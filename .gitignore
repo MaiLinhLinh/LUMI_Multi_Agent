@@ -1,0 +1,5 @@
+# Bỏ qua thư mục agent-engineer ở thư mục gốc
+/agent-engineer/
+
+# Bỏ qua file .env nằm trong thư mục code
+/code/.env

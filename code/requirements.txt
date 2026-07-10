@@ -1,0 +1,9 @@
+langgraph
+google-genai
+httpx
+python-dotenv
+prompt_toolkit
+rich
+wikipedia
+pytest
+pytest-asyncio
