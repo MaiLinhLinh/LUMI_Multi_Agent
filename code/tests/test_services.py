@@ -50,6 +50,68 @@ def test_fetch_weather_uses_http_helper_and_compacts_response(monkeypatch) -> No
     assert response["data"]["temperature"]["current_celsius"] == 30.5
 
 
+def test_fetch_weather_forecast_uses_http_helper_and_compacts_daily_response(monkeypatch) -> None:
+    calls = []
+
+    def fake_get_json(url, *, source, params, timeout_seconds):
+        calls.append(
+            {
+                "url": url,
+                "source": source,
+                "params": params,
+                "timeout_seconds": timeout_seconds,
+            }
+        )
+        return {
+            "ok": True,
+            "data": {
+                "city": {"name": "Ha Noi", "country": "VN", "timezone": 25200},
+                "list": [
+                    {
+                        "dt": 1783670000,
+                        "dt_txt": "2026-07-10 00:00:00",
+                        "weather": [{"main": "Rain", "description": "mua nhe"}],
+                        "main": {"temp": 28.5, "feels_like": 32, "humidity": 83},
+                        "wind": {"speed": 4.1},
+                        "clouds": {"all": 88},
+                        "rain": {"3h": 0.5},
+                        "pop": 0.6,
+                    },
+                    {
+                        "dt": 1783680800,
+                        "dt_txt": "2026-07-10 03:00:00",
+                        "weather": [{"main": "Clouds", "description": "nhieu may"}],
+                        "main": {"temp": 30.0, "feels_like": 34, "humidity": 78},
+                        "wind": {"speed": 3.8},
+                        "clouds": {"all": 90},
+                        "pop": 0.2,
+                    },
+                ],
+            },
+        }
+
+    monkeypatch.setattr(weather_api, "get_json", fake_get_json)
+
+    response = weather_api.fetch_weather_forecast(
+        "Ha Noi",
+        api_key="weather-key",
+        timeout_seconds=3,
+        days=3,
+    )
+
+    assert calls[0]["url"] == weather_api.OPENWEATHER_FORECAST_URL
+    assert calls[0]["params"]["q"] == "Ha Noi"
+    assert calls[0]["params"]["cnt"] == 24
+    assert response["ok"] is True
+    assert response["data"]["location"] == "Ha Noi"
+    assert response["data"]["requested_days"] == 3
+    assert response["data"]["days"][0]["date"] == "2026-07-10"
+    assert response["data"]["days"][0]["temperature"]["min_celsius"] == 28.5
+    assert response["data"]["days"][0]["temperature"]["max_celsius"] == 30.0
+    assert response["data"]["days"][0]["max_rain_probability"] == 0.6
+    assert response["data"]["days"][0]["total_rain_mm"] == 0.5
+
+
 def test_fetch_news_uses_http_helper_and_compacts_response(monkeypatch) -> None:
     calls = []
 

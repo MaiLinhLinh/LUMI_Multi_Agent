@@ -1,4 +1,6 @@
 langgraph
+langchain
+langchain-google-genai
 google-genai
 httpx
 python-dotenv
