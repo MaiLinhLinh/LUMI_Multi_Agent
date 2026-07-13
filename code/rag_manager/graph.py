@@ -233,7 +233,7 @@ def weather_node(state: GraphState) -> GraphState:
             _state_metadata(state),
             run_weather_agent(
                 state,
-                cache=state.get("weather_cache"),
+                store=state.get("weather_store"),
                 settings=_get_settings(state),
                 client=state.get("weather_client"),
             ),

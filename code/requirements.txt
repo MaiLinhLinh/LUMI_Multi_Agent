@@ -7,6 +7,7 @@ Jinja2>=3.1,<4
 python-dotenv
 prompt_toolkit
 rich
+redis>=5,<7
 wikipedia
 pytest
 pytest-asyncio

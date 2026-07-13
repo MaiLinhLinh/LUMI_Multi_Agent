@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import sys
 import traceback
-import unicodedata
-from datetime import datetime, timedelta
+from datetime import datetime
 from time import perf_counter
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -15,11 +14,15 @@ from langchain_core.messages import AIMessage
 from langchain_core.tools import tool
 from langchain_google_genai import ChatGoogleGenerativeAI
 
-from rag_manager.cache import MemoryCache, weather_cache_key, weather_hour_bucket
 from rag_manager.config import Settings, load_settings
-from rag_manager.llm.gemini_client import strip_thought_tags
+from rag_manager.llm.gemini_client import print_llm_cache_metrics, strip_thought_tags
 from rag_manager.llm.prompts import WEATHER_TOOL_AGENT_SYSTEM_PROMPT
-from rag_manager.services.weather_api import fetch_weather, fetch_weather_forecast
+from rag_manager.services.weather_location_resolver import (
+    LOCATION_RESOLVER_SOURCE,
+    WeatherLocationResolver,
+    get_weather_location_resolver,
+)
+from rag_manager.services.weather_redis import RedisWeatherStore, WeatherStore
 from rag_manager.state import AgentState
 
 WEATHER_PROVIDER = "openweathermap"
@@ -28,28 +31,28 @@ WEATHER_PROVIDER = "openweathermap"
 def run_weather_agent(
     state: AgentState,
     *,
-    cache: MemoryCache | None = None,
+    store: WeatherStore | None = None,
     settings: Settings | None = None,
     client: object | None = None,
 ) -> AgentState:
     """Run the tool-calling weather agent and return state updates."""
     started_at = perf_counter()
-    cache = cache or MemoryCache()
     settings = settings or load_settings()
+    store = store or state.get("weather_store") or RedisWeatherStore.from_settings(settings)
     query = state.get("query", "")
     location_hint = extract_weather_location(state)
 
     agent_result = run_weather_tool_agent(
         query=query if isinstance(query, str) else "",
         location_hint=location_hint,
-        cache=cache,
+        store=store,
         settings=settings,
     )
 
     update: AgentState = {
         "weather_data": agent_result["weather_data"],
         "weather_answer": agent_result["answer"],
-        "cache_stats": {"weather": cache.stats()},
+        "cache_stats": {"weather": store.stats()},
         "timings": {"weather": _elapsed_since(started_at)},
     }
     usage = agent_result.get("llm_usage")
@@ -62,15 +65,17 @@ def run_weather_tool_agent(
     *,
     query: str,
     location_hint: str,
-    cache: MemoryCache,
+    store: WeatherStore,
     settings: Settings,
 ) -> dict[str, Any]:
     """Invoke a LangChain agent that chooses weather tools for the query."""
     tools, tool_state = build_weather_tools(
-        cache=cache,
-        settings=settings,
+        store=store,
         location_hint=location_hint,
         query=query,
+        resolver=get_weather_location_resolver(
+            settings.weather_locations_file or None
+        ),
     )
     try:
         model = _create_weather_model(settings)
@@ -107,13 +112,14 @@ def run_weather_tool_agent(
 
 def build_weather_tools(
     *,
-    cache: MemoryCache,
-    settings: Settings,
+    store: WeatherStore,
     location_hint: str,
     query: str = "",
+    resolver: WeatherLocationResolver | None = None,
 ) -> tuple[list[Any], dict[str, Any]]:
     """Create weather tools bound to the current request context."""
     tool_state: dict[str, Any] = {}
+    resolved_resolver = resolver or get_weather_location_resolver()
 
     @tool
     def get_current_time(timezone_name: str = "Asia/Bangkok") -> dict[str, Any]:
@@ -124,6 +130,7 @@ def build_weather_tools(
             timezone = ZoneInfo("UTC")
             timezone_name = "UTC"
         now = datetime.now(timezone)
+        _record_support_tool_call(tool_state, "get_current_time", source="system_clock")
         return {
             "timezone": timezone_name,
             "iso_datetime": now.isoformat(),
@@ -132,37 +139,46 @@ def build_weather_tools(
         }
 
     @tool
-    def get_current_weather(location: str = "") -> dict[str, Any]:
-        """Get current weather for a location using OpenWeather current weather data."""
-        resolved_location = _resolve_location(location, location_hint)
-        cache_key = weather_cache_key(
-            resolved_location,
-            bucket=f"current:{weather_hour_bucket()}",
+    def resolve_weather_location(location_text: str = "") -> dict[str, Any]:
+        """Resolve one extracted Vietnamese place phrase to a stable location_id."""
+        requested = location_text.strip() or location_hint.strip()
+        response = resolved_resolver.resolve(requested)
+        _record_support_tool_call(
+            tool_state,
+            "resolve_weather_location",
+            source="location_catalog",
         )
-        cached_data = cache.get(cache_key)
-        if cached_data is not None:
-            _record_weather_tool_call(tool_state, "get_current_weather", cached=True)
-            tool_state["current_weather_data"] = cached_data
-            tool_state["last_weather_data"] = cached_data
-            return {"ok": True, "data": cached_data, "cached": True}
-
-        response = fetch_weather(
-            resolved_location,
-            api_key=settings.openweather_api_key,
-            timeout_seconds=settings.request_timeout_seconds,
-        )
+        resolutions = tool_state.setdefault("location_resolutions", [])
+        if isinstance(resolutions, list):
+            resolutions.append(response)
         if response.get("ok"):
-            cache.set(
-                cache_key,
-                response["data"],
-                ttl_seconds=settings.weather_cache_ttl_seconds,
-            )
-            _record_weather_tool_call(tool_state, "get_current_weather", cached=False)
+            location_id = str(response.get("location_id", ""))
+            resolved_locations = tool_state.setdefault("resolved_locations", {})
+            if isinstance(resolved_locations, dict):
+                resolved_locations[location_id] = response
+        else:
+            _record_weather_error(tool_state, response)
+        _print_location_resolution(requested, response)
+        return response
+
+    @tool
+    def get_current_weather(location_id: str) -> dict[str, Any]:
+        """Read current weather by a resolver-confirmed location_id from Redis."""
+        resolution_error = _require_resolved_location(tool_state, location_id)
+        if resolution_error:
+            _record_weather_error(tool_state, resolution_error)
+            return resolution_error
+        lookup_started_at = perf_counter()
+        response = store.get_current(location_id)
+        _print_redis_lookup("get_current_weather", location_id, response, lookup_started_at)
+        if response.get("ok"):
+            _record_weather_tool_call(tool_state, "get_current_weather", cached=True)
             tool_state["current_weather_data"] = response["data"]
             tool_state["last_weather_data"] = response["data"]
         else:
             error_data = {
-                "location": resolved_location,
+                "location": _resolved_location_name(tool_state, location_id),
+                "location_id": location_id,
                 "error": response.get("error", {}),
             }
             _record_weather_tool_call(tool_state, "get_current_weather", cached=False)
@@ -171,49 +187,34 @@ def build_weather_tools(
         return response
 
     @tool
-    def get_weather_forecast(location: str = "", days: int = 3) -> dict[str, Any]:
-        """Get a daily weather forecast summary for 1 to 5 days for a location."""
-        resolved_location = _resolve_location(location, location_hint)
-        tomorrow_only = _asks_for_tomorrow_only(query)
-        # OpenWeather's 3-hour forecast starts with the current day. Request
-        # enough data to reach tomorrow, then keep only tomorrow for a direct
-        # "ngày mai" request. Other ranges retain their existing semantics.
+    def get_weather_forecast(
+        location_id: str,
+        days: int = 3,
+        start_date: str = "",
+    ) -> dict[str, Any]:
+        """Read forecast days by location_id, optional YYYY-MM-DD start date."""
+        resolution_error = _require_resolved_location(tool_state, location_id)
+        if resolution_error:
+            _record_weather_error(tool_state, resolution_error)
+            return resolution_error
         bounded_days = max(1, min(int(days), 5))
-        service_days = max(2, bounded_days) if tomorrow_only else bounded_days
-        cache_key = weather_cache_key(
-            resolved_location,
-            bucket=f"forecast:{service_days}:{weather_hour_bucket()}",
+        lookup_started_at = perf_counter()
+        response = store.get_forecast(
+            location_id,
+            days=bounded_days,
+            start_date=start_date.strip() or None,
         )
-        cached_data = cache.get(cache_key)
-        if cached_data is not None:
-            if tomorrow_only:
-                cached_data = _tomorrow_only_forecast(cached_data)
-            _record_weather_tool_call(tool_state, "get_weather_forecast", cached=True)
-            tool_state["forecast_weather_data"] = cached_data
-            tool_state["last_weather_data"] = cached_data
-            return {"ok": True, "data": cached_data, "cached": True}
-
-        response = fetch_weather_forecast(
-            resolved_location,
-            api_key=settings.openweather_api_key,
-            timeout_seconds=settings.request_timeout_seconds,
-            days=service_days,
-        )
+        _print_redis_lookup("get_weather_forecast", location_id, response, lookup_started_at)
         if response.get("ok"):
-            if tomorrow_only:
-                response = {**response, "data": _tomorrow_only_forecast(response.get("data"))}
-            cache.set(
-                cache_key,
-                response["data"],
-                ttl_seconds=settings.weather_cache_ttl_seconds,
-            )
-            _record_weather_tool_call(tool_state, "get_weather_forecast", cached=False)
+            _record_weather_tool_call(tool_state, "get_weather_forecast", cached=True)
             tool_state["forecast_weather_data"] = response["data"]
             tool_state["last_weather_data"] = response["data"]
         else:
             error_data = {
-                "location": resolved_location,
+                "location": _resolved_location_name(tool_state, location_id),
+                "location_id": location_id,
                 "requested_days": bounded_days,
+                "requested_start_date": start_date.strip() or None,
                 "error": response.get("error", {}),
             }
             _record_weather_tool_call(tool_state, "get_weather_forecast", cached=False)
@@ -221,33 +222,12 @@ def build_weather_tools(
             tool_state["last_weather_data"] = error_data
         return response
 
-    return [get_current_time, get_current_weather, get_weather_forecast], tool_state
-
-
-def _asks_for_tomorrow_only(query: str) -> bool:
-    normalized = "".join(
-        char
-        for char in unicodedata.normalize("NFD", query.casefold())
-        if unicodedata.category(char) != "Mn"
-    )
-    normalized = " ".join(normalized.split())
-    return any(marker in normalized for marker in ("ngay mai", "tomorrow"))
-
-
-def _tomorrow_only_forecast(data: Any) -> dict[str, Any]:
-    if not isinstance(data, dict):
-        return {}
-    days = data.get("days")
-    if not isinstance(days, list):
-        return dict(data)
-
-    today = datetime.now(ZoneInfo("Asia/Bangkok")).date()
-    tomorrow = (today + timedelta(days=1)).isoformat()
-    matching_days = [day for day in days if isinstance(day, dict) and day.get("date") == tomorrow]
-    result = dict(data)
-    result["requested_days"] = 1
-    result["days"] = matching_days[:1]
-    return result
+    return [
+        get_current_time,
+        resolve_weather_location,
+        get_current_weather,
+        get_weather_forecast,
+    ], tool_state
 
 
 def _record_weather_tool_call(
@@ -259,6 +239,88 @@ def _record_weather_tool_call(
     calls = tool_state.setdefault("tool_calls", [])
     if isinstance(calls, list):
         calls.append({"name": tool_name, "cached": cached})
+
+
+def _record_support_tool_call(
+    tool_state: dict[str, Any],
+    tool_name: str,
+    *,
+    source: str,
+) -> None:
+    calls = tool_state.setdefault("tool_calls", [])
+    if isinstance(calls, list):
+        calls.append({"name": tool_name, "source": source})
+
+
+def _require_resolved_location(
+    tool_state: dict[str, Any],
+    location_id: str,
+) -> dict[str, Any] | None:
+    resolved_locations = tool_state.get("resolved_locations", {})
+    if (
+        isinstance(resolved_locations, dict)
+        and location_id.strip()
+        and location_id in resolved_locations
+    ):
+        return None
+    return {
+        "ok": False,
+        "error": {
+            "source": LOCATION_RESOLVER_SOURCE,
+            "code": "location_not_resolved",
+            "message": (
+                "location_id chưa được xác nhận. "
+                "Hãy gọi resolve_weather_location trước khi đọc dữ liệu thời tiết."
+            ),
+            "status_code": None,
+        },
+    }
+
+
+def _resolved_location_name(tool_state: dict[str, Any], location_id: str) -> str:
+    resolved_locations = tool_state.get("resolved_locations", {})
+    if isinstance(resolved_locations, dict):
+        resolution = resolved_locations.get(location_id, {})
+        if isinstance(resolution, dict):
+            name = resolution.get("canonical_name")
+            if isinstance(name, str):
+                return name
+    return location_id
+
+
+def _print_location_resolution(requested: str, response: dict[str, Any]) -> None:
+    if response.get("ok"):
+        print(
+            "[WEATHER_LOCATION] "
+            f"input={requested!r} "
+            f"location_id={response.get('location_id')!r} "
+            f"match_type={response.get('match_type')} "
+            f"confidence={response.get('confidence')}"
+        )
+        return
+    error = response.get("error", {})
+    print(
+        "[WEATHER_LOCATION] "
+        f"input={requested!r} "
+        f"error={error.get('code', 'unknown') if isinstance(error, dict) else 'unknown'}"
+    )
+
+
+def _print_redis_lookup(
+    tool_name: str,
+    location_id: str,
+    response: dict[str, Any],
+    started_at: float,
+) -> None:
+    elapsed_ms = (perf_counter() - started_at) * 1000
+    print(
+        "[WEATHER_REDIS] "
+        f"tool={tool_name} "
+        f"location_id={location_id!r} "
+        f"ok={bool(response.get('ok'))} "
+        f"snapshot_id={response.get('snapshot_id')!r} "
+        f"lookup_ms={elapsed_ms:.2f}"
+    )
 
 
 def _record_weather_error(tool_state: dict[str, Any], error_data: dict[str, Any]) -> None:
@@ -353,6 +415,7 @@ def _weather_location(
     if not source and error_records:
         source = error_records[0]
     return {
+        "location_id": source.get("location_id", ""),
         "name": source.get("location", ""),
         "country": source.get("country", ""),
         "timezone_offset_seconds": source.get(
@@ -386,6 +449,8 @@ def _forecast_payload(forecast: dict[str, Any] | None) -> dict[str, Any] | None:
     return {
         "requested_days": forecast.get("requested_days"),
         "source_granularity": forecast.get("source_granularity"),
+        "day_grouping": forecast.get("day_grouping"),
+        "interval_time_basis": forecast.get("interval_time_basis"),
         "days": forecast.get("days", []),
     }
 
@@ -427,9 +492,7 @@ def extract_weather_location(state: AgentState) -> str:
     location = intent.get("location", "") if isinstance(intent, dict) else ""
     if isinstance(location, str) and location.strip():
         return location.strip()
-
-    query = state.get("query", "")
-    return query.strip() if isinstance(query, str) else ""
+    return ""
 
 
 def _create_weather_model(settings: Settings) -> ChatGoogleGenerativeAI:
@@ -495,10 +558,6 @@ def _print_weather_exception_debug(
     traceback.print_exception(error, file=sys.stderr)
 
 
-def _resolve_location(location: str, location_hint: str) -> str:
-    return location.strip() or location_hint.strip()
-
-
 def _last_ai_text(result: dict[str, Any]) -> str:
     messages = result.get("messages", []) if isinstance(result, dict) else []
     for message in reversed(messages):
@@ -533,10 +592,18 @@ def _fallback_weather_answer(tool_state: dict[str, Any]) -> str:
 def _extract_langchain_usage(result: dict[str, Any], model: str) -> dict[str, Any]:
     messages = result.get("messages", []) if isinstance(result, dict) else []
     usage: dict[str, Any] = {}
+    call_id = 0
     for message in messages:
         if not isinstance(message, AIMessage):
             continue
-        usage = _merge_usage_dicts(usage, _usage_from_ai_message(message))
+        call_id += 1
+        message_usage = _usage_from_ai_message(message)
+        print_llm_cache_metrics(
+            message_usage,
+            source="weather_langchain",
+            call_id=call_id,
+        )
+        usage = _merge_usage_dicts(usage, message_usage)
 
     if not usage:
         return {}
@@ -550,6 +617,9 @@ def _usage_from_ai_message(message: AIMessage) -> dict[str, Any]:
     token_usage = response_metadata.get("token_usage", {})
     if not isinstance(token_usage, dict):
         token_usage = {}
+    input_token_details = usage_metadata.get("input_token_details", {})
+    if not isinstance(input_token_details, dict):
+        input_token_details = {}
 
     prompt_tokens = _int_value(
         usage_metadata.get("input_tokens"),
@@ -566,17 +636,27 @@ def _usage_from_ai_message(message: AIMessage) -> dict[str, Any]:
         token_usage.get("total_tokens"),
         token_usage.get("total_token_count"),
     )
+    cached_tokens = _int_value(
+        input_token_details.get("cache_read"),
+        input_token_details.get("cached_tokens"),
+        usage_metadata.get("cached_content_token_count"),
+        usage_metadata.get("total_cached_tokens"),
+        token_usage.get("cached_content_token_count"),
+        token_usage.get("total_cached_tokens"),
+    )
+    cache_hit_ratio = None
+    if isinstance(prompt_tokens, int) and isinstance(cached_tokens, int) and prompt_tokens > 0:
+        cache_hit_ratio = round(cached_tokens / prompt_tokens, 4)
+
     return {
         "prompt_tokens": prompt_tokens,
         "completion_tokens": completion_tokens,
         "thoughts_tokens": _int_value(token_usage.get("thoughts_token_count")),
         "total_tokens": total_tokens,
-        "cached_tokens": _int_value(
-            token_usage.get("cached_content_token_count"),
-            token_usage.get("total_cached_tokens"),
-        ),
-        "prefix_cache_hit": False,
-        "cache_hit_ratio": None,
+        "cached_tokens": cached_tokens,
+        "prefix_cache_hit": cached_tokens > 0 if isinstance(cached_tokens, int) else None,
+        "cache_hit_ratio": cache_hit_ratio,
+        "saved_tokens_estimated": cached_tokens,
         "kv_cache_hit": "not_exposed_by_gemini_api",
         "raw_usage_keys": sorted(set(usage_metadata) | set(token_usage)),
     }
@@ -590,7 +670,10 @@ def _merge_usage_dicts(existing: dict[str, Any], new: dict[str, Any]) -> dict[st
         merged[key] = _sum_optional_ints(merged.get(key), new.get(key))
     cached_tokens = _sum_optional_ints(merged.get("cached_tokens"), new.get("cached_tokens"))
     merged["cached_tokens"] = cached_tokens
-    merged["prefix_cache_hit"] = bool(cached_tokens and cached_tokens > 0)
+    merged["prefix_cache_hit"] = (
+        cached_tokens > 0 if isinstance(cached_tokens, int) else None
+    )
+    merged["saved_tokens_estimated"] = cached_tokens
     prompt_tokens = merged.get("prompt_tokens")
     if isinstance(prompt_tokens, int) and isinstance(cached_tokens, int) and prompt_tokens > 0:
         merged["cache_hit_ratio"] = round(cached_tokens / prompt_tokens, 4)

@@ -59,6 +59,11 @@ class Settings:
     wiki_cache_ttl_seconds: int | None
     request_timeout_seconds: int
     debug_routing: bool
+    redis_url: str = "redis://localhost:6379/0"
+    weather_redis_prefix: str = "weather"
+    weather_snapshot_ttl_seconds: int = 14400
+    weather_refresh_interval_seconds: int = 10800
+    weather_locations_file: str = ""
 
     @property
     def has_gemini_key(self) -> bool:
@@ -80,4 +85,15 @@ def load_settings() -> Settings:
         wiki_cache_ttl_seconds=_get_optional_int_env("WIKI_CACHE_TTL_SECONDS"),
         request_timeout_seconds=_get_int_env("REQUEST_TIMEOUT_SECONDS", 8),
         debug_routing=_get_bool_env("DEBUG_ROUTING", False),
+        redis_url=os.getenv("REDIS_URL", "redis://localhost:6379/0").strip()
+        or "redis://localhost:6379/0",
+        weather_redis_prefix=os.getenv("WEATHER_REDIS_PREFIX", "weather").strip()
+        or "weather",
+        weather_snapshot_ttl_seconds=_get_int_env(
+            "WEATHER_SNAPSHOT_TTL_SECONDS", 14400
+        ),
+        weather_refresh_interval_seconds=_get_int_env(
+            "WEATHER_REFRESH_INTERVAL_SECONDS", 10800
+        ),
+        weather_locations_file=os.getenv("WEATHER_LOCATIONS_FILE", "").strip(),
     )

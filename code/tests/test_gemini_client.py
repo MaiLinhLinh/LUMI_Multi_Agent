@@ -42,6 +42,7 @@ def _client_with_outcomes(outcomes: list[object]) -> tuple[GeminiClient, _FakeMo
     client.client = _FakeNativeClient(models)
     client.last_usage = {}
     client._types = types
+    client._call_sequence = 0
     return client, models
 
 
@@ -112,7 +113,7 @@ def test_gemini_client_skips_thought_parts_when_text_helper_is_unavailable() -> 
     assert result == "Visible answer"
 
 
-def test_gemini_client_records_prefix_cache_usage_from_native_response() -> None:
+def test_gemini_client_records_prefix_cache_usage_from_native_response(capsys) -> None:
     class UsageResponse:
         text = "ok"
         usage_metadata = {
@@ -136,7 +137,13 @@ def test_gemini_client_records_prefix_cache_usage_from_native_response() -> None
     assert client.last_usage["cached_tokens"] == 75
     assert client.last_usage["prefix_cache_hit"] is True
     assert client.last_usage["cache_hit_ratio"] == 0.75
+    assert client.last_usage["saved_tokens_estimated"] == 75
     assert client.last_usage["kv_cache_hit"] == "not_exposed_by_gemini_api"
+    terminal_output = capsys.readouterr().out
+    assert "[LLM_CACHE][source=gemini_native][call=1]" in terminal_output
+    assert "cached_tokens=75" in terminal_output
+    assert "cache_hit_ratio=0.7500" in terminal_output
+    assert "saved_tokens_estimated=75" in terminal_output
 
 
 def test_gemini_client_reads_total_cached_tokens_alias() -> None:

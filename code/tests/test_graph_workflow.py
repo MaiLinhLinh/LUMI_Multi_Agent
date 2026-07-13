@@ -34,7 +34,7 @@ def test_graph_single_mode_runs_only_primary_agent(monkeypatch) -> None:
             "reason": "Người dùng hỏi thời tiết.",
         }
 
-    def fake_weather_agent(state, *, cache=None, settings=None, client=None) -> dict:
+    def fake_weather_agent(state, *, store=None, settings=None, client=None) -> dict:
         calls.append("weather")
         return {
             "weather_data": {"location": "Hà Nội", "temperature": {"current_celsius": 30}},
@@ -106,7 +106,7 @@ def test_graph_parallel_mode_runs_selected_agents_and_aggregates(monkeypatch) ->
             "reason": "Independent weather and news request.",
         }
 
-    def fake_weather_agent(state, *, cache=None, settings=None, client=None) -> dict:
+    def fake_weather_agent(state, *, store=None, settings=None, client=None) -> dict:
         calls.append("weather")
         assert state["selected_agents"] == ["weather", "news"]
         return {
@@ -198,7 +198,7 @@ def test_graph_parallel_mode_keeps_successful_agent_when_one_agent_fails(monkeyp
             "reason": "Independent weather and news request.",
         }
 
-    def failing_weather_agent(state, *, cache=None, settings=None, client=None) -> dict:
+    def failing_weather_agent(state, *, store=None, settings=None, client=None) -> dict:
         calls.append("weather")
         raise RuntimeError("weather failed")
 
@@ -283,7 +283,7 @@ def test_graph_sequential_mode_passes_context_between_steps(monkeypatch) -> None
             "reason": "Dependent multi-step request.",
         }
 
-    def fake_weather_agent(state, *, cache=None, settings=None, client=None) -> dict:
+    def fake_weather_agent(state, *, store=None, settings=None, client=None) -> dict:
         calls.append("weather")
         assert state.get("context", {}) == {}
         return {

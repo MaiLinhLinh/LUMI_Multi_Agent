@@ -75,7 +75,7 @@ class AgentState(TypedDict, total=False):
     settings: Any
     manager_client: Any
     semantic_router_client: Any
-    weather_cache: Any
+    weather_store: Any
     weather_client: Any
     news_cache: Any
     news_client: Any

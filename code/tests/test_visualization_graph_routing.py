@@ -74,7 +74,7 @@ def test_domain_question_runs_manager_weather_aggregate_then_visualize(monkeypat
             "reason": "weather",
         }
 
-    def fake_weather_agent(state, *, cache=None, settings=None, client=None) -> dict:
+    def fake_weather_agent(state, *, store=None, settings=None, client=None) -> dict:
         calls.append("weather")
         return {
             "weather_data": _weather_envelope(),

@@ -68,6 +68,11 @@ class GeminiClient:
             )
             raise
         self.last_usage = extract_llm_usage_native(response, self.model)
+        print_llm_cache_metrics(
+            self.last_usage,
+            source="gemini_native",
+            call_id=call_id,
+        )
         text = strip_thought_tags(_response_text(response))
         _debug_print(f"[Gemini][call={call_id}] RESULT {text}")
         return text
@@ -331,9 +336,41 @@ def extract_llm_usage_native(response: Any, model: str) -> dict[str, Any]:
         "cached_tokens": cached_tokens,
         "prefix_cache_hit": bool(cached_tokens and cached_tokens > 0),
         "cache_hit_ratio": cache_hit_ratio,
+        "saved_tokens_estimated": cached_tokens,
         "kv_cache_hit": "not_exposed_by_gemini_api",
         "raw_usage_keys": sorted(usage_metadata.keys()),
     }
+
+
+def print_llm_cache_metrics(
+    usage: dict[str, Any],
+    *,
+    source: str,
+    call_id: int | str,
+) -> None:
+    """Print API-provided cache usage for one successful logical LLM call."""
+
+    cached_tokens = usage.get("cached_tokens")
+    cache_hit_ratio = usage.get("cache_hit_ratio")
+    saved_tokens = usage.get("saved_tokens_estimated")
+    _debug_print(
+        f"[LLM_CACHE][source={source}][call={call_id}] "
+        f"cached_tokens={_cache_metric_value(cached_tokens)} "
+        f"cache_hit_ratio={_cache_ratio_value(cache_hit_ratio)} "
+        f"saved_tokens_estimated={_cache_metric_value(saved_tokens)}"
+    )
+
+
+def _cache_metric_value(value: Any) -> str:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return "unknown"
+    return str(value)
+
+
+def _cache_ratio_value(value: Any) -> str:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return "unknown"
+    return f"{value:.4f}"
 
 
 def _object_to_dict(value: Any) -> dict[str, Any]:

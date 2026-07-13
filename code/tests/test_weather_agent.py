@@ -1,6 +1,93 @@
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
 from rag_manager.agents import weather as weather_agent
-from rag_manager.cache import MemoryCache, weather_cache_key, weather_hour_bucket
 from rag_manager.config import Settings
+from langchain_core.messages import AIMessage
+
+
+class StubWeatherStore:
+    def __init__(self, *, current=None, forecast=None) -> None:
+        self.current = current
+        self.forecast = forecast
+        self.current_calls: list[str] = []
+        self.forecast_calls: list[tuple[str, int, str | None]] = []
+        self._hits = 0
+        self._misses = 0
+
+    def get_current(self, location: str) -> dict:
+        self.current_calls.append(location)
+        response = self.current or _redis_unavailable()
+        self._record(response)
+        return response
+
+    def get_forecast(
+        self,
+        location: str,
+        *,
+        days: int,
+        start_date: str | None = None,
+    ) -> dict:
+        self.forecast_calls.append((location, days, start_date))
+        response = self.forecast or _redis_unavailable()
+        self._record(response)
+        if not response.get("ok"):
+            return response
+        data = dict(response["data"])
+        data["requested_days"] = days
+        stored_days = data.get("days", [])
+        if start_date:
+            stored_days = [day for day in stored_days if day.get("date", "") >= start_date]
+            data["requested_start_date"] = start_date
+        data["days"] = stored_days[:days]
+        return {**response, "data": data}
+
+    def stats(self) -> dict[str, int]:
+        return {"hits": self._hits, "misses": self._misses, "errors": 0}
+
+    def _record(self, response: dict) -> None:
+        if response.get("ok"):
+            self._hits += 1
+        else:
+            self._misses += 1
+
+
+class StubLocationResolver:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def resolve(self, location_text: str) -> dict:
+        self.calls.append(location_text)
+        if not location_text.strip():
+            return {
+                "ok": False,
+                "error": {
+                    "source": "weather_location_resolver",
+                    "code": "missing_location",
+                    "message": "missing",
+                    "status_code": None,
+                },
+            }
+        return {
+            "ok": True,
+            "location_id": "ha_noi",
+            "canonical_name": "Hà Nội",
+            "requested_text": location_text,
+            "matched_name": "Hà Nội",
+            "match_type": "exact",
+            "confidence": 1.0,
+        }
+
+
+def _redis_unavailable() -> dict:
+    return {
+        "ok": False,
+        "error": {
+            "source": "weather_redis",
+            "message": "No active weather snapshot is available in Redis.",
+            "status_code": None,
+        },
+    }
 
 
 def _settings(*, openweather_api_key: str = "weather-key") -> Settings:
@@ -18,15 +105,41 @@ def _settings(*, openweather_api_key: str = "weather-key") -> Settings:
     )
 
 
+def test_weather_langchain_usage_logs_each_llm_cache_result(capsys) -> None:
+    message = AIMessage(
+        content="weather answer",
+        usage_metadata={
+            "input_tokens": 100,
+            "output_tokens": 20,
+            "total_tokens": 120,
+            "input_token_details": {"cache_read": 80},
+        },
+    )
+
+    usage = weather_agent._extract_langchain_usage(
+        {"messages": [message]},
+        "gemini-weather",
+    )
+
+    assert usage["cached_tokens"] == 80
+    assert usage["cache_hit_ratio"] == 0.8
+    assert usage["saved_tokens_estimated"] == 80
+    terminal_output = capsys.readouterr().out
+    assert "[LLM_CACHE][source=weather_langchain][call=1]" in terminal_output
+    assert "cached_tokens=80" in terminal_output
+    assert "cache_hit_ratio=0.8000" in terminal_output
+    assert "saved_tokens_estimated=80" in terminal_output
+
+
 def test_weather_agent_returns_tool_agent_result(monkeypatch) -> None:
     calls = []
 
-    def fake_run_weather_tool_agent(*, query, location_hint, cache, settings):
+    def fake_run_weather_tool_agent(*, query, location_hint, store, settings):
         calls.append(
             {
                 "query": query,
                 "location_hint": location_hint,
-                "cache": cache,
+                "store": store,
                 "settings": settings,
             }
         )
@@ -43,14 +156,14 @@ def test_weather_agent_returns_tool_agent_result(monkeypatch) -> None:
 
     monkeypatch.setattr(weather_agent, "run_weather_tool_agent", fake_run_weather_tool_agent)
 
-    cache = MemoryCache()
+    store = StubWeatherStore()
     settings = _settings()
     result = weather_agent.run_weather_agent(
         {
             "query": "Weather in Ha Noi",
             "intent": {"location": "Ha Noi"},
         },
-        cache=cache,
+        store=store,
         settings=settings,
     )
 
@@ -58,7 +171,7 @@ def test_weather_agent_returns_tool_agent_result(monkeypatch) -> None:
         {
             "query": "Weather in Ha Noi",
             "location_hint": "Ha Noi",
-            "cache": cache,
+            "store": store,
             "settings": settings,
         }
     ]
@@ -70,131 +183,157 @@ def test_weather_agent_returns_tool_agent_result(monkeypatch) -> None:
     assert result["llm_usage"]["weather"]["prompt_tokens"] == 50
 
 
-def test_current_weather_tool_cache_hit_does_not_call_service(monkeypatch) -> None:
-    def fail_fetch_weather(*args, **kwargs):
-        raise AssertionError("fetch_weather should not be called on cache hit")
+def test_manager_location_hint_is_resolved_but_full_query_is_not_used_as_hint() -> None:
+    resolver = StubLocationResolver()
+    tools, _tool_state = weather_agent.build_weather_tools(
+        store=StubWeatherStore(),
+        location_hint="Hà Nội",
+        resolver=resolver,
+    )
 
-    monkeypatch.setattr(weather_agent, "fetch_weather", fail_fetch_weather)
+    result = _tool_by_name(tools, "resolve_weather_location").invoke(
+        {"location_text": ""}
+    )
 
-    cache = MemoryCache()
+    assert result["location_id"] == "ha_noi"
+    assert resolver.calls == ["Hà Nội"]
+    assert weather_agent.extract_weather_location(
+        {"query": "Thời tiết Hà Nội hôm nay", "intent": {}}
+    ) == ""
+
+
+def test_current_weather_tool_reads_active_redis_snapshot() -> None:
     cached_data = {
         "location": "Ha Noi",
         "temperature": {"current_celsius": 30},
         "condition": {"description": "cloudy"},
     }
-    cache.set(
-        weather_cache_key("Ha Noi", bucket=f"current:{weather_hour_bucket()}"),
-        cached_data,
+    store = StubWeatherStore(
+        current={"ok": True, "data": cached_data, "cached": True}
     )
+    resolver = StubLocationResolver()
     tools, tool_state = weather_agent.build_weather_tools(
-        cache=cache,
-        settings=_settings(),
+        store=store,
         location_hint="Ha Noi",
+        resolver=resolver,
     )
 
-    result = _tool_by_name(tools, "get_current_weather").invoke({"location": "Ha Noi"})
+    resolution = _tool_by_name(tools, "resolve_weather_location").invoke(
+        {"location_text": "Ha Noi"}
+    )
+    result = _tool_by_name(tools, "get_current_weather").invoke(
+        {"location_id": resolution["location_id"]}
+    )
 
     assert result == {"ok": True, "data": cached_data, "cached": True}
     assert tool_state["last_weather_data"] == cached_data
-    assert cache.stats()["hits"] == 1
-    assert cache.stats()["misses"] == 0
+    assert store.current_calls == ["ha_noi"]
+    assert resolver.calls == ["Ha Noi"]
+    assert store.stats()["hits"] == 1
 
 
-def test_current_weather_tool_returns_missing_api_key_error() -> None:
-    cache = MemoryCache()
+def test_current_weather_tool_returns_missing_snapshot_error() -> None:
+    store = StubWeatherStore()
     tools, tool_state = weather_agent.build_weather_tools(
-        cache=cache,
-        settings=_settings(openweather_api_key=""),
+        store=store,
         location_hint="Hà Nội",
+        resolver=StubLocationResolver(),
     )
 
-    result = _tool_by_name(tools, "get_current_weather").invoke({"location": "Hà Nội"})
+    _tool_by_name(tools, "resolve_weather_location").invoke(
+        {"location_text": "Hà Nội"}
+    )
+    result = _tool_by_name(tools, "get_current_weather").invoke(
+        {"location_id": "ha_noi"}
+    )
 
     assert result["ok"] is False
-    assert result["error"]["message"] == "Missing OPENWEATHER_API_KEY."
+    assert result["error"]["source"] == "weather_redis"
+    assert "No active weather snapshot" in result["error"]["message"]
     assert tool_state["last_weather_data"]["location"] == "Hà Nội"
-    assert tool_state["last_weather_data"]["error"]["message"] == "Missing OPENWEATHER_API_KEY."
+    assert tool_state["last_weather_data"]["location_id"] == "ha_noi"
 
 
-def test_forecast_tool_calls_forecast_service_and_caches(monkeypatch) -> None:
-    calls = []
+def test_weather_data_tool_requires_resolver_first() -> None:
+    store = StubWeatherStore(
+        current={"ok": True, "data": {"location": "Hà Nội"}, "cached": True}
+    )
+    tools, _tool_state = weather_agent.build_weather_tools(
+        store=store,
+        location_hint="",
+        resolver=StubLocationResolver(),
+    )
 
-    def fake_fetch_weather_forecast(location, *, api_key, timeout_seconds, days):
-        calls.append(
-            {
-                "location": location,
-                "api_key": api_key,
-                "timeout_seconds": timeout_seconds,
-                "days": days,
-            }
-        )
-        return {
+    result = _tool_by_name(tools, "get_current_weather").invoke(
+        {"location_id": "ha_noi"}
+    )
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "location_not_resolved"
+    assert store.current_calls == []
+
+
+def test_forecast_tool_reads_bounded_range_from_redis() -> None:
+    store = StubWeatherStore(
+        forecast={
             "ok": True,
+            "cached": True,
             "data": {
-                "location": location,
-                "requested_days": days,
-                "days": [{"date": "2026-07-10"}],
+                "location": "Ha Noi",
+                "requested_days": 5,
+                "days": [{"date": f"2026-07-{day:02d}"} for day in range(10, 15)],
             },
         }
-
-    monkeypatch.setattr(weather_agent, "fetch_weather_forecast", fake_fetch_weather_forecast)
-
-    cache = MemoryCache()
+    )
     tools, tool_state = weather_agent.build_weather_tools(
-        cache=cache,
-        settings=_settings(),
+        store=store,
         location_hint="Ha Noi",
+        resolver=StubLocationResolver(),
     )
 
+    _tool_by_name(tools, "resolve_weather_location").invoke(
+        {"location_text": "Ha Noi"}
+    )
     result = _tool_by_name(tools, "get_weather_forecast").invoke(
-        {"location": "Ha Noi", "days": 9}
+        {"location_id": "ha_noi", "days": 9}
     )
 
-    assert calls == [
-        {
-            "location": "Ha Noi",
-            "api_key": "weather-key",
-            "timeout_seconds": 8,
-            "days": 5,
-        }
-    ]
+    assert store.forecast_calls == [("ha_noi", 5, None)]
     assert result["ok"] is True
     assert result["data"]["requested_days"] == 5
     assert tool_state["last_weather_data"]["requested_days"] == 5
-    assert cache.stats()["misses"] == 1
-    assert cache.stats()["size"] == 1
 
 
-def test_tomorrow_forecast_keeps_only_tomorrow(monkeypatch) -> None:
-    calls = []
-    today = weather_agent.datetime.now(weather_agent.ZoneInfo("Asia/Bangkok")).date()
-    tomorrow = (today + weather_agent.timedelta(days=1)).isoformat()
-
-    def fake_fetch_weather_forecast(location, *, api_key, timeout_seconds, days):
-        calls.append(days)
-        return {
+def test_forecast_tool_filters_from_explicit_start_date() -> None:
+    today = datetime.now(ZoneInfo("Asia/Bangkok")).date()
+    tomorrow = (today + timedelta(days=1)).isoformat()
+    store = StubWeatherStore(
+        forecast={
             "ok": True,
             "data": {
-                "location": location,
-                "requested_days": days,
+                "location": "Ha Noi",
+                "requested_days": 3,
                 "days": [{"date": tomorrow}, {"date": "2099-01-01"}],
             },
         }
-
-    monkeypatch.setattr(weather_agent, "fetch_weather_forecast", fake_fetch_weather_forecast)
+    )
     tools, tool_state = weather_agent.build_weather_tools(
-        cache=MemoryCache(),
-        settings=_settings(),
+        store=store,
         location_hint="Ha Noi",
         query="Thời tiết Hà Nội ngày mai",
+        resolver=StubLocationResolver(),
     )
 
+    _tool_by_name(tools, "resolve_weather_location").invoke(
+        {"location_text": "Hà Nội"}
+    )
     result = _tool_by_name(tools, "get_weather_forecast").invoke(
-        {"location": "Ha Noi", "days": 3}
+        {"location_id": "ha_noi", "days": 1, "start_date": tomorrow}
     )
 
-    assert calls == [3]
+    assert store.forecast_calls == [("ha_noi", 1, tomorrow)]
     assert result["data"]["requested_days"] == 1
+    assert result["data"]["requested_start_date"] == tomorrow
     assert result["data"]["days"] == [{"date": tomorrow}]
     assert tool_state["forecast_weather_data"]["days"] == [{"date": tomorrow}]
 
