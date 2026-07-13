@@ -5,7 +5,7 @@ import rag_manager.services.weather_api as weather_api
 import rag_manager.services.wiki_api as wiki_api
 
 
-def test_fetch_weather_uses_http_helper_and_compacts_response(monkeypatch) -> None:
+def test_fetch_weather_uses_http_helper_and_compacts_response(monkeypatch, capsys) -> None:
     calls = []
 
     def fake_get_json(url, *, source, params, timeout_seconds):
@@ -17,8 +17,10 @@ def test_fetch_weather_uses_http_helper_and_compacts_response(monkeypatch) -> No
                 "timeout_seconds": timeout_seconds,
             }
         )
+        raw_text = '{"name":"Ha Noi","main":{"temp":30.5}}'
         return {
             "ok": True,
+            "raw_text": raw_text,
             "data": {
                 "name": "Ha Noi",
                 "dt": 1783670000,
@@ -48,9 +50,18 @@ def test_fetch_weather_uses_http_helper_and_compacts_response(monkeypatch) -> No
     assert response["data"]["location"] == "Ha Noi"
     assert response["data"]["condition"]["description"] == "mây rải rác"
     assert response["data"]["temperature"]["current_celsius"] == 30.5
+    assert response["data"]["timezone_offset_seconds"] == 25200
+    assert response["data"]["observed_at_utc"] == "2026-07-10T07:53:20+00:00"
+    assert response["data"]["observed_at_local"] == "2026-07-10T14:53:20+07:00"
+    terminal_output = capsys.readouterr().out
+    assert "[OpenWeather][current][RAW_RESPONSE_TEXT]" in terminal_output
+    assert '{"name":"Ha Noi","main":{"temp":30.5}}' in terminal_output
+    assert "[OpenWeather][current][RAW_API_RESPONSE]" in terminal_output
+    assert '"temp": 30.5' in terminal_output
+    assert "weather-key" not in terminal_output
 
 
-def test_fetch_weather_forecast_uses_http_helper_and_compacts_daily_response(monkeypatch) -> None:
+def test_fetch_weather_forecast_uses_http_helper_and_compacts_daily_response(monkeypatch, capsys) -> None:
     calls = []
 
     def fake_get_json(url, *, source, params, timeout_seconds):
@@ -62,8 +73,10 @@ def test_fetch_weather_forecast_uses_http_helper_and_compacts_daily_response(mon
                 "timeout_seconds": timeout_seconds,
             }
         )
+        raw_text = '{"city":{"name":"Ha Noi"},"list":[]}'
         return {
             "ok": True,
+            "raw_text": raw_text,
             "data": {
                 "city": {"name": "Ha Noi", "country": "VN", "timezone": 25200},
                 "list": [
@@ -110,6 +123,15 @@ def test_fetch_weather_forecast_uses_http_helper_and_compacts_daily_response(mon
     assert response["data"]["days"][0]["temperature"]["max_celsius"] == 30.0
     assert response["data"]["days"][0]["max_rain_probability"] == 0.6
     assert response["data"]["days"][0]["total_rain_mm"] == 0.5
+    first_interval = response["data"]["days"][0]["intervals"][0]
+    assert first_interval["forecast_at_utc"] == "2026-07-10T07:53:20+00:00"
+    assert first_interval["forecast_at_local"] == "2026-07-10T14:53:20+07:00"
+    terminal_output = capsys.readouterr().out
+    assert "[OpenWeather][forecast][RAW_RESPONSE_TEXT]" in terminal_output
+    assert '{"city":{"name":"Ha Noi"},"list":[]}' in terminal_output
+    assert "[OpenWeather][forecast][RAW_API_RESPONSE]" in terminal_output
+    assert '"dt_txt": "2026-07-10 00:00:00"' in terminal_output
+    assert "weather-key" not in terminal_output
 
 
 def test_fetch_news_uses_http_helper_and_compacts_response(monkeypatch) -> None:

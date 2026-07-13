@@ -1,0 +1,10 @@
+{
+  "component_html": "<div class=\"generated-rain-icon\" aria-label=\"Rain\">☔</div>",
+  "metadata": {
+    "kind": "component",
+    "supported_slots": [
+      "metrics"
+    ],
+    "required_fields": []
+  }
+}

@@ -1,0 +1,3 @@
+Thay vì chỉ hiển thị text trả lời người dùng, thì chatbot phải trực quan hoá được câu trả lời bằng html. 
+Người dùng vẫn nhập câu hỏi như bình thường: ví dụ người dùng nhập câu hỏi" Thời tiết hà nội hôm nay thế nào", và được quyền chọn template để trực quan hoá câu trả lời của bot, giả sử người dùng chọn template thời tiết cơ bản.
+Thì sẽ kiểm tra xem template đó đã tồn tại chưa, nếu chưa thì sinh template theo ý muốn người dùng, nếu có rồi thì tái sử dụng lại. Và kết quả text của bot sẽ hiển thị lên template được chọn để visualize cho người dùng ( dưới dạng html, mà người dùng xem được như kiểu web)

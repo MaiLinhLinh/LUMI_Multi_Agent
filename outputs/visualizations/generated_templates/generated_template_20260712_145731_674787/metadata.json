@@ -1,0 +1,108 @@
+{
+  "id": "weather_basic",
+  "kind": "complete_template",
+  "fillable": true,
+  "source": {
+    "execution_plan": {
+      "plan_version": "1.0",
+      "target": {
+        "mode": "existing_template",
+        "template_ref": {
+          "ref_type": "registry",
+          "id": "weather_basic",
+          "kind": "complete_template"
+        },
+        "base_ref": null,
+        "preserve_existing_structure": true
+      },
+      "lookup_plan": {
+        "templates": [
+          "weather_basic"
+        ],
+        "base_templates": [],
+        "components": [
+          "metric_card",
+          "temperature_hero"
+        ]
+      },
+      "resource_plan": {
+        "reuse_components": [
+          {
+            "ref_type": "registry",
+            "id": "temperature_hero",
+            "kind": "base_template"
+          },
+          {
+            "ref_type": "registry",
+            "id": "metric_card",
+            "kind": "base_template"
+          }
+        ]
+      },
+      "generation_plan": {
+        "base": null,
+        "components": []
+      },
+      "modification_plan": {
+        "style": {
+          "background_color": "lightpink"
+        },
+        "content": [],
+        "layout": []
+      },
+      "todo_list": [
+        "Apply light pink background color to the existing weather_basic template",
+        "Ensure layout is preserved as per requirements"
+      ]
+    },
+    "assembly_input": {
+      "target": {
+        "mode": "existing_template",
+        "template_ref": {
+          "ref_type": "registry",
+          "id": "weather_basic",
+          "kind": "complete_template"
+        },
+        "base_ref": null,
+        "preserve_existing_structure": true
+      },
+      "components": [
+        {
+          "ref_type": "registry",
+          "id": "temperature_hero",
+          "kind": "base_template"
+        },
+        {
+          "ref_type": "registry",
+          "id": "metric_card",
+          "kind": "base_template"
+        }
+      ]
+    },
+    "validation": "deterministic"
+  },
+  "domain": "weather",
+  "schema_versions": [
+    "weather.current.v1"
+  ],
+  "required_fields": [
+    "location.name",
+    "location.country",
+    "location.timezone_offset_seconds",
+    "current.timestamp",
+    "current.timezone_offset_seconds",
+    "current.condition.main",
+    "current.condition.description",
+    "current.temperature.current_celsius",
+    "current.temperature.feels_like_celsius",
+    "current.temperature.min_celsius",
+    "current.temperature.max_celsius",
+    "current.humidity_percent",
+    "current.pressure_hpa",
+    "current.wind.speed_mps",
+    "current.wind.degrees",
+    "current.cloudiness_percent"
+  ],
+  "template_file": "template.html",
+  "optional_fields": []
+}

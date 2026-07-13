@@ -1,0 +1,24 @@
+{
+  "plan_type": "fill_plan",
+  "target": {
+    "mode": "existing_template",
+    "template_ref": {
+      "id": "weather_basic",
+      "kind": "complete_template",
+      "ref_type": "registry"
+    },
+    "base_ref": null,
+    "preserve_existing_structure": true
+  },
+  "operations": [
+    {
+      "op": "set_style",
+      "property": "background_color",
+      "value": "lightpink",
+      "slot": null,
+      "component_ref": null,
+      "position": "append"
+    }
+  ],
+  "parameters": {}
+}

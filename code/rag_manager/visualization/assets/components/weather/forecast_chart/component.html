@@ -1,0 +1,23 @@
+<div class="forecast-chart">
+  <h2>Forecast</h2>
+  <div class="forecast-bars">
+    {% if data.forecast and data.forecast.days %}
+      {% for day in data.forecast.days %}
+        {% for interval in day.intervals | default([], true) %}
+          <div class="forecast-row">
+            <div class="forecast-time">{{ interval.time | default(interval.timestamp, true) }}</div>
+            <div class="forecast-condition">
+              {{ interval.condition.description | default(interval.condition.main, true) }}
+              {% if interval.rain_probability is number %} · Rain {{ (interval.rain_probability * 100) | round | int }}%{% endif %}
+            </div>
+            <div class="forecast-temp">
+              {% if interval.temperature_celsius is number %}{{ interval.temperature_celsius }}&deg;C{% else %}&mdash;{% endif %}
+            </div>
+          </div>
+        {% endfor %}
+      {% endfor %}
+    {% else %}
+      <p class="empty-note">Forecast data is not available.</p>
+    {% endif %}
+  </div>
+</div>

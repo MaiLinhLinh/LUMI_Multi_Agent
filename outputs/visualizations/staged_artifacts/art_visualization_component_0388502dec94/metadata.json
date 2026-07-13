@@ -1,0 +1,9 @@
+{
+  "request_id": "visualization",
+  "kind": "component",
+  "source": "llm3",
+  "artifact_id": "art_visualization_component_0388502dec94",
+  "status": "used_by_llm4",
+  "created_at": "2026-07-12T15:21:34.250838+00:00",
+  "expires_at": "2026-07-12T16:21:34.250838+00:00"
+}

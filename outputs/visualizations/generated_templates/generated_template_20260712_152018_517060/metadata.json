@@ -1,0 +1,138 @@
+{
+  "id": "weather_basic",
+  "kind": "complete_template",
+  "fillable": true,
+  "source": {
+    "execution_plan": {
+      "plan_version": "1.0",
+      "target": {
+        "mode": "existing_template",
+        "template_ref": {
+          "ref_type": "registry",
+          "id": "weather_basic",
+          "kind": "complete_template"
+        },
+        "base_ref": null,
+        "preserve_existing_structure": true
+      },
+      "lookup_plan": {
+        "templates": [],
+        "base_templates": [],
+        "components": []
+      },
+      "resource_plan": {
+        "reuse_components": []
+      },
+      "generation_plan": {
+        "base": null,
+        "components": []
+      },
+      "modification_plan": {
+        "style": [],
+        "content": [],
+        "layout": []
+      },
+      "todo_list": [
+        "Preserve existing template structure",
+        "Apply requested operations",
+        "Validate and render"
+      ]
+    },
+    "assembly_input": {
+      "target": {
+        "mode": "existing_template",
+        "template_ref": {
+          "ref_type": "registry",
+          "id": "weather_basic",
+          "kind": "complete_template"
+        },
+        "base_ref": null,
+        "preserve_existing_structure": true
+      },
+      "components": [],
+      "style_targets": [
+        {
+          "id": "page_background",
+          "label": "nền toàn trang",
+          "selector": "body",
+          "properties": [
+            "background_color"
+          ]
+        },
+        {
+          "id": "weather_hero",
+          "label": "vùng xanh-vàng phía trên của thẻ thời tiết",
+          "selector": ".hero",
+          "properties": [
+            "background_color"
+          ]
+        },
+        {
+          "id": "metrics_section",
+          "label": "khu vực các chỉ số thời tiết",
+          "selector": ".metrics",
+          "properties": [
+            "background_color"
+          ]
+        },
+        {
+          "id": "weather_card",
+          "label": "nền thẻ thời tiết",
+          "selector": ".weather-shell",
+          "properties": [
+            "background_color"
+          ]
+        }
+      ],
+      "extension_points": [
+        {
+          "slot": "hero",
+          "selector": "[data-slot='hero']",
+          "allowed_operations": [
+            "insert_component",
+            "replace_component"
+          ],
+          "max_components": 1
+        },
+        {
+          "slot": "metrics",
+          "selector": "[data-slot='metrics']",
+          "allowed_operations": [
+            "insert_component",
+            "replace_component"
+          ],
+          "max_components": 6
+        },
+        {
+          "slot": "chart",
+          "selector": "[data-slot='chart']",
+          "allowed_operations": [
+            "insert_component",
+            "replace_component"
+          ],
+          "max_components": 2
+        },
+        {
+          "slot": "footer",
+          "selector": "[data-slot='footer']",
+          "allowed_operations": [
+            "insert_component",
+            "replace_component"
+          ],
+          "max_components": 2
+        }
+      ]
+    },
+    "validation": "deterministic"
+  },
+  "domain": "weather",
+  "schema_versions": [
+    "weather.combined.v1"
+  ],
+  "required_fields": [
+    "location.name",
+    "current.temperature.current_celsius"
+  ],
+  "template_file": "template.html",
+  "optional_fields": []
+}

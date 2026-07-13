@@ -15,11 +15,20 @@ from rag_manager.agents.weather import run_weather_agent
 from rag_manager.agents.wiki import run_wiki_agent
 from rag_manager.config import Settings, load_settings
 from rag_manager.state import GraphState
+from rag_manager.semantic_router import analyze_input, is_high_confidence_domain_query
+from rag_manager.visualization.orchestrator import (
+    CREATE_NEW_TEMPLATE_ID,
+    VisualizationOrchestrator,
+    VisualizationRequest,
+    VisualizationResult,
+)
+from rag_manager.visualization.template_agent import TemplateAgentWorkflow
 
 
 def build_workflow():
     """Build and compile the application workflow."""
     graph = StateGraph(GraphState)
+    graph.add_node("input_router", input_router_node)
     graph.add_node("manager_classify", manager_classify_node)
     graph.add_node("weather", weather_node)
     graph.add_node("news", news_node)
@@ -27,7 +36,16 @@ def build_workflow():
     graph.add_node("execute_parallel", execute_parallel_node)
     graph.add_node("plan_sequence", plan_sequence_node)
     graph.add_node("aggregate", aggregate_node)
-    graph.set_entry_point("manager_classify")
+    graph.add_node("visualize", visualize_node)
+    graph.set_entry_point("input_router")
+    graph.add_conditional_edges(
+        "input_router",
+        route_input,
+        {
+            "manager_classify": "manager_classify",
+            "visualize": "visualize",
+        },
+    )
     graph.add_conditional_edges(
         "manager_classify",
         route_execution_mode,
@@ -44,14 +62,139 @@ def build_workflow():
     graph.add_edge("wiki", "aggregate")
     graph.add_edge("execute_parallel", "aggregate")
     graph.add_edge("plan_sequence", "aggregate")
-    graph.add_edge("aggregate", END)
+    graph.add_edge("aggregate", "visualize")
+    graph.add_edge("visualize", END)
     return graph.compile()
+
+
+def input_router_node(state: GraphState) -> GraphState:
+    query = state.get("query", "")
+    pending_template_state = state.get("pending_template_state")
+    if is_high_confidence_domain_query(query) and not (
+        isinstance(pending_template_state, dict)
+        and pending_template_state.get("status") == "collecting_requirements"
+    ):
+        return {
+            "input_route": "domain",
+            "semantic_result": {},
+            "visualization_request": {"mode": "auto", "action": "auto_render"},
+            "pending_visualization_action": "",
+            "pending_template_state": {},
+            "template_requirements": {},
+            "template_clarification_round": 0,
+            "visualization_context": {},
+        }
+
+    client = state.get("semantic_router_client") or state.get("manager_client")
+    if client is None or not hasattr(client, "chat_json"):
+        settings = _get_settings(state)
+        client = _create_gemini_client(settings) if settings.has_gemini_key else None
+    semantic_result = analyze_input(
+        client,
+        query=query,
+        history=state.get("history", []),
+        previous_template_state=pending_template_state
+        if isinstance(pending_template_state, dict)
+        else None,
+        active_template_id=_string_value(state.get("active_template_id")),
+        available_templates=state.get("available_templates", [])
+        if isinstance(state.get("available_templates", []), list)
+        else [],
+    )
+    semantic_result = _merge_semantic_requirements(
+        semantic_result,
+        previous_state=pending_template_state
+        if isinstance(pending_template_state, dict)
+        else None,
+    )
+    if semantic_result.get("route") == "domain":
+        return {
+            "input_route": "domain",
+            "semantic_result": semantic_result,
+            "visualization_request": {"mode": "auto", "action": "auto_render"},
+            "pending_visualization_action": "",
+            "pending_template_state": {},
+            "template_requirements": {},
+            "template_clarification_round": 0,
+            "visualization_context": {},
+            **_llm_usage_update("semantic_router", client),
+        }
+
+    pending_state = _pending_template_state_from_semantic(
+        semantic_result,
+        previous_state=pending_template_state
+        if isinstance(pending_template_state, dict)
+        else None,
+    )
+    visualization_context = _build_visualization_context(
+        previous_context=state.get("visualization_context")
+        if isinstance(state.get("visualization_context"), dict)
+        else {},
+        query=query,
+        domain_result=state.get("last_domain_result")
+        if isinstance(state.get("last_domain_result"), dict)
+        else None,
+        pending_state=pending_state,
+    )
+
+    visualization_request = {
+        "mode": "auto",
+        "action": "semantic_request",
+        "user_request": query,
+        "semantic_result": semantic_result,
+        "previous_template_state": pending_state,
+        "visualization_context": visualization_context,
+    }
+    update: GraphState = {
+        "input_route": "visualize",
+        "semantic_result": semantic_result,
+        "visualization_request": visualization_request,
+        "pending_visualization_action": semantic_result.get("template", {}).get(
+            "action", "clarification"
+        ),
+        "visualization_context": visualization_context,
+        **_llm_usage_update("semantic_router", client),
+    }
+    if pending_state is None:
+        update.update(
+            {
+                "pending_template_state": {},
+                "template_requirements": {},
+                "template_clarification_round": 0,
+            }
+        )
+    else:
+        update.update(
+            {
+                "pending_template_state": pending_state,
+                "template_requirements": pending_state["requirements"],
+                "template_clarification_round": pending_state[
+                    "clarification_round"
+                ],
+            }
+        )
+    return update
+
+
+def route_input(state: GraphState) -> str:
+    return "visualize" if state.get("input_route") == "visualize" else "manager_classify"
 
 
 def manager_classify_node(state: GraphState) -> GraphState:
     started_at = perf_counter()
     client = state.get("manager_client") or _create_gemini_client(_get_settings(state))
-    plan = classify_intent(client, state.get("query", ""))
+    semantic_result = state.get("semantic_result")
+    domain_request = (
+        semantic_result.get("domain_request")
+        if isinstance(semantic_result, dict)
+        else None
+    )
+    manager_query = (
+        domain_request.strip()
+        if isinstance(domain_request, str) and domain_request.strip()
+        else state.get("query", "")
+    )
+    plan = classify_intent(client, manager_query)
     return {
         "intent": plan,
         "execution_mode": plan["execution_mode"],
@@ -184,6 +327,226 @@ def aggregate_node(state: GraphState) -> GraphState:
     )
 
 
+def visualize_node(state: GraphState) -> GraphState:
+    visualization_request = state.get("visualization_request", {})
+    if not isinstance(visualization_request, dict):
+        visualization_request = {"mode": "auto", "action": "auto_render"}
+
+    domain_result = _domain_result_for_visualization(state)
+    semantic_result = visualization_request.get("semantic_result")
+    semantic_needs_response = (
+        isinstance(semantic_result, dict)
+        and semantic_result.get("status") in {"needs_clarification", "cancelled"}
+    )
+    if not domain_result and visualization_request.get("action") not in {
+        "create_template",
+        "customize_template",
+        "design_template",
+        "continue_template",
+        "cancel_template",
+    } and not semantic_needs_response:
+        message = "Can hoi domain truoc khi chon hoac tao visualization."
+        return {
+            "visualization_output": {
+                "ok": False,
+                "mode": visualization_request.get("mode", "auto"),
+                "message": message,
+                "errors": ["missing_domain_result"],
+            },
+            "pending_visualization_action": "",
+            "visualization_html_path": "",
+        }
+
+    is_template_request = visualization_request.get("action") == "semantic_request"
+    template_id = None if is_template_request else _template_id_from_visualization_request(
+        state, visualization_request
+    )
+    is_create_new_selection = template_id == CREATE_NEW_TEMPLATE_ID
+    if is_create_new_selection:
+        template_id = None
+        visualization_request = {
+            **visualization_request,
+            "action": "template_request",
+        }
+        is_template_request = True
+    mode = "auto" if is_template_request else _visualization_mode(
+        visualization_request, template_id=template_id
+    )
+    orchestrator = state.get("visualization_orchestrator")
+    if orchestrator is None:
+        orchestrator = _create_visualization_orchestrator(state)
+    result = orchestrator.run(
+        VisualizationRequest(
+            domain_result=domain_result,
+            mode=mode,
+            template_id=template_id,
+            source_template_id=_string_value(visualization_request.get("source_template_id"))
+            or _string_value(state.get("active_template_id")),
+            user_request=_string_value(visualization_request.get("user_request")),
+            previous_template_state=(
+                visualization_request.get("previous_template_state")
+                if isinstance(visualization_request.get("previous_template_state"), dict)
+                else state.get("pending_template_state")
+            ),
+            visualization_context=(
+                visualization_request.get("visualization_context")
+                if isinstance(visualization_request.get("visualization_context"), dict)
+                else state.get("visualization_context", {})
+            ),
+            action=_string_value(visualization_request.get("action")),
+            modification_request=_string_value(visualization_request.get("modification_request")),
+            # Semantic Router output is only meaningful for visualization
+            # requests that still need template action dispatch. A domain
+            # request has already completed the domain workflow and must use
+            # the deterministic auto-render path based on its domain result.
+            semantic_result=(
+                visualization_request.get("semantic_result")
+                if visualization_request.get("action") == "semantic_request"
+                and isinstance(visualization_request.get("semantic_result"), dict)
+                else None
+            ),
+        )
+    )
+    output = _visualization_result_dict(result)
+    visualization_context = _context_after_visualization_result(
+        visualization_request.get("visualization_context")
+        if isinstance(visualization_request.get("visualization_context"), dict)
+        else state.get("visualization_context", {}),
+        output,
+    )
+    update: GraphState = {
+        "visualization_output": output,
+        "last_domain_result": domain_result,
+        "available_templates": output.get("available_templates", []),
+        "pending_visualization_action": "",
+        "visualization_html_path": "",
+        "visualization_context": visualization_context,
+    }
+    if output.get("ok") and isinstance(output.get("template_id"), str):
+        update["active_template_id"] = output["template_id"]
+    if output.get("ok") and isinstance(output.get("template_path"), str):
+        update["active_template_path"] = output["template_path"]
+    metadata = output.get("metadata")
+    if isinstance(metadata, dict):
+        pending_template_state = metadata.get("pending_template_state")
+        if isinstance(pending_template_state, dict):
+            update["pending_template_state"] = pending_template_state
+            update["template_requirements"] = pending_template_state.get("requirements", {})
+            update["template_clarification_round"] = pending_template_state.get(
+                "clarification_round", 0
+            )
+        elif "missing_template_requirements" not in output.get("errors", []):
+            update["pending_template_state"] = {}
+            update["template_requirements"] = {}
+            update["template_clarification_round"] = 0
+    html_path = output.get("html_path")
+    if isinstance(html_path, str) and html_path:
+        update["visualization_html_path"] = html_path
+    return update
+
+
+def _pending_template_state_from_semantic(
+    semantic_result: dict[str, Any],
+    *,
+    previous_state: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Build the session's structured template-gathering state.
+
+    The Semantic Router owns interpretation and merging. This helper only
+    persists its validated result in a stable graph-state shape so the next
+    turn can provide it back as context.
+    """
+
+    status = semantic_result.get("status")
+    if status == "cancelled":
+        return None
+    if status == "ready":
+        # A ready response from LLM1 only means routing is complete. If LLM2
+        # was waiting for a design clarification, keep that state so the next
+        # LLM2 call receives the original request plus the user's answer.
+        if (
+            isinstance(previous_state, dict)
+            and previous_state.get("status") == "collecting_planner_clarification"
+        ):
+            return {
+                **previous_state,
+                "status": "resolving_planner_clarification",
+            }
+        return None
+    if status != "needs_clarification":
+        return previous_state
+
+    template = semantic_result.get("template", {})
+    requirements = (
+        template.get("requirements", {}) if isinstance(template, dict) else {}
+    )
+    if not isinstance(requirements, dict):
+        requirements = {}
+    previous_requirements = (
+        previous_state.get("requirements", {})
+        if isinstance(previous_state, dict)
+        else {}
+    )
+    if isinstance(previous_requirements, dict):
+        requirements = {**previous_requirements, **requirements}
+    previous_round = (
+        previous_state.get("clarification_round", 0)
+        if isinstance(previous_state, dict)
+        else 0
+    )
+    try:
+        clarification_round = int(previous_round) + 1
+    except (TypeError, ValueError):
+        clarification_round = 1
+    return {
+        "status": "collecting_requirements",
+        "requirements": requirements,
+        "missing_information": list(semantic_result.get("missing_information", [])),
+        "clarifying_question": semantic_result.get("clarifying_question"),
+        "source": template.get("source", "none") if isinstance(template, dict) else "none",
+        "action": template.get("action") if isinstance(template, dict) else None,
+        "template_id": template.get("template_id") if isinstance(template, dict) else None,
+        "extracted_keywords": list(template.get("extracted_keywords", []))
+        if isinstance(template, dict)
+        else [],
+        "clarification_round": clarification_round,
+    }
+
+
+def _merge_semantic_requirements(
+    semantic_result: dict[str, Any],
+    *,
+    previous_state: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Preserve confirmed requirements when a router response is partial."""
+
+    if not isinstance(previous_state, dict):
+        return semantic_result
+    previous_requirements = previous_state.get("requirements", {})
+    template = semantic_result.get("template", {})
+    current_requirements = template.get("requirements", {}) if isinstance(template, dict) else {}
+    if not isinstance(previous_requirements, dict) or not isinstance(current_requirements, dict):
+        return semantic_result
+    merged_template = {**template, "requirements": {**previous_requirements, **current_requirements}}
+    return {**semantic_result, "template": merged_template}
+
+
+def _create_visualization_orchestrator(state: GraphState) -> VisualizationOrchestrator:
+    """Build the default orchestrator and wire Gemini only for Template Agent paths."""
+
+    client = state.get("template_agent_client")
+    if client is None:
+        client = state.get("manager_client")
+    if client is None or not (
+        hasattr(client, "chat_json") or hasattr(client, "chat_text")
+    ):
+        settings = _get_settings(state)
+        client = _create_gemini_client(settings) if settings.has_gemini_key else None
+    return VisualizationOrchestrator(
+        template_agent_workflow=TemplateAgentWorkflow(llm=client)
+    )
+
+
 def _get_settings(state: GraphState) -> Settings:
     settings = state.get("settings")
     return settings if isinstance(settings, Settings) else load_settings()
@@ -222,9 +585,18 @@ def _merge_state_updates(updates: list[GraphState]) -> GraphState:
 
 def _state_metadata(state: GraphState) -> GraphState:
     metadata: GraphState = {}
-    for key in ("cache_stats", "context", "timings", "llm_usage"):
+    for key in (
+        "cache_stats",
+        "context",
+        "timings",
+        "llm_usage",
+        "last_domain_result",
+        "available_templates",
+    ):
         value = state.get(key)
         if isinstance(value, dict):
+            metadata[key] = value
+        elif key == "available_templates" and isinstance(value, list):
             metadata[key] = value
     errors = state.get("errors")
     if isinstance(errors, list):
@@ -327,3 +699,161 @@ def _topic_context(topic: str, update: GraphState) -> dict[str, Any]:
         context[answer_key] = update[answer_key]
 
     return context
+
+
+def _domain_result_for_visualization(state: GraphState) -> dict[str, Any]:
+    if state.get("input_route") == "visualize":
+        last_domain_result = state.get("last_domain_result")
+        return last_domain_result if isinstance(last_domain_result, dict) else {}
+
+    weather_data = state.get("weather_data")
+    if isinstance(weather_data, dict) and weather_data.get("domain") == "weather":
+        return {
+            "weather_data": weather_data,
+            "weather_answer": _string_value(state.get("weather_answer")),
+            "final_response": _string_value(state.get("final_response")),
+        }
+
+    last_domain_result = state.get("last_domain_result")
+    return last_domain_result if isinstance(last_domain_result, dict) else {}
+
+
+def _build_visualization_context(
+    *,
+    previous_context: dict[str, Any],
+    query: str,
+    domain_result: dict[str, Any] | None,
+    pending_state: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Build the compact, visualization-only context envelope for LLM2."""
+
+    context = dict(previous_context) if isinstance(previous_context, dict) else {}
+    history = context.get("conversation_history", [])
+    history = list(history) if isinstance(history, list) else []
+    if query.strip() and not (
+        history
+        and isinstance(history[-1], dict)
+        and history[-1].get("role") == "user"
+        and history[-1].get("content") == query
+    ):
+        history.append({"role": "user", "content": query})
+    context["conversation_history"] = history[-8:]
+    context.setdefault("merged_requirements", {})
+    if isinstance(pending_state, dict):
+        pending_requirements = pending_state.get("merged_requirements")
+        if isinstance(pending_requirements, dict):
+            context["merged_requirements"] = pending_requirements
+    context["domain_context"] = _domain_context_snapshot(
+        domain_result,
+        fallback=context.get("domain_context", {}),
+    )
+    return context
+
+
+def _context_after_visualization_result(
+    context: object,
+    output: dict[str, Any],
+) -> dict[str, Any]:
+    current = dict(context) if isinstance(context, dict) else {}
+    history = list(current.get("conversation_history", []))
+    metadata = output.get("metadata", {})
+    if isinstance(metadata, dict):
+        execution_plan = metadata.get("execution_plan")
+        if isinstance(execution_plan, dict) and isinstance(execution_plan.get("requirements"), dict):
+            current["merged_requirements"] = execution_plan["requirements"]
+        pending_state = metadata.get("pending_template_state")
+        if isinstance(pending_state, dict) and isinstance(pending_state.get("merged_requirements"), dict):
+            current["merged_requirements"] = pending_state["merged_requirements"]
+    if "llm2_needs_clarification" in output.get("errors", []):
+        question = output.get("message")
+        if isinstance(question, str) and question.strip() and not (
+            history
+            and isinstance(history[-1], dict)
+            and history[-1].get("role") == "assistant"
+            and history[-1].get("content") == question
+        ):
+            history.append({"role": "assistant", "content": question})
+    current["conversation_history"] = history[-8:]
+    return current
+
+
+def _domain_context_snapshot(
+    domain_result: dict[str, Any] | None,
+    *,
+    fallback: object,
+) -> dict[str, Any]:
+    if not isinstance(domain_result, dict):
+        return dict(fallback) if isinstance(fallback, dict) else {}
+    envelope = domain_result
+    for key in ("weather_data", "data_envelope", "domain_data"):
+        candidate = domain_result.get(key)
+        if isinstance(candidate, dict) and candidate.get("domain"):
+            envelope = candidate
+            break
+    snapshot = {
+        "domain": envelope.get("domain"),
+        "schema_version": envelope.get("schema_version"),
+        "available_fields": envelope.get("available_fields", []),
+    }
+    return {key: value for key, value in snapshot.items() if value not in (None, [], {})}
+
+
+def _template_id_from_visualization_request(
+    state: GraphState,
+    visualization_request: dict[str, Any],
+) -> str | None:
+    template_id = visualization_request.get("template_id")
+    if isinstance(template_id, str) and template_id.strip():
+        return template_id.strip()
+
+    template_index = visualization_request.get("template_index")
+    available_templates = state.get("available_templates", [])
+    if isinstance(template_index, int) and isinstance(available_templates, list):
+        selected = _template_from_index(available_templates, template_index)
+        if selected:
+            return selected
+    return None
+
+
+def _template_from_index(available_templates: list[object], template_index: int) -> str | None:
+    if template_index < 1 or template_index > len(available_templates):
+        return None
+    template = available_templates[template_index - 1]
+    if isinstance(template, dict) and isinstance(template.get("id"), str):
+        return template["id"]
+    return None
+
+
+def _visualization_mode(visualization_request: dict[str, Any], *, template_id: str | None) -> str:
+    mode = visualization_request.get("mode")
+    if mode in {"choose", "create", "customize"}:
+        return mode
+    if template_id:
+        return "choose"
+    return "auto"
+
+
+def _visualization_result_dict(result: object) -> dict[str, Any]:
+    if isinstance(result, VisualizationResult):
+        return {
+            "ok": result.ok,
+            "mode": result.mode,
+            "template_id": result.template_id,
+            "html": result.html,
+            "html_path": result.html_path,
+            "available_templates": result.available_templates,
+            "message": result.message,
+            "errors": result.errors,
+            "metadata": result.metadata,
+        }
+    if isinstance(result, dict):
+        return result
+    return {
+        "ok": False,
+        "message": "Visualization orchestrator returned an unsupported result.",
+        "errors": ["unsupported_visualization_result"],
+    }
+
+
+def _string_value(value: object) -> str:
+    return value if isinstance(value, str) else ""

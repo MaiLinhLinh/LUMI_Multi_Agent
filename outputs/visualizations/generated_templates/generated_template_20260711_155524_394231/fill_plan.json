@@ -1,0 +1,18 @@
+{
+  "base_template": "base_dashboard",
+  "parameters": {
+    "page_title": "Weather Dashboard"
+  },
+  "slots": {
+    "hero": [
+      "temperature_hero"
+    ],
+    "metrics": [
+      "metric_card"
+    ],
+    "chart": [],
+    "footer": [
+      "source_note"
+    ]
+  }
+}

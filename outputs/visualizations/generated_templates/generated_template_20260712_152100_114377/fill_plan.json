@@ -1,0 +1,22 @@
+{
+  "plan_type": "fill_plan",
+  "target": {
+    "mode": "existing_template",
+    "template_ref": {
+      "ref_type": "registry",
+      "id": "weather_basic",
+      "kind": "complete_template"
+    },
+    "base_ref": null,
+    "preserve_existing_structure": true
+  },
+  "operations": [
+    {
+      "op": "set_style",
+      "target_id": "weather_hero",
+      "property": "background_color",
+      "value": "pink"
+    }
+  ],
+  "parameters": {}
+}

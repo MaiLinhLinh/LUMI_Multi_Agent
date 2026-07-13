@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ page_title }}</title>
+</head>
+<body>
+  <main class="dashboard-shell">
+    <section data-slot="hero">
+      {{ slot.hero }}
+    </section>
+    <section data-slot="metrics">
+      {{ slot.metrics }}
+    </section>
+    <section data-slot="chart">
+      {{ slot.chart }}
+    </section>
+    <footer data-slot="footer">
+      {{ slot.footer }}
+    </footer>
+  </main>
+</body>
+</html>

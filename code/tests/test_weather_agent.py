@@ -165,6 +165,176 @@ def test_forecast_tool_calls_forecast_service_and_caches(monkeypatch) -> None:
     assert cache.stats()["size"] == 1
 
 
+def test_tomorrow_forecast_keeps_only_tomorrow(monkeypatch) -> None:
+    calls = []
+    today = weather_agent.datetime.now(weather_agent.ZoneInfo("Asia/Bangkok")).date()
+    tomorrow = (today + weather_agent.timedelta(days=1)).isoformat()
+
+    def fake_fetch_weather_forecast(location, *, api_key, timeout_seconds, days):
+        calls.append(days)
+        return {
+            "ok": True,
+            "data": {
+                "location": location,
+                "requested_days": days,
+                "days": [{"date": tomorrow}, {"date": "2099-01-01"}],
+            },
+        }
+
+    monkeypatch.setattr(weather_agent, "fetch_weather_forecast", fake_fetch_weather_forecast)
+    tools, tool_state = weather_agent.build_weather_tools(
+        cache=MemoryCache(),
+        settings=_settings(),
+        location_hint="Ha Noi",
+        query="Thời tiết Hà Nội ngày mai",
+    )
+
+    result = _tool_by_name(tools, "get_weather_forecast").invoke(
+        {"location": "Ha Noi", "days": 3}
+    )
+
+    assert calls == [3]
+    assert result["data"]["requested_days"] == 1
+    assert result["data"]["days"] == [{"date": tomorrow}]
+    assert tool_state["forecast_weather_data"]["days"] == [{"date": tomorrow}]
+
+
+def test_weather_visualization_data_wraps_current_weather() -> None:
+    envelope = weather_agent._build_weather_visualization_data(
+        {
+            "current_weather_data": {
+                "location": "Ha Noi",
+                "country": "VN",
+                "timestamp": 1783670000,
+                "timezone": 25200,
+                "observed_at_utc": "2026-07-10T07:53:20+00:00",
+                "observed_at_local": "2026-07-10T14:53:20+07:00",
+                "condition": {"main": "Clouds", "description": "cloudy"},
+                "temperature": {"current_celsius": 30},
+                "humidity_percent": 70,
+                "pressure_hpa": 1008,
+                "wind": {"speed_mps": 3.4},
+                "cloudiness_percent": 40,
+            },
+            "tool_calls": [{"name": "get_current_weather", "cached": False}],
+        }
+    )
+
+    assert envelope["domain"] == "weather"
+    assert envelope["schema_version"] == "weather.current.v1"
+    assert envelope["data_type"] == "current"
+    assert envelope["location"] == "Ha Noi"
+    assert envelope["data"]["location"]["country"] == "VN"
+    assert envelope["data"]["current"]["temperature"]["current_celsius"] == 30
+    assert envelope["data"]["current"]["observed_at_local"] == "2026-07-10T14:53:20+07:00"
+    assert "current.observed_at_local" in envelope["available_fields"]
+    assert envelope["data"]["forecast"] is None
+    assert "current.temperature.current_celsius" in envelope["available_fields"]
+    assert envelope["source"]["tools_used"] == [
+        {"name": "get_current_weather", "cached": False}
+    ]
+
+
+def test_weather_visualization_data_combines_current_and_forecast() -> None:
+    envelope = weather_agent._build_weather_visualization_data(
+        {
+            "current_weather_data": {
+                "location": "Ha Noi",
+                "country": "VN",
+                "timestamp": 1783670000,
+                "timezone": 25200,
+                "condition": {"description": "cloudy"},
+                "temperature": {"current_celsius": 30},
+            },
+            "forecast_weather_data": {
+                "location": "Ha Noi",
+                "country": "VN",
+                "timezone": 25200,
+                "requested_days": 3,
+                "source_granularity": "3-hour forecast intervals",
+                "days": [
+                    {
+                        "date": "2026-07-10",
+                        "temperature": {"min_celsius": 28.5, "max_celsius": 30.0},
+                        "max_rain_probability": 0.6,
+                        "intervals": [],
+                    }
+                ],
+            },
+            "tool_calls": [
+                {"name": "get_current_weather", "cached": False},
+                {"name": "get_weather_forecast", "cached": False},
+            ],
+        }
+    )
+
+    assert envelope["schema_version"] == "weather.combined.v1"
+    assert envelope["data_type"] == "combined"
+    assert envelope["data"]["current"]["temperature"]["current_celsius"] == 30
+    assert envelope["data"]["forecast"]["requested_days"] == 3
+    assert envelope["data"]["forecast"]["days"][0]["max_rain_probability"] == 0.6
+    assert "forecast.days[].temperature.max_celsius" in envelope["available_fields"]
+
+
+def test_weather_visualization_data_preserves_error_metadata() -> None:
+    envelope = weather_agent._build_weather_visualization_data(
+        {
+            "error_records": [
+                {
+                    "location": "Ha Noi",
+                    "error": {
+                        "source": "weather",
+                        "message": "Missing OPENWEATHER_API_KEY.",
+                        "status_code": None,
+                    },
+                }
+            ],
+            "errors": [
+                {
+                    "source": "weather",
+                    "message": "Missing OPENWEATHER_API_KEY.",
+                    "status_code": None,
+                }
+            ],
+            "tool_calls": [{"name": "get_current_weather", "cached": False}],
+        }
+    )
+
+    assert envelope["schema_version"] == "weather.error.v1"
+    assert envelope["data_type"] == "error"
+    assert envelope["location"] == "Ha Noi"
+    assert envelope["data"]["current"] is None
+    assert envelope["data"]["forecast"] is None
+    assert envelope["errors"][0]["message"] == "Missing OPENWEATHER_API_KEY."
+
+
+def test_weather_visualization_data_empty_has_no_available_empty_fields() -> None:
+    envelope = weather_agent._build_weather_visualization_data({})
+
+    assert envelope["schema_version"] == "weather.empty.v1"
+    assert envelope["data_type"] == "empty"
+    assert envelope["location"] == ""
+    assert envelope["available_fields"] == []
+
+
+def test_weather_visualization_data_ignores_blank_string_fields() -> None:
+    envelope = weather_agent._build_weather_visualization_data(
+        {
+            "current_weather_data": {
+                "location": "  ",
+                "country": "",
+                "condition": {"description": ""},
+                "temperature": {"current_celsius": 30},
+            }
+        }
+    )
+
+    assert "location.name" not in envelope["available_fields"]
+    assert "location.country" not in envelope["available_fields"]
+    assert "current.condition.description" not in envelope["available_fields"]
+    assert "current.temperature.current_celsius" in envelope["available_fields"]
+
+
 def _tool_by_name(tools: list[object], name: str):
     for weather_tool in tools:
         if getattr(weather_tool, "name", "") == name:

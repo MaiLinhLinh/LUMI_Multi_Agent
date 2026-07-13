@@ -1,0 +1,21 @@
+{
+  "plan_type": "fill_plan",
+  "target": {
+    "mode": "existing_template",
+    "template_ref": "weather_forecast",
+    "base_ref": null,
+    "preserve_existing_structure": true
+  },
+  "operations": [
+    {
+      "op": "set_style",
+      "target_id": "page_background",
+      "property": "background_color",
+      "value": "lightpink",
+      "slot": null,
+      "component_ref": null,
+      "position": null
+    }
+  ],
+  "parameters": {}
+}

@@ -1,0 +1,39 @@
+{
+  "id": "base_dashboard",
+  "kind": "base_template",
+  "name": "Base Dashboard",
+  "description": "A fillable dashboard shell with hero, metrics, chart, and footer slots.",
+  "template_file": "base.html",
+  "domains": [
+    "weather"
+  ],
+  "slots": [
+    "hero",
+    "metrics",
+    "chart",
+    "footer"
+  ],
+  "parameters": [
+    "page_title"
+  ],
+  "style_targets": [
+    {
+      "id": "page_background",
+      "label": "nền toàn trang",
+      "selector": "body",
+      "properties": ["background_color"]
+    },
+    {
+      "id": "dashboard_surface",
+      "label": "khung dashboard",
+      "selector": ".dashboard-shell",
+      "properties": ["background_color", "surface_color"]
+    },
+    {
+      "id": "hero",
+      "label": "vùng đầu dashboard",
+      "selector": "[data-slot='hero']",
+      "properties": ["background_color", "surface_color"]
+    }
+  ]
+}

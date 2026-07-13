@@ -1,0 +1,17 @@
+{
+  "id": "source_note",
+  "kind": "component",
+  "domain": "weather",
+  "name": "Source Note",
+  "description": "Small data provider note.",
+  "component_file": "component.html",
+  "supported_slots": [
+    "footer"
+  ],
+  "required_fields": [],
+  "optional_fields": [],
+  "tags": [
+    "source",
+    "footer"
+  ]
+}

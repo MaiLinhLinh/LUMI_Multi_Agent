@@ -1,0 +1,28 @@
+{
+  "plan_type": "fill_plan",
+  "target": {
+    "mode": "existing_template",
+    "template_ref": {
+      "ref_type": "registry",
+      "id": "weather_basic",
+      "kind": "complete_template"
+    },
+    "base_ref": null,
+    "preserve_existing_structure": true
+  },
+  "operations": [
+    {
+      "op": "insert_component",
+      "slot": "metrics",
+      "component_ref": {
+        "ref_type": "artifact",
+        "artifact_id": "art_visualization_component_0388502dec94",
+        "kind": "component",
+        "status": "validated",
+        "slot": "metrics"
+      },
+      "position": "append"
+    }
+  ],
+  "parameters": {}
+}

@@ -190,6 +190,9 @@ def test_gemini_client_timeout_error_is_clear_after_retry_limit(monkeypatch) -> 
     assert models.calls == gemini_client.MAX_TRANSIENT_RETRIES + 1
     assert "qua thoi gian cho" in str(exc_info.value)
     assert "REQUEST_TIMEOUT_SECONDS" in str(exc_info.value)
+    assert "status_code=504" in str(exc_info.value)
+    assert "exception_type=_FakeError" in str(exc_info.value)
+    assert "detail=timeout" in str(exc_info.value)
 
 
 def test_gemini_client_rate_limit_error_is_clear_after_retry_limit(monkeypatch) -> None:
@@ -207,6 +210,27 @@ def test_gemini_client_rate_limit_error_is_clear_after_retry_limit(monkeypatch) 
     assert models.calls == gemini_client.MAX_TRANSIENT_RETRIES + 1
     assert "gioi han toc do" in str(exc_info.value)
     assert "thu lai" in str(exc_info.value)
+    assert "status_code=429" in str(exc_info.value)
+    assert "detail=rate limited" in str(exc_info.value)
+
+
+def test_gemini_client_includes_network_error_details_without_credentials(monkeypatch) -> None:
+    monkeypatch.setattr(gemini_client.time, "sleep", lambda seconds: None)
+    client, _models = _client_with_outcomes(
+        [
+            _FakeError("Server disconnected; key=AIzaSecretShouldNotAppear", status_code=503)
+            for _ in range(gemini_client.MAX_TRANSIENT_RETRIES + 1)
+        ]
+    )
+
+    with pytest.raises(GeminiRequestError) as exc_info:
+        client.chat_text("system", "user")
+
+    message = str(exc_info.value)
+    assert "status_code=503" in message
+    assert "exception_type=_FakeError" in message
+    assert "Server disconnected" in message
+    assert "AIzaSecretShouldNotAppear" not in message
 
 
 def _config_dict(config: object) -> dict:

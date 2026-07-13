@@ -1,0 +1,66 @@
+{
+  "id": "weather_forecast",
+  "kind": "complete_template",
+  "domain": "weather",
+  "name": "Weather Forecast",
+  "description": "Forecast-focused layout for forecast-only weather data.",
+  "template_file": "template.html",
+  "schema_versions": ["weather.forecast.v1", "weather.combined.v1"],
+  "required_fields": [
+    "location.name",
+    "forecast.days[].date",
+    "forecast.days[].intervals[].temperature_celsius"
+  ],
+  "optional_fields": [
+    "location.country",
+    "forecast.source_granularity",
+    "forecast.days[].temperature.min_celsius",
+    "forecast.days[].temperature.max_celsius",
+    "forecast.days[].max_rain_probability",
+    "forecast.days[].total_rain_mm",
+    "forecast.days[].condition.description",
+    "forecast.days[].temperature_feels_like_celsius",
+    "forecast.days[].humidity_percent",
+    "forecast.days[].pressure_hpa",
+    "forecast.days[].wind_speed_mps",
+    "forecast.days[].intervals[].time",
+    "forecast.days[].intervals[].condition.description",
+    "forecast.days[].intervals[].rain_probability"
+  ],
+  "tags": ["weather", "forecast", "minimal"],
+  "fillable": true,
+  "style_targets": [
+    {
+      "id": "page_background",
+      "label": "nền toàn trang",
+      "selector": "body",
+      "properties": ["background_color"]
+    },
+    {
+      "id": "forecast_header",
+      "label": "vùng tiêu đề phía trên",
+      "selector": ".page-header",
+      "properties": ["background_color"]
+    },
+    {
+      "id": "forecast_content",
+      "label": "vùng nội dung dự báo",
+      "selector": ".page",
+      "properties": ["background_color"]
+    }
+  ],
+  "extension_points": [
+    {
+      "slot": "metrics",
+      "selector": "[data-slot='metrics']",
+      "allowed_operations": ["insert_component", "replace_component"],
+      "max_components": 6
+    },
+    {
+      "slot": "footer",
+      "selector": "[data-slot='footer']",
+      "allowed_operations": ["insert_component", "replace_component"],
+      "max_components": 2
+    }
+  ]
+}

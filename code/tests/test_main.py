@@ -91,6 +91,69 @@ def test_main_passes_in_memory_history_to_follow_up_turn(monkeypatch, capsys) ->
     ]
 
 
+def test_main_carries_visualization_session_context_to_follow_up(monkeypatch, capsys) -> None:
+    class FakeWorkflow:
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        def invoke(self, state: dict) -> dict:
+            self.calls.append(dict(state))
+            if state["query"] == "Weather question":
+                return {
+                    "final_response": "Weather answer",
+                    "last_domain_result": {"weather_data": {"domain": "weather"}},
+                    "available_templates": [
+                        {"id": "weather_basic"},
+                        {"id": "weather_alt"},
+                    ],
+                    "visualization_html_path": "D:/tmp/weather.html",
+                    "visualization_output": {
+                        "ok": True,
+                        "mode": "auto",
+                        "template_id": "weather_basic",
+                        "html_path": "D:/tmp/weather.html",
+                    },
+                }
+            return {
+                "visualization_output": {
+                    "ok": True,
+                    "mode": "choose",
+                    "template_id": "weather_alt",
+                    "message": "Visualization rendered.",
+                    "html_path": "D:/tmp/weather_alt.html",
+                },
+                "visualization_html_path": "D:/tmp/weather_alt.html",
+            }
+
+    workflow = FakeWorkflow()
+    user_inputs = iter(["Weather question", "chon mau 2"])
+
+    def fake_input(prompt: str) -> str:
+        try:
+            return next(user_inputs)
+        except StopIteration:
+            raise EOFError
+
+    monkeypatch.setattr(main, "_load_workflow", lambda: workflow)
+    monkeypatch.setattr(main, "load_settings", lambda: object())
+    monkeypatch.setattr("builtins.input", fake_input)
+
+    main.main()
+
+    output = capsys.readouterr().out
+    assert workflow.calls[0]["query"] == "Weather question"
+    assert "last_domain_result" not in workflow.calls[0]
+    assert workflow.calls[1]["query"] == "chon mau 2"
+    assert workflow.calls[1]["last_domain_result"] == {"weather_data": {"domain": "weather"}}
+    assert workflow.calls[1]["available_templates"] == [
+        {"id": "weather_basic"},
+        {"id": "weather_alt"},
+    ]
+    assert "Visualization HTML: D:/tmp/weather.html" in output
+    assert "Visualization HTML: D:/tmp/weather_alt.html" in output
+    assert "Bot:\nVisualization rendered." in output
+
+
 def test_main_streams_workflow_steps_when_available(monkeypatch, capsys) -> None:
     class FakeWorkflow:
         def __init__(self) -> None:
@@ -99,6 +162,12 @@ def test_main_streams_workflow_steps_when_available(monkeypatch, capsys) -> None
 
         def stream(self, state: dict, stream_mode: str):
             self.stream_calls.append({"state": state, "stream_mode": stream_mode})
+            yield {
+                "input_router": {
+                    "input_route": "domain",
+                    "visualization_request": {"mode": "auto", "action": "auto_render"},
+                }
+            }
             yield {
                 "manager_classify": {
                     "intent": {"reason": "route reason"},
@@ -135,6 +204,17 @@ def test_main_streams_workflow_steps_when_available(monkeypatch, capsys) -> None
                     "timings": {"aggregate": 0.03},
                 }
             }
+            yield {
+                "visualize": {
+                    "visualization_output": {
+                        "ok": True,
+                        "mode": "auto",
+                        "template_id": "weather_basic",
+                        "html_path": "D:/tmp/weather.html",
+                    },
+                    "visualization_html_path": "D:/tmp/weather.html",
+                }
+            }
 
         def invoke(self, state: dict) -> dict:
             self.invoke_calls += 1
@@ -159,6 +239,8 @@ def test_main_streams_workflow_steps_when_available(monkeypatch, capsys) -> None
     assert workflow.invoke_calls == 0
     assert workflow.stream_calls[0]["stream_mode"] == "updates"
     assert workflow.stream_calls[0]["state"]["query"] == "Test streaming"
+    assert "Input router" in output
+    assert "Visualization render HTML" in output
     assert "Tiến trình xử lý:" in output
     assert "Manager phân tích câu hỏi" in output
     assert "Weather agent xử lý dữ liệu thời tiết" in output
@@ -172,6 +254,8 @@ def test_main_streams_workflow_steps_when_available(monkeypatch, capsys) -> None
     assert "kv_cache_hit: not_exposed_by_gemini_api" in output
     assert "raw_usage_keys: ['cachedContentTokenCount']" in output
     assert "weather_answer: Weather answer" in output
+    assert "visualization: ok=True, mode=auto, template=weather_basic" in output
+    assert "Visualization HTML: D:/tmp/weather.html" in output
     assert main.RESPONSE_SEPARATOR in output
     assert "Bot:\nFinal streamed answer" in output
 
@@ -198,7 +282,7 @@ def test_main_prints_active_step_when_stream_fails_before_first_update(monkeypat
     main.main()
 
     output = capsys.readouterr().out
-    assert "Manager" in output
+    assert "Input router" in output
     assert "Gemini timeout" in output
 
 

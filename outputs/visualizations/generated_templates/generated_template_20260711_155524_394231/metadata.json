@@ -1,0 +1,47 @@
+{
+  "source": {
+    "base_template": "base_dashboard",
+    "components": {
+      "hero": [
+        "temperature_hero"
+      ],
+      "metrics": [
+        "metric_card"
+      ],
+      "footer": [
+        "source_note"
+      ]
+    },
+    "todo_list": [
+      "Implement temperature_hero component for weather display",
+      "Implement metric_card components for weather metrics",
+      "Implement source_note component in the footer"
+    ],
+    "requirements": {
+      "user_goal": "tạo template mới",
+      "domain": "weather",
+      "mode": "create",
+      "style_preferences": [],
+      "data_focus": []
+    },
+    "strategy": {
+      "strategy": "assemble_base",
+      "base_template": "base_dashboard",
+      "reason": "The user wants to create a new template, and the base_dashboard provides a suitable shell for the weather domain."
+    },
+    "validation": "deterministic"
+  },
+  "domain": "weather",
+  "schema_version": "weather.current.v1",
+  "generated_base_id": null,
+  "id": "generated_template_20260711_155524_394231",
+  "kind": "complete_template",
+  "template_file": "template.html",
+  "schema_versions": [
+    "weather.current.v1"
+  ],
+  "required_fields": [
+    "location.name"
+  ],
+  "optional_fields": []
+}

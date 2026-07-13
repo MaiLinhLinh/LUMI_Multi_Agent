@@ -1,0 +1,23 @@
+{
+  "id": "metric_card",
+  "kind": "component",
+  "domain": "weather",
+  "name": "Metric Card",
+  "description": "Compact current weather metrics.",
+  "component_file": "component.html",
+  "supported_slots": [
+    "metrics"
+  ],
+  "required_fields": [
+    "current.humidity_percent",
+    "current.wind.speed_mps",
+    "current.pressure_hpa"
+  ],
+  "optional_fields": [
+    "current.cloudiness_percent"
+  ],
+  "tags": [
+    "current",
+    "metrics"
+  ]
+}

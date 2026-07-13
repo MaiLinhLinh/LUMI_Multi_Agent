@@ -6,6 +6,7 @@ from typing import Any, Literal, TypedDict
 
 
 ExecutionMode = Literal["single", "parallel", "sequential"]
+InputRoute = Literal["domain", "visualize"]
 AgentTopic = Literal["weather", "news", "wiki"]
 
 
@@ -73,6 +74,7 @@ class AgentState(TypedDict, total=False):
     history: list[dict[str, str]]
     settings: Any
     manager_client: Any
+    semantic_router_client: Any
     weather_cache: Any
     weather_client: Any
     news_cache: Any
@@ -80,6 +82,8 @@ class AgentState(TypedDict, total=False):
     wiki_cache: Any
     wiki_client: Any
     aggregator_client: Any
+    visualization_orchestrator: Any
+    input_route: InputRoute
     intent: ManagerPlan
     execution_mode: ExecutionMode
     selected_agents: list[AgentTopic]
@@ -91,6 +95,19 @@ class AgentState(TypedDict, total=False):
     wiki_data: dict[str, Any]
     wiki_answer: str
     final_response: str
+    visualization_request: dict[str, Any]
+    visualization_context: dict[str, Any]
+    semantic_result: dict[str, Any]
+    visualization_output: dict[str, Any]
+    visualization_html_path: str
+    last_domain_result: dict[str, Any]
+    available_templates: list[dict[str, Any]]
+    active_template_id: str
+    active_template_path: str
+    pending_visualization_action: str
+    pending_template_state: dict[str, Any]
+    template_requirements: dict[str, Any]
+    template_clarification_round: int
     cache_stats: CacheStats
     timings: TimingStats
     llm_usage: LlmUsageStats

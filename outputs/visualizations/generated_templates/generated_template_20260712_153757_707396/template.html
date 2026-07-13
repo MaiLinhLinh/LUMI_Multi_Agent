@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dự báo thời tiết {{ data.location.name }}</title>
+  <style>
+    :root { color-scheme: light; font-family: Inter, Arial, sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 18px; background: #edf5f8; color: #003b72; }
+    .page { max-width: 1100px; margin: auto; }
+    .page-header { padding: 28px 40px 18px; }
+    h1 { margin: 0; color: #073b70; font-size: clamp(30px, 4vw, 46px); letter-spacing: -1px; }
+    .country { margin: 6px 0 0; color: #55758b; font-size: 20px; }
+    .daily-card { margin: 0 0 28px; padding: 28px 38px 24px; background: #fff; border-radius: 7px; box-shadow: 0 5px 18px #255a6b18; }
+    h2 { margin: 0 0 22px; color: #0b0b0b; font-size: 25px; }
+    .daily-main { display: grid; grid-template-columns: 110px minmax(220px, 1fr) minmax(190px, 1fr) minmax(280px, 1.2fr); gap: 18px; align-items: center; padding-bottom: 24px; border-bottom: 1px solid #e7ecee; }
+    .daily-icon { width: 100px; height: 100px; }
+    .daily-icon svg { width: 100%; height: 100%; }
+    .daily-temperature { color: #003d78; font-size: 76px; font-weight: 700; line-height: 1; white-space: nowrap; }
+    .daily-temperature span { font-size: 45px; vertical-align: top; }
+    .daily-summary { display: grid; gap: 10px; color: #426681; font-size: 18px; }
+    .daily-summary strong { color: #003b72; font-size: 20px; }
+    .daily-side { display: grid; gap: 14px; color: #255570; font-size: 18px; }
+    .daily-metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; padding-top: 22px; text-align: center; }
+    .daily-metrics div { display: grid; gap: 7px; justify-items: center; }
+    .daily-metrics span { color: #064f45; font-size: 24px; height: 26px; }
+    .daily-metrics strong { color: #003b72; font-size: 17px; }
+    .daily-metrics b { color: #064f89; font-size: 17px; font-weight: 400; }
+    .hourly-list { display: grid; gap: 8px; margin-top: 22px; }
+    .forecast-row { display: grid; grid-template-columns: 125px 1fr 90px; gap: 16px; align-items: center; padding: 11px 14px; border: 1px solid #d8e6ec; border-radius: 10px; background: #fbfdfe; color: #365d75; }
+    .forecast-time, .forecast-temp { color: #0c0c0c; font-weight: 700; }
+    .forecast-temp { text-align: right; }
+    .source-note { padding: 0 40px; color: #78909c; font-size: 13px; }
+    @media (max-width: 800px) {
+      .page-header { padding: 22px 12px 14px; }
+      .daily-card { padding: 22px 18px; }
+      .daily-main { grid-template-columns: 78px minmax(190px, 1fr); }
+      .daily-icon { width: 72px; height: 72px; }
+      .daily-temperature { font-size: 58px; }
+      .daily-summary { grid-column: 2; }
+      .daily-side { grid-column: 1 / -1; grid-template-columns: repeat(2, 1fr); font-size: 15px; }
+    }
+    @media (max-width: 520px) {
+      body { padding: 8px; }
+      .daily-main { grid-template-columns: 70px 1fr; }
+      .daily-summary { grid-column: 2; }
+      .daily-side { grid-column: 1 / -1; grid-template-columns: 1fr; }
+      .daily-metrics { grid-template-columns: repeat(2, 1fr); }
+      .forecast-row { grid-template-columns: 1fr; gap: 5px; }
+      .forecast-temp { text-align: left; }
+    }
+  </style>
+<style data-generated-style="background_color">body { background: lightpink !important; }</style>
+</head>
+<body>
+  <main class="page">
+    <header class="page-header">
+      <h1>Dự báo thời tiết {{ data.location.name }}</h1>
+      <p class="country">{{ data.location.country }}</p>
+    </header>
+    <section class="forecast-list" data-slot="metrics">{{ forecast_summary_rows }}</section>
+    <p class="source-note" data-slot="footer">Nguồn: {{ source.provider }} · {{ data.forecast.source_granularity }}</p>
+  </main>
+</body>
+</html>

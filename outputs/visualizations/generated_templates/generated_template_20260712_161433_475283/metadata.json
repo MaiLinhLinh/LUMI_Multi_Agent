@@ -1,0 +1,143 @@
+{
+  "id": "weather_forecast",
+  "kind": "complete_template",
+  "fillable": true,
+  "source": {
+    "execution_plan": {
+      "plan_version": "1.0",
+      "target": {
+        "mode": "existing_template",
+        "template_ref": {
+          "ref_type": "registry",
+          "id": "weather_forecast",
+          "kind": "complete_template"
+        },
+        "base_ref": null,
+        "preserve_existing_structure": true
+      },
+      "lookup_plan": {
+        "templates": [],
+        "base_templates": [],
+        "components": []
+      },
+      "resource_plan": {
+        "reuse_components": []
+      },
+      "generation_plan": {
+        "base": null,
+        "components": []
+      },
+      "modification_plan": {
+        "style": [
+          {
+            "target_id": "forecast_content",
+            "property": "background_color",
+            "value": "lightpink"
+          }
+        ],
+        "content": [],
+        "layout": []
+      },
+      "todo_list": [
+        "Apply background color 'lightpink' to the 'forecast_content' style target."
+      ]
+    },
+    "assembly_input": {
+      "target": {
+        "mode": "existing_template",
+        "template_ref": {
+          "ref_type": "registry",
+          "id": "weather_forecast",
+          "kind": "complete_template"
+        },
+        "base_ref": null,
+        "preserve_existing_structure": true
+      },
+      "components": [],
+      "style_targets": [
+        {
+          "id": "page_background",
+          "label": "nền toàn trang",
+          "selector": "body",
+          "properties": [
+            "background_color"
+          ]
+        },
+        {
+          "id": "forecast_header",
+          "label": "vùng tiêu đề phía trên",
+          "selector": ".page-header",
+          "properties": [
+            "background_color"
+          ]
+        },
+        {
+          "id": "forecast_content",
+          "label": "vùng nội dung dự báo",
+          "selector": ".page",
+          "properties": [
+            "background_color"
+          ]
+        }
+      ],
+      "extension_points": [
+        {
+          "slot": "metrics",
+          "selector": "[data-slot='metrics']",
+          "allowed_operations": [
+            "insert_component",
+            "replace_component"
+          ],
+          "max_components": 6
+        },
+        {
+          "slot": "footer",
+          "selector": "[data-slot='footer']",
+          "allowed_operations": [
+            "insert_component",
+            "replace_component"
+          ],
+          "max_components": 2
+        }
+      ]
+    },
+    "validation": "deterministic"
+  },
+  "domain": "weather",
+  "schema_versions": [
+    "weather.forecast.v1"
+  ],
+  "required_fields": [
+    "location.name",
+    "location.country",
+    "location.timezone_offset_seconds",
+    "forecast.requested_days",
+    "forecast.source_granularity",
+    "forecast.days[].date",
+    "forecast.days[].temperature.min_celsius",
+    "forecast.days[].temperature.max_celsius",
+    "forecast.days[].max_rain_probability",
+    "forecast.days[].total_rain_mm",
+    "forecast.days[].common_conditions[]",
+    "forecast.days[].condition.main",
+    "forecast.days[].condition.description",
+    "forecast.days[].temperature_feels_like_celsius",
+    "forecast.days[].humidity_percent",
+    "forecast.days[].pressure_hpa",
+    "forecast.days[].wind_speed_mps",
+    "forecast.days[].intervals[].timestamp",
+    "forecast.days[].intervals[].time",
+    "forecast.days[].intervals[].condition.main",
+    "forecast.days[].intervals[].condition.description",
+    "forecast.days[].intervals[].temperature_celsius",
+    "forecast.days[].intervals[].feels_like_celsius",
+    "forecast.days[].intervals[].humidity_percent",
+    "forecast.days[].intervals[].pressure_hpa",
+    "forecast.days[].intervals[].rain_probability",
+    "forecast.days[].intervals[].wind_speed_mps",
+    "forecast.days[].intervals[].cloudiness_percent",
+    "forecast.days[].intervals[].rain_3h_mm"
+  ],
+  "template_file": "template.html",
+  "optional_fields": []
+}

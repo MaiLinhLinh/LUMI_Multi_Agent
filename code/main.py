@@ -26,6 +26,9 @@ def _print_help() -> None:
                 "- Tin công nghệ mới nhất hôm nay là gì?",
                 "- Albert Einstein là ai?",
                 "- Thời tiết Đà Nẵng và tin du lịch mới nhất?",
+                "- template (xem các template phù hợp với dữ liệu gần nhất)",
+                "- chọn mẫu 2 hoặc dùng template weather_forecast",
+                "- tạo template giao diện tối, card theo từng ngày",
                 "",
             ]
         )
@@ -46,6 +49,30 @@ def _print_bot_response(response: object) -> None:
     print(f"\n{RESPONSE_SEPARATOR}")
     print(f"Bot:\n{_format_final_response(response)}")
     print(f"{RESPONSE_SEPARATOR}\n")
+
+
+def _response_from_result(result: dict) -> str:
+    final_response = result.get("final_response")
+    if isinstance(final_response, str) and final_response.strip():
+        return _format_final_response(final_response)
+
+    visualization_output = result.get("visualization_output", {})
+    if isinstance(visualization_output, dict):
+        message = visualization_output.get("message")
+        if isinstance(message, str) and message.strip():
+            return message
+
+    return _format_final_response("")
+
+
+def _print_visualization_output(result: dict) -> None:
+    visualization_output = result.get("visualization_output", {})
+    if not isinstance(visualization_output, dict):
+        return
+
+    html_path = result.get("visualization_html_path") or visualization_output.get("html_path")
+    if isinstance(html_path, str) and html_path.strip():
+        print(f"Visualization HTML: {html_path}")
 
 
 def _print_debug_routing(result: dict, settings: object) -> None:
@@ -84,7 +111,7 @@ def _invoke_workflow_with_trace(workflow: object, state: dict) -> dict:
 def _stream_workflow_with_trace(workflow: object, state: dict) -> dict:
     result = dict(state)
     current_step = 1
-    active_node = "manager_classify"
+    active_node = "input_router"
 
     _print_workflow_step_start(current_step, active_node)
 
@@ -118,6 +145,7 @@ def _print_workflow_step_start(step_number: int, node_name: str) -> None:
 
 def _workflow_node_label(node_name: str) -> str:
     labels = {
+        "input_router": "Input router phân loại câu hỏi mới hoặc lệnh visualization.",
         "manager_classify": "Manager phân tích câu hỏi và chọn agent.",
         "weather": "Weather agent xử lý dữ liệu thời tiết.",
         "news": "News agent xử lý dữ liệu tin tức.",
@@ -125,15 +153,20 @@ def _workflow_node_label(node_name: str) -> str:
         "execute_parallel": "Chạy các agent song song.",
         "plan_sequence": "Chạy các agent tuần tự theo phụ thuộc.",
         "aggregate": "Aggregator tổng hợp câu trả lời cuối.",
+        "visualize": "Visualization render HTML nếu có dữ liệu phù hợp.",
     }
     return labels.get(node_name, f"Node {node_name} hoàn thành.")
 
 
 def _next_nodes_after_update(node_name: str, result: dict) -> list[str]:
+    if node_name == "input_router":
+        return ["visualize"] if result.get("input_route") == "visualize" else ["manager_classify"]
     if node_name == "manager_classify":
         return [_route_after_manager(result)]
     if node_name in {"weather", "news", "wiki", "execute_parallel", "plan_sequence"}:
         return ["aggregate"]
+    if node_name == "aggregate":
+        return ["visualize"]
     return []
 
 
@@ -170,6 +203,8 @@ def _print_workflow_step_details(node_name: str, update: object) -> None:
         reason = _manager_reason(update)
         if reason:
             print(f"  - Lý do route: {reason}")
+    if node_name == "input_router":
+        print(f"  - Route: {update.get('input_route', 'domain')}")
 
     for key in ("weather_answer", "news_answer", "wiki_answer", "final_response"):
         value = update.get(key)
@@ -189,6 +224,26 @@ def _print_workflow_step_details(node_name: str, update: object) -> None:
         print(f"  - Timings: {_format_debug_value(update.get('timings'))}")
     if update.get("llm_usage"):
         _print_llm_usage(update["llm_usage"])
+    visualization_output = update.get("visualization_output")
+    if isinstance(visualization_output, dict):
+        print(f"  - visualization: {_summarize_visualization_output(visualization_output)}")
+
+
+def _summarize_visualization_output(output: dict) -> str:
+    parts = [
+        f"ok={output.get('ok', False)}",
+        f"mode={output.get('mode', 'unknown')}",
+    ]
+    template_id = output.get("template_id")
+    if isinstance(template_id, str) and template_id:
+        parts.append(f"template={template_id}")
+    html_path = output.get("html_path")
+    if isinstance(html_path, str) and html_path:
+        parts.append(f"html_path={html_path}")
+    errors = output.get("errors")
+    if errors:
+        parts.append(f"errors={errors}")
+    return ", ".join(parts)
 
 
 def _manager_reason(update: dict) -> str:
@@ -262,6 +317,27 @@ def _merge_result_update(result: dict, update: dict) -> None:
             result[key] = value
 
 
+def _session_context_from_result(result: dict) -> dict:
+    session_context = {}
+    for key in (
+        "last_domain_result",
+        "available_templates",
+        "active_template_id",
+        "active_template_path",
+        "visualization_html_path",
+        "pending_template_state",
+        "template_requirements",
+        "template_clarification_round",
+    ):
+        value = result.get(key)
+        if key in {"pending_template_state", "template_requirements", "template_clarification_round"}:
+            if key in result:
+                session_context[key] = value
+        elif value not in (None, "", [], {}):
+            session_context[key] = value
+    return session_context
+
+
 def _has_required_gemini_config(settings: object) -> bool:
     return bool(getattr(settings, "has_gemini_key", True))
 
@@ -289,6 +365,7 @@ def main() -> None:
         return
 
     history: list[dict[str, str]] = []
+    session_context: dict = {}
 
     while True:
         try:
@@ -317,15 +394,18 @@ def main() -> None:
                     "query": query,
                     "history": list(history),
                     "settings": settings,
+                    **session_context,
                 }
             )
         except Exception as exc:
             print(f"Lỗi khi xử lý: {exc}\n")
             continue
 
-        final_response = _format_final_response(result.get("final_response", ""))
+        final_response = _response_from_result(result)
         _print_bot_response(final_response)
+        _print_visualization_output(result)
         _print_debug_routing(result, settings)
+        session_context.update(_session_context_from_result(result))
 
         history.append({"role": "user", "content": query})
         history.append({"role": "assistant", "content": final_response})

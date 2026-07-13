@@ -1,0 +1,96 @@
+{
+  "id": "weather_basic",
+  "kind": "complete_template",
+  "domain": "weather",
+  "name": "Weather Basic",
+  "description": "A deterministic weather dashboard template for current and forecast data.",
+  "template_file": "template.html",
+  "schema_versions": [
+    "weather.current.v1",
+    "weather.forecast.v1",
+    "weather.combined.v1"
+  ],
+  "required_fields": [
+    "location.name",
+    "current.temperature.current_celsius"
+  ],
+  "optional_fields": [
+    "location.country",
+    "current.condition.main",
+    "current.condition.description",
+    "current.temperature.current_celsius",
+    "current.temperature.feels_like_celsius",
+    "current.humidity_percent",
+    "current.pressure_hpa",
+    "current.wind.speed_mps",
+    "current.cloudiness_percent",
+    "forecast.source_granularity",
+    "forecast.days[].date",
+    "forecast.days[].temperature.min_celsius",
+    "forecast.days[].temperature.max_celsius",
+    "forecast.days[].max_rain_probability",
+    "forecast.days[].intervals[].time",
+    "forecast.days[].intervals[].temperature_celsius",
+    "forecast.days[].intervals[].condition.main",
+    "forecast.days[].intervals[].condition.description",
+    "forecast.days[].intervals[].rain_probability"
+  ],
+  "tags": [
+    "weather",
+    "dashboard",
+    "forecast"
+  ],
+  "fillable": true,
+  "style_targets": [
+    {
+      "id": "page_background",
+      "label": "nền toàn trang",
+      "selector": "body",
+      "properties": ["background_color"]
+    },
+    {
+      "id": "weather_hero",
+      "label": "vùng xanh-vàng phía trên của thẻ thời tiết",
+      "selector": ".hero",
+      "properties": ["background_color"]
+    },
+    {
+      "id": "metrics_section",
+      "label": "khu vực các chỉ số thời tiết",
+      "selector": ".metrics",
+      "properties": ["background_color"]
+    },
+    {
+      "id": "weather_card",
+      "label": "nền thẻ thời tiết",
+      "selector": ".weather-shell",
+      "properties": ["background_color"]
+    }
+  ],
+  "extension_points": [
+    {
+      "slot": "hero",
+      "selector": "[data-slot='hero']",
+      "allowed_operations": ["insert_component", "replace_component"],
+      "max_components": 1
+    },
+    {
+      "slot": "metrics",
+      "selector": "[data-slot='metrics']",
+      "allowed_operations": ["insert_component", "replace_component"],
+      "max_components": 6
+    },
+    {
+      "slot": "chart",
+      "selector": "[data-slot='chart']",
+      "allowed_operations": ["insert_component", "replace_component"],
+      "max_components": 2
+    },
+    {
+      "slot": "footer",
+      "selector": "[data-slot='footer']",
+      "allowed_operations": ["insert_component", "replace_component"],
+      "max_components": 2
+    }
+  ]
+}

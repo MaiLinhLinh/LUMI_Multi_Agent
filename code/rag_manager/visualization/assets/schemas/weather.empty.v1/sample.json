@@ -1,0 +1,20 @@
+{
+  "domain": "weather",
+  "schema_version": "weather.empty.v1",
+  "data_type": "empty",
+  "location": "",
+  "data": {
+    "location": {
+      "name": "",
+      "country": "",
+      "timezone_offset_seconds": null
+    },
+    "current": null,
+    "forecast": null
+  },
+  "source": {
+    "provider": "openweathermap",
+    "tools_used": []
+  },
+  "available_fields": []
+}
