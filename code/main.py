@@ -387,12 +387,16 @@ def main() -> None:
             _print_help()
             continue
 
+        turn_history = [
+            *history,
+            {"role": "user", "content": query},
+        ]
         try:
             result = _invoke_workflow_with_trace(
                 workflow,
                 {
                     "query": query,
-                    "history": list(history),
+                    "history": turn_history,
                     "settings": settings,
                     **session_context,
                 }
@@ -407,7 +411,7 @@ def main() -> None:
         _print_debug_routing(result, settings)
         session_context.update(_session_context_from_result(result))
 
-        history.append({"role": "user", "content": query})
+        history[:] = turn_history
         history.append({"role": "assistant", "content": final_response})
 
 

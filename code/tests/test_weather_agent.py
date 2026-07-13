@@ -134,16 +134,17 @@ def test_weather_langchain_usage_logs_each_llm_cache_result(capsys) -> None:
 def test_weather_agent_returns_tool_agent_result(monkeypatch) -> None:
     calls = []
 
-    def fake_run_weather_tool_agent(*, query, location_hint, store, settings):
+    def fake_run_weather_tool_agent(*, query, history, store, settings):
         calls.append(
             {
                 "query": query,
-                "location_hint": location_hint,
+                "history": history,
                 "store": store,
                 "settings": settings,
             }
         )
         return {
+            "status": "completed",
             "answer": "tool weather answer",
             "weather_data": {"location": "Ha Noi"},
             "llm_usage": {
@@ -161,7 +162,7 @@ def test_weather_agent_returns_tool_agent_result(monkeypatch) -> None:
     result = weather_agent.run_weather_agent(
         {
             "query": "Weather in Ha Noi",
-            "intent": {"location": "Ha Noi"},
+            "history": [{"role": "user", "content": "Weather in Ha Noi"}],
         },
         store=store,
         settings=settings,
@@ -170,12 +171,13 @@ def test_weather_agent_returns_tool_agent_result(monkeypatch) -> None:
     assert calls == [
         {
             "query": "Weather in Ha Noi",
-            "location_hint": "Ha Noi",
+            "history": [{"role": "user", "content": "Weather in Ha Noi"}],
             "store": store,
             "settings": settings,
         }
     ]
     assert result["weather_data"] == {"location": "Ha Noi"}
+    assert result["weather_status"] == "completed"
     assert result["weather_answer"] == "tool weather answer"
     assert result["cache_stats"]["weather"]["hits"] == 0
     assert result["cache_stats"]["weather"]["misses"] == 0
@@ -183,28 +185,92 @@ def test_weather_agent_returns_tool_agent_result(monkeypatch) -> None:
     assert result["llm_usage"]["weather"]["prompt_tokens"] == 50
 
 
-def test_manager_location_hint_is_resolved_but_full_query_is_not_used_as_hint() -> None:
+def test_validator_resolves_location_without_manager_hint() -> None:
     resolver = StubLocationResolver()
-    tools, _tool_state = weather_agent.build_weather_tools(
+    tools, tool_state = weather_agent.build_weather_tools(
         store=StubWeatherStore(),
-        location_hint="Hà Nội",
         resolver=resolver,
     )
 
-    result = _tool_by_name(tools, "resolve_weather_location").invoke(
-        {"location_text": ""}
+    result = _tool_by_name(tools, "validate_weather_request").invoke(
+        {
+            "location_text": "Hà Nội",
+            "time_text": "hiện tại",
+            "request_type_candidate": "current",
+        }
     )
 
-    assert result["location_id"] == "ha_noi"
+    assert result == {
+        "status": "ready_for_redis",
+        "request": {"request_type": "current", "location_id": "ha_noi"},
+    }
     assert resolver.calls == ["Hà Nội"]
-    assert weather_agent.extract_weather_location(
-        {"query": "Thời tiết Hà Nội hôm nay", "intent": {}}
-    ) == ""
+    assert "ha_noi" in tool_state["resolved_locations"]
+
+
+def test_validator_returns_location_clarification_before_time_validation() -> None:
+    class MissingLocationResolver:
+        def resolve(self, location_text: str) -> dict:
+            return {
+                "ok": False,
+                "error": {
+                    "source": "weather_location_resolver",
+                    "code": "location_not_found",
+                    "message": "not found",
+                    "status_code": None,
+                },
+                "candidates": [],
+            }
+
+    store = StubWeatherStore()
+    tools, tool_state = weather_agent.build_weather_tools(
+        store=store,
+        resolver=MissingLocationResolver(),
+        reference_datetime=datetime(2026, 7, 13, 10, tzinfo=ZoneInfo("Asia/Ho_Chi_Minh")),
+    )
+
+    result = _tool_by_name(tools, "validate_weather_request").invoke(
+        {
+            "location_text": "Paris",
+            "time_text": "thứ Tư ngày 17/7/2026",
+            "request_type_candidate": "forecast",
+        }
+    )
+
+    assert result["stage"] == "location"
+    assert result["code"] == "location_not_found"
+    assert tool_state["weather_status"] == "needs_clarification"
+    assert store.current_calls == []
+    assert store.forecast_calls == []
+
+
+def test_weekday_date_conflict_never_accesses_redis() -> None:
+    store = StubWeatherStore()
+    tools, tool_state = weather_agent.build_weather_tools(
+        store=store,
+        resolver=StubLocationResolver(),
+        reference_datetime=datetime(2026, 7, 13, 10, tzinfo=ZoneInfo("Asia/Ho_Chi_Minh")),
+    )
+
+    result = _tool_by_name(tools, "validate_weather_request").invoke(
+        {
+            "location_text": "Hà Nội",
+            "time_text": "thứ Tư ngày 17/7/2026",
+            "request_type_candidate": "forecast",
+        }
+    )
+
+    assert result["stage"] == "time"
+    assert result["code"] == "weekday_date_conflict"
+    assert result["details"]["matching_weekday_date"] == "2026-07-15"
+    assert tool_state["weather_status"] == "needs_clarification"
+    assert store.forecast_calls == []
 
 
 def test_current_weather_tool_reads_active_redis_snapshot() -> None:
     cached_data = {
         "location": "Ha Noi",
+        "timezone_offset_seconds": 25200,
         "temperature": {"current_celsius": 30},
         "condition": {"description": "cloudy"},
     }
@@ -214,17 +280,21 @@ def test_current_weather_tool_reads_active_redis_snapshot() -> None:
     resolver = StubLocationResolver()
     tools, tool_state = weather_agent.build_weather_tools(
         store=store,
-        location_hint="Ha Noi",
         resolver=resolver,
     )
 
-    resolution = _tool_by_name(tools, "resolve_weather_location").invoke(
-        {"location_text": "Ha Noi"}
+    validation = _tool_by_name(tools, "validate_weather_request").invoke(
+        {
+            "location_text": "Ha Noi",
+            "time_text": "bây giờ",
+            "request_type_candidate": "current",
+        }
     )
     result = _tool_by_name(tools, "get_current_weather").invoke(
-        {"location_id": resolution["location_id"]}
+        {"location_id": "llm_must_not_override_validated_id"}
     )
 
+    assert validation["status"] == "ready_for_redis"
     assert result == {"ok": True, "data": cached_data, "cached": True}
     assert tool_state["last_weather_data"] == cached_data
     assert store.current_calls == ["ha_noi"]
@@ -236,12 +306,15 @@ def test_current_weather_tool_returns_missing_snapshot_error() -> None:
     store = StubWeatherStore()
     tools, tool_state = weather_agent.build_weather_tools(
         store=store,
-        location_hint="Hà Nội",
         resolver=StubLocationResolver(),
     )
 
-    _tool_by_name(tools, "resolve_weather_location").invoke(
-        {"location_text": "Hà Nội"}
+    _tool_by_name(tools, "validate_weather_request").invoke(
+        {
+            "location_text": "Hà Nội",
+            "time_text": "hiện tại",
+            "request_type_candidate": "current",
+        }
     )
     result = _tool_by_name(tools, "get_current_weather").invoke(
         {"location_id": "ha_noi"}
@@ -252,6 +325,37 @@ def test_current_weather_tool_returns_missing_snapshot_error() -> None:
     assert "No active weather snapshot" in result["error"]["message"]
     assert tool_state["last_weather_data"]["location"] == "Hà Nội"
     assert tool_state["last_weather_data"]["location_id"] == "ha_noi"
+    assert tool_state["weather_status"] == "unavailable"
+
+
+def test_snapshot_timezone_mismatch_is_a_technical_error() -> None:
+    store = StubWeatherStore(
+        current={
+            "ok": True,
+            "data": {"location": "Hà Nội", "timezone_offset_seconds": 0},
+            "cached": True,
+        }
+    )
+    tools, tool_state = weather_agent.build_weather_tools(
+        store=store,
+        resolver=StubLocationResolver(),
+    )
+    _tool_by_name(tools, "validate_weather_request").invoke(
+        {
+            "location_text": "Hà Nội",
+            "time_text": "hiện tại",
+            "request_type_candidate": "current",
+        }
+    )
+
+    result = _tool_by_name(tools, "get_current_weather").invoke(
+        {"location_id": "ha_noi"}
+    )
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "snapshot_timezone_mismatch"
+    assert tool_state["weather_status"] == "error"
+    assert "current_weather_data" not in tool_state
 
 
 def test_weather_data_tool_requires_resolver_first() -> None:
@@ -269,49 +373,47 @@ def test_weather_data_tool_requires_resolver_first() -> None:
     )
 
     assert result["ok"] is False
-    assert result["error"]["code"] == "location_not_resolved"
+    assert result["error"]["code"] == "tool_call_mismatch"
     assert store.current_calls == []
 
 
-def test_forecast_tool_reads_bounded_range_from_redis() -> None:
+def test_validator_rejects_forecast_longer_than_five_days() -> None:
     store = StubWeatherStore(
         forecast={
             "ok": True,
             "cached": True,
-            "data": {
-                "location": "Ha Noi",
-                "requested_days": 5,
-                "days": [{"date": f"2026-07-{day:02d}"} for day in range(10, 15)],
-            },
+                "data": {},
         }
     )
     tools, tool_state = weather_agent.build_weather_tools(
         store=store,
-        location_hint="Ha Noi",
         resolver=StubLocationResolver(),
+        reference_datetime=datetime(2026, 7, 13, 10, tzinfo=ZoneInfo("Asia/Ho_Chi_Minh")),
     )
 
-    _tool_by_name(tools, "resolve_weather_location").invoke(
-        {"location_text": "Ha Noi"}
-    )
-    result = _tool_by_name(tools, "get_weather_forecast").invoke(
-        {"location_id": "ha_noi", "days": 9}
+    result = _tool_by_name(tools, "validate_weather_request").invoke(
+        {
+            "location_text": "Ha Noi",
+            "time_text": "9 ngày tới",
+            "request_type_candidate": "forecast",
+        }
     )
 
-    assert store.forecast_calls == [("ha_noi", 5, None)]
-    assert result["ok"] is True
-    assert result["data"]["requested_days"] == 5
-    assert tool_state["last_weather_data"]["requested_days"] == 5
+    assert result["status"] == "needs_clarification"
+    assert result["code"] == "forecast_range_exceeded"
+    assert tool_state["weather_status"] == "needs_clarification"
+    assert store.forecast_calls == []
 
 
 def test_forecast_tool_filters_from_explicit_start_date() -> None:
-    today = datetime.now(ZoneInfo("Asia/Bangkok")).date()
+    today = datetime.now(ZoneInfo("Asia/Ho_Chi_Minh")).date()
     tomorrow = (today + timedelta(days=1)).isoformat()
     store = StubWeatherStore(
         forecast={
             "ok": True,
-            "data": {
-                "location": "Ha Noi",
+                "data": {
+                    "location": "Ha Noi",
+                    "timezone_offset_seconds": 25200,
                 "requested_days": 3,
                 "days": [{"date": tomorrow}, {"date": "2099-01-01"}],
             },
@@ -319,19 +421,23 @@ def test_forecast_tool_filters_from_explicit_start_date() -> None:
     )
     tools, tool_state = weather_agent.build_weather_tools(
         store=store,
-        location_hint="Ha Noi",
         query="Thời tiết Hà Nội ngày mai",
         resolver=StubLocationResolver(),
     )
 
-    _tool_by_name(tools, "resolve_weather_location").invoke(
-        {"location_text": "Hà Nội"}
+    validation = _tool_by_name(tools, "validate_weather_request").invoke(
+        {
+            "location_text": "Hà Nội",
+            "time_text": "ngày mai",
+            "request_type_candidate": "forecast",
+        }
     )
     result = _tool_by_name(tools, "get_weather_forecast").invoke(
         {"location_id": "ha_noi", "days": 1, "start_date": tomorrow}
     )
 
     assert store.forecast_calls == [("ha_noi", 1, tomorrow)]
+    assert validation["request"]["start_date"] == tomorrow
     assert result["data"]["requested_days"] == 1
     assert result["data"]["requested_start_date"] == tomorrow
     assert result["data"]["days"] == [{"date": tomorrow}]

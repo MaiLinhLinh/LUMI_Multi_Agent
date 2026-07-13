@@ -61,7 +61,7 @@ class FakeVisualizationOrchestrator:
 def test_domain_question_runs_manager_weather_aggregate_then_visualize(monkeypatch) -> None:
     calls: list[str] = []
 
-    def fake_classify_intent(client, query: str) -> dict:
+    def fake_classify_intent(client, query: str, history=None) -> dict:
         calls.append("manager")
         return {
             "topics": ["weather"],

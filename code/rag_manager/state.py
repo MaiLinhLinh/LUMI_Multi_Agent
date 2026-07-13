@@ -8,6 +8,17 @@ from typing import Any, Literal, TypedDict
 ExecutionMode = Literal["single", "parallel", "sequential"]
 InputRoute = Literal["domain", "visualize"]
 AgentTopic = Literal["weather", "news", "wiki"]
+WeatherRequirementStatus = Literal[
+    "not_applicable",
+    "needs_clarification",
+    "ready_for_weather",
+]
+WeatherStatus = Literal[
+    "needs_clarification",
+    "unavailable",
+    "error",
+    "completed",
+]
 
 
 class PlanDependency(TypedDict):
@@ -18,6 +29,16 @@ class PlanDependency(TypedDict):
     reason: str
 
 
+class WeatherRequirements(TypedDict):
+    """Manager-level presence check for a weather request."""
+
+    status: WeatherRequirementStatus
+    has_location_expression: bool
+    has_time_expression: bool
+    missing_fields: list[Literal["location", "time"]]
+    clarification_question: str | None
+
+
 class ManagerPlan(TypedDict):
     """Validated routing plan produced by the Manager Agent."""
 
@@ -25,10 +46,10 @@ class ManagerPlan(TypedDict):
     execution_mode: ExecutionMode
     primary_intent: AgentTopic
     dependencies: list[PlanDependency]
-    location: str
     news_query: str
     wiki_topic: str
     reason: str
+    weather_requirements: WeatherRequirements
 
 
 class CacheStats(TypedDict, total=False):
@@ -85,11 +106,14 @@ class AgentState(TypedDict, total=False):
     visualization_orchestrator: Any
     input_route: InputRoute
     intent: ManagerPlan
+    manager_status: str
     execution_mode: ExecutionMode
     selected_agents: list[AgentTopic]
     context: dict[str, Any]
     weather_data: dict[str, Any]
     weather_answer: str
+    weather_status: WeatherStatus
+    weather_error: dict[str, Any]
     news_data: dict[str, Any]
     news_answer: str
     wiki_data: dict[str, Any]

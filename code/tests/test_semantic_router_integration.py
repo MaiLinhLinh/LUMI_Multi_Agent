@@ -89,7 +89,7 @@ def test_domain_semantic_route_runs_domain_workflow(monkeypatch):
     manager_queries = []
     orchestrator = FakeVisualizationOrchestrator()
 
-    def fake_manager(client, query):
+    def fake_manager(client, query, history=None):
         manager_queries.append(query)
         return {
             "topics": ["weather"],

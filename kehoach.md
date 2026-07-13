@@ -1,301 +1,504 @@
-Kiến trúc đích nên là:
-Cấu hình 63 tỉnh: location_id + aliases + lat/lon
-        ↓
-Background Worker gọi OpenWeather bằng lat/lon mỗi 3 giờ
-        ↓
-Chuẩn hóa + giữ nguyên raw response
-        ↓
-Ghi snapshot Redis theo location_id
-        ↓
-Weather Agent extract cụm địa danh
-        ↓
-resolve_location tool → location_id
-        ↓
-weather tools đọc Redis
-        ↓
-Weather Agent tổng hợp câu trả lời
-Kế hoạch triển khai
-1. Chốt danh mục 63 địa điểm
-Mỗi địa điểm phải có ID ổn định, không phụ thuộc tên OpenWeather:
-{
-  "id": "nghe_an",
-  "name": "Nghệ An",
-  "aliases": [
-    "Nghe An",
-    "nghean",
-    "tỉnh Nghệ An"
-  ],
-  "latitude": 18.6796,
-  "longitude": 105.6813,
-  "center_type": "administrative_center",
-  "coordinate_source": "manual_verified",
-  "active": true
-}
-Yêu cầu:
-Đúng 63 location_id duy nhất.
-Tọa độ nằm trong phạm vi Việt Nam.
-Chọn trung tâm hành chính/tỉnh lỵ, không dùng tâm hình học.
-Tọa độ phải được kiểm tra thủ công, không tự động lấy ứng viên đầu tiên từ Geocoding.
-Ghi rõ nguồn và ngày xác minh tọa độ.
-Không gọi Geocoding API trong request người dùng.
-Đầu ra: cập nhật [weather_locations_vn.json](D:/RAG_ManageAgent_Lumi/code/rag_manager/services/weather_locations_vn.json).
-2. Viết validator cho file địa điểm
-Trước khi worker chạy, kiểm tra:
-Có đúng 63 địa điểm.
-Không trùng id.
-Không trùng alias sau khi chuẩn hóa.
-latitude và longitude hợp lệ.
-Không thiếu tên hoặc tọa độ.
-Khoảng cách giữa các tọa độ không bất thường.
-Tất cả alias đều trỏ được về một location_id.
-Nếu cấu hình sai, worker dừng trước khi gọi OpenWeather.
-3. Chuyển OpenWeather service sang tọa độ
-Trong weather_api.py, bổ sung hoặc chuyển sang:
-fetch_weather_by_coordinates(latitude, longitude)
-fetch_weather_forecast_by_coordinates(latitude, longitude, days)
-Request sử dụng:
-lat={latitude}
-lon={longitude}
-units=metric
-lang=vi
-Không còn dùng:
-q=Nghệ An,VN
-Cần giữ hai dạng dữ liệu:
-raw_data: toàn bộ JSON OpenWeather trả về, không sửa đổi.
-normalized_data: schema ổn định cho Weather Agent và visualization.
-4. Chuẩn hóa đầy đủ dữ liệu thời tiết
-Current weather nên chuẩn hóa:
-Thời điểm quan sát UTC và giờ địa phương.
-Nhiệt độ, cảm giác như, thấp/cao.
-Trạng thái, mô tả, icon/code.
-Độ ẩm, áp suất, tầm nhìn.
-Tốc độ, hướng và gió giật.
-Mây, mưa, tuyết nếu có.
-Bình minh, hoàng hôn.
-Tọa độ nguồn.
-Forecast nên giữ:
-Toàn bộ interval theo dữ liệu API.
-Ngày và giờ địa phương.
-Nhiệt độ, cảm giác như.
-Xác suất và lượng mưa.
-Độ ẩm, áp suất, gió, mây.
-Tổng hợp theo ngày.
-Phạm vi ngày thực sự có trong snapshot.
-Không để LLM tự tính min/max hoặc tổng lượng mưa nếu code có thể tính chính xác.
-5. Thiết kế snapshot worker
-Mỗi chu kỳ 3 giờ:
-Đọc và validate file 63 tỉnh.
-Với từng tỉnh, gọi Current và Forecast bằng tọa độ.
-Phân loại lỗi:401: API key.
-429: quota.
-timeout/5xx: lỗi tạm thời, retry có giới hạn.
-payload thiếu trường: lỗi dữ liệu.
+**giữ một node weather; Manager nhận thấy người dùng muốn hỏi thời tiết nhưng thiếu thông tin rõ ràng thì hỏi trước những thông tin thiếu rõ ràng, và Manager chỉ nhận biết có biểu thức địa điểm/thời gian, không chuẩn hóa địa điểm, không tạo location_id và không validate lịch; Weather Agent tự extract location và time và xác thực lại; chỉ khi cả location\_id và canonical time hợp lệ mới đọc Redis và tiếp tục Aggregate → Visualization. còn không hợp lệ thì phải hỏi lại**
 
-Chuẩn hóa dữ liệu.
-Tạo snapshot_id.
-Ghi snapshot staging vào Redis.
-Chỉ chuyển active snapshot khi dữ liệu đạt chính sách chất lượng.
-Nên retry theo exponential backoff cho timeout, 429 và 5xx; không retry vô hạn.
-6. Chọn chính sách khi một tỉnh tải lỗi
-Khuyến nghị không bỏ cả snapshot chỉ vì một tỉnh lỗi tạm thời.
-Nên áp dụng:
-Tỉnh thành công: dùng dữ liệu mới.
-Tỉnh thất bại: lấy bản last-known-good.
-Đánh dấu:
-{
-  "stale": true,
-  "stale_since": "...",
-  "refresh_error": {}
-}
-Nếu dữ liệu cũ vượt ngưỡng, ví dụ 6–12 giờ, đánh dấu unavailable.
-Manifest phải ghi số tỉnh mới, stale và unavailable.
-Trong lần bootstrap đầu tiên, nên yêu cầu đủ 63 tỉnh hoặc có danh sách ngoại lệ được xác nhận rõ ràng.
-7. Thiết kế lại Redis theo location_id
-Không lưu payload lặp lại cho từng alias.
-Cấu trúc đề xuất:
-weather:snapshot:active
-    → snapshot_id
+### Lưu ý khi triển khai: Manager phải nhận user message chứa query + history; Weather Agent phải truyền trực tiếp history vào messages và không append query thêm lần nữa
 
-weather:snapshot:{id}:manifest
-    → metadata snapshot
+# luồng:
+Input + history
+    → Semantic Router(query, history)
+    → Manager Agent(query, history)
+        │
+        ├─ Không có weather
+        │   → tiếp tục routing hiện tại
+        │
+        └─ Có weather
+            → Manager kiểm tra presence
+                ├─ có location expression?
+                └─ có time expression?
+                    │
+                    ├─ Thiếu location hoặc time
+                    │   → manager_status = needs_clarification
+                    │   → final_response = câu hỏi bổ sung
+                    │   → không gọi node weather
+                    │   → END
+                    │
+                    └─ Có cả hai expression
+                        → route vào node weather hiện tại
 
-weather:snapshot:{id}:location:nghe_an
-    → current + forecast + raw + normalized
 
-weather:location_aliases
-    nghean       → nghe_an
-    nghe-an      → nghe_an
-    tinh-nghe-an → nghe_an
-Tọa độ nằm trong metadata của record:
+Node weather
+    │
+    ├─ LLM2 nhận:
+    │   ├─ query
+    │   ├─ history
+    │  
+    │
+    ├─ LLM2 extract đồng thời:
+    │   ├─ location_text
+    │   └─ time_text
+    │
+    ├─ Kiểm tra extraction
+    │   │
+    │   ├─ Thiếu location_text hoặc time_text
+    │   │   → weather_status = needs_clarification
+    │   │   → weather_answer = câu hỏi bổ sung
+    │   │   → final_response = weather_answer
+    │   │   → không gọi location resolver
+    │   │   → không gọi data tool
+    │   │   → không truy cập Redis
+    │   │   → END
+    │   │
+    │   └─ Extract đủ
+    │       → tiếp tục validate
+
+LLM2 gọi validate_weather_request(...)
+    │
+    ├─ Bước 1: resolve_weather_location(location_text)   # giữ nguyên
+    │   ├─ location không hợp lệ
+    │   │   → return needs_clarification/location
+    │   │   → LLM2 sinh câu hỏi địa điểm
+    │   │   → không kiểm tra time
+    │   │   → không gọi Redis
+    │   │
+    │   └─ location hợp lệ
+    │       → location_id nằm trong resolved_locations
+    │
+    ├─ Bước 2: validate time bằng Python
+    │   ├─ dùng Asia/Ho_Chi_Minh
+    │   ├─ parse thời gian tương đối/tuyệt đối
+    │   ├─ đối chiếu ngày–thứ
+    │   └─ kiểm tra tối đa 5 ngày
+    │
+    │   ├─ time không hợp lệ
+    │   │   → return needs_clarification/time
+    │   │   → LLM2 sinh câu hỏi thời gian
+    │   │   → không gọi Redis
+    │   │
+    │   └─ time hợp lệ
+    │
+    └─ Bước 3: code tạo ready_for_redis
+        → lưu vào tool_state
+        → trả kết quả cho LLM2
+
+    
+    ├─ LLM2 đề xuất data tool call
+    │   │
+    │   ├─ ready_for_redis.request_type = current
+    │   │   → get_current_weather(location_id)
+    │   │
+    │   └─ ready_for_redis.request_type = forecast
+    │       → get_weather_forecast(
+    │             location_id,
+    │             days,
+    │             start_date
+    │         )
+    │
+    ├─ WeatherDataToolGate kiểm tra tool call
+    │   │
+    │   ├─ validated request có status = ready_for_redis?
+    │   ├─ tool name có khớp request_type?
+    │   ├─ location_id có khớp validated request?
+    │   ├─ start_date có khớp validated request?
+    │   └─ days có khớp validated request?
+    │
+    │   ├─ Tool call không khớp
+    │   │   → chặn tool call kèm ghi log lỗi kĩ thuật
+    │   │   → không truy cập Redis
+    │   │   → weather_status = error - có nghĩa là tool gặp lỗi kĩ thuật không khớp validated weather request
+    │   │
+    │   └─ Tool call khớp
+    │       → cho phép thực thi tool hiện tại
+
+
+    ├─ Truy xuất Redis bằng 6 hàm hiện tại
+    │   │
+    │   ├─ Current
+    │   │   → get_current_weather(location_id)
+    │   │   → _require_resolved_location(tool_state, location_id)
+    │   │       ├─ chưa resolve → location_not_resolved
+    │   │       └─ đã resolve
+    │   │           → RedisWeatherStore.get_current(location_id)
+    │   │           → đọc section current từ active snapshot
+    │   │
+    │   └─ Forecast
+    │       → get_weather_forecast(location_id, days, start_date)
+    │       → _require_resolved_location(tool_state, location_id)
+    │           ├─ chưa resolve → location_not_resolved
+    │           └─ đã resolve
+    │               → RedisWeatherStore.get_forecast(
+    │                     location_id,
+    │                     days=days,
+    │                     start_date=start_date
+    │                 )
+    │               → đọc section forecast từ active snapshot
+    │               → lọc từ start_date
+    │               → lấy tối đa days
+
+
+    ├─ Kiểm tra response Redis
+    │   │
+    │   ├─ Không có active snapshot/dữ liệu location
+    │   │   → weather_status = unavailable
+    │   │   → weather_answer = thông báo thiếu dữ liệu cache
+    │   │   → final_response = weather_answer
+    │   │   → không bịa dữ liệu
+    │   │   → không Visualization
+    │   │   → END
+    │   │
+    │   ├─ Forecast response không chứa đúng start_date
+    │   │   → weather_status = unavailable
+    │   │   → weather_answer = thông báo snapshot không có ngày yêu cầu
+    │   │   → final_response = weather_answer
+    │   │   → không dùng ngày kế tiếp thay thế
+    │   │   → không Visualization
+    │   │   → END
+    │   │
+    │   └─ Redis response hợp lệ
+    │       → lưu current_weather_data hoặc forecast_weather_data
+    │       → build weather_data envelope
+    │       → LLM2 tạo weather_answer từ tool result
+    │       → weather_status = completed
+
+
+    └─ Graph routing sau node weather
+        │
+        ├─ needs_clarification
+        │   → final_response đã có
+        │   → không Aggregate
+        │   → không Visualization
+        │   → END
+        │
+        ├─ unavailable
+        │   → final_response đã có
+        │   → không Visualization
+        │   → END
+        │
+        ├─ error
+        │   → tạo weather_error và thông báo lỗi hệ thống
+        │   → final_response
+        │   → không Visualization weather
+        │   → END
+        │
+        └─ completed
+            → Aggregate
+            → Visualization
+            → END
+## Quy định 
+1. Manager đánh giá trên query + history
+Manager không chỉ kiểm tra câu "Ngày mai" mà phải tổng hợp ngữ cảnh liên quan:
+History cung cấp ý định weather và địa điểm Hà Nội.
+Query mới nhất cung cấp thời gian "Ngày mai".
+Kết quả: đã có cả location và time → chuyển vào Weather Agent.
+
+2. Weather Agent nhận được câu hỏi gốc qua history
+Với schema:
 {
-  "location": {
-    "id": "nghe_an",
-    "name": "Nghệ An",
-    "latitude": 18.6796,
-    "longitude": 105.6813
-  }
-}
-Redis được tra theo location_id; tọa độ chỉ dùng ở worker.
-TTL nên dài hơn chu kỳ refresh. Ví dụ refresh 3 giờ nhưng giữ snapshot cũ đủ lâu để rollback hoặc sử dụng last-known-good.
-8. Tạo resolve_location tool
-Tool nhận cụm địa danh do Weather Agent extract:
-{
-  "raw_location": "nghe annn"
-}
-Tool thực hiện:
-Chuẩn hóa Unicode, viết hoa/thường, dấu cách.
-So khớp chính xác với name/alias.
-Fuzzy matching với danh mục 63 tỉnh.
-Trả kết quả có cấu trúc:
-{
-  "status": "resolved",
-  "location_id": "nghe_an",
-  "canonical_name": "Nghệ An",
-  "score": 0.94
-}
-Nếu nhập nhằng:
-{
-  "status": "ambiguous",
-  "candidates": [
-    {"location_id": "...", "name": "...", "score": 0.72}
+  "query": "Ngày mai",
+  "history": [
+    {
+      "role": "user",
+      "content": "Thời tiết Hà Nội thế nào?"
+    },
+    {
+      "role": "assistant",
+      "content": "Bạn muốn xem thời tiết Hà Nội vào thời điểm nào?"
+    },
+    {
+      "role": "user",
+      "content": "Ngày mai"
+    }
   ]
 }
-Weather Agent không được tự tạo location_id.
-9. Đổi weather tools sang nhận location_id
-Các tool nên là:
-resolve_location(raw_location)
-get_current_time(timezone_name)
-get_current_weather(location_id)
-get_weather_forecast(location_id, days)
-Quy tắc:
-get_current_weather và get_weather_forecast chỉ nhận ID hợp lệ.
-Tool xác nhận ID tồn tại trong catalog.
-Tool lấy active snapshot.
-Tool đọc Redis, không gọi OpenWeather.
-Tool trả kèm:snapshot ID;
-thời gian tạo snapshot;
-tọa độ đại diện;
-stale;
-phạm vi forecast có sẵn;
-lỗi nếu dữ liệu unavailable.
-
-Việc lọc “ngày mai”, “thứ năm tới”, “3 ngày tới” nên được code/tool thực hiện theo ngày cụ thể sau khi Agent xác định yêu cầu.
-10. Sửa Weather Agent prompt
-Prompt nên quy định rõ:
-Extract cụm địa danh từ câu hỏi.
-Luôn gọi resolve_location trước weather tools.
-Không tự đoán location_id hoặc tọa độ.
-Nếu ambiguous, hỏi lại người dùng.
-Dùng get_current_time cho ngày tương đối.
-Chỉ trả lời bằng dữ liệu Redis do tool trả về.
-Thông báo nếu snapshot stale/unavailable.
-Không tuyên bố đã gọi OpenWeather trực tiếp.
-Giải thích dữ liệu tỉnh đại diện cho tọa độ trung tâm hành chính.
-Không xuất hidden reasoning.
-Không nên nhúng toàn bộ dữ liệu thời tiết hay danh sách tọa độ vào system prompt. Giữ system prompt cố định để thuận lợi cho prefix cache.
-11. Phân chia lại trách nhiệm Manager và Weather Agent
-Manager chỉ cần:
-Xác định đây là câu hỏi thời tiết.
-Chuyển toàn bộ câu hỏi sang Weather Agent.
-Có thể cung cấp location_hint, nhưng không canonicalize.
-Weather Agent chịu trách nhiệm:
-Hiểu câu hỏi.
-Extract địa danh.
-Resolve địa danh qua tool.
-Chọn current hay forecast tool.
-Tổng hợp câu trả lời.
-Như vậy tránh việc Manager và Weather Agent cùng xử lý địa danh hai lần.
-12. Giữ tương thích visualization
-Weather envelope nên bổ sung nhưng không phá schema hiện tại:
+Weather agent phải extract trên toàn bộ đoạn hội thoại liên quan, không chỉ trên query. Vì vậy nó tổng hợp được:
 {
-  "location": {
-    "id": "nghe_an",
-    "name": "Nghệ An",
-    "latitude": 18.6796,
-    "longitude": 105.6813
-  },
-  "source": {
-    "provider": "openweathermap",
-    "snapshot_id": "...",
-    "generated_at": "...",
-    "stale": false
+  "location_text": "Hà Nội hoặc null",
+  "time_text": "ngày mai hoặc null",
+  "request_type_candidate": "current | forecast | null"
+}
+Sau đó mới resolve location, validate time và tạo ready_for_redis
+
+3. Không đưa query vào message LLM hai lần
+Về interface, cả Manager và Weather Agent vẫn nhận:
+query + history
+Nhưng vì history đã chứa query mới nhất, khi dựng danh sách message gửi LLM thì không append thêm "Ngày mai" lần nữa. query được giữ riêng để:
+Xác định input mới nhất.
+Ưu tiên thông tin mới hơn lịch sử.
+Kiểm tra query có tiếp nối ngữ cảnh cũ hay chuyển chủ đề.
+Phục vụ routing và logging.
+
+
+4. Cần quy định rõ Python mới là nguồn quyết định request_type; request_type_candidate của LLM2 chỉ là gợi ý. Đồng thời phải chốt:
+“hiện tại/bây giờ” → current
+ngày cụ thể/ngày mai/khoảng ngày → forecast
+“hôm nay” dùng forecast
+#### khoảng ngày tính days theo số ngày ( ví dụ ngày mai thì days = 1)
+13/7 đến 15/7 → start_date=2026-07-13, days=3
+3 ngày tới → từ ngày mai, days=3
+
+cách hiểu “thứ Tư” khi không có “tuần này/tuần tới" -> thì phải hỏi lại.
+
+5. Semantic Router phải dựa trên history cho khoảng 2-3 câu tiếp nối trước khi chạy nhánh phân loại nhanh chỉ dựa trên query. Nếu không, query "Ngày mai" vẫn có thể không được nhận ra là weather.
+
+6. WeatherDataToolGate nên lấy tham số thực thi trực tiếp từ weather_validation.request; không nên tin tham số do LLM2 gửi. Tool name sai thì chặn, tool name đúng thì code dùng bộ tham số đã validate.
+7. Cần chốt nhánh multi-intent: nếu người dùng vừa hỏi weather thiếu dữ liệu vừa hỏi news/wiki, Manager sẽ dừng lại hỏi ý định người dùng là gì.
+
+8. Quy định đúng về reference_datetime
+Nên bổ sung:
+WEATHER_TIMEZONE = "Asia/Ho_Chi_Minh"
+EXPECTED_TIMEZONE_OFFSET_SECONDS = 25200
+
+reference_datetime = datetime.now(ZoneInfo(WEATHER_TIMEZONE))
+
+reference_datetime:
+Do Python tạo một lần trong validator.
+Không nhận từ LLM2.
+Dùng để tính “hôm nay”, “ngày mai” theo giờ Việt Nam.
+Canonical start_date phải cùng hệ ngày địa phương với forecast.days[].date trong snapshot.
+Sau khi đọc Redis, kiểm tra timezone_offset_seconds == 25200 và ngày đầu tiên đúng start_date
+
+# schema output
+
+## Conversation input schema
+{
+  "query": "Ngày mai",
+  "history": [
+    {
+      "role": "user",
+      "content": "Thời tiết Hà Nội thế nào?"
+    },
+    {
+      "role": "assistant",
+      "content": "Bạn muốn xem thời tiết Hà Nội vào thời điểm nào?"
+    },
+    {
+      "role": "user",
+      "content": "Ngày mai"
+    }
+  ]
+}
+Quy định:
+query là input mới nhất.
+history là toàn bộ hội thoại và đã chứa query ở message cuối.
+history[-1] phải là user message có content == query.
+Chỉ chấp nhận role user và assistant.
+Khi tạo message cho LLM, không append query lần thứ hai.
+Query mới nhất được ưu tiên nếu mâu thuẫn với thông tin cũ.
+History cũ chỉ được dùng nếu có liên quan đến yêu cầu hiện tại.
+
+## Manager output
+{
+  "topics": ["weather"],
+  "execution_mode": "single",
+  "primary_intent": "weather",
+  "dependencies": [],
+  "news_query": "",
+  "wiki_topic": "",
+  "reason": "Người dùng hỏi thời tiết.",
+  "weather_requirements": {
+    "status": "needs_clarification",
+    "has_location_expression": true,
+    "has_time_expression": false,
+    "missing_fields": ["time"],
+    "clarification_question": "Bạn muốn xem thời tiết Hà Nội vào thời điểm nào?"
   }
 }
-Renderer vẫn chỉ nhận dữ liệu đã chuẩn hóa, loop, escape và thay placeholder.
-13. Kiểm thử
-Cần có các nhóm test:
-Catalog có đúng 63 tỉnh.
-Tọa độ và ID hợp lệ.
-Worker gọi API bằng lat/lon, không còn q.
-Raw response không bị sửa đổi.
-Snapshot chỉ active sau khi ghi hoàn chỉnh.
-Alias không làm lặp payload Redis.
-Resolver xử lý:nghean;
-nghe annn;
-tp hcm;
-sai gon;
-nhập nhằng hoặc không tìm thấy.
 
-Weather tools từ chối ID không hợp lệ.
-“hôm nay”, “ngày mai”, “thứ năm tới”, “3 ngày tới”.
-Redis lỗi, snapshot stale, thiếu forecast.
-Visualization vẫn render đúng.
-14. Thứ tự triển khai an toàn
-Nên thực hiện theo thứ tự:
-Chuẩn hóa file 63 tỉnh và tọa độ.
-Viết catalog validator.
-Bổ sung API gọi bằng tọa độ.
-Cập nhật worker nhưng chưa thay luồng chatbot.
-Thiết kế Redis schema mới.
-Nạp và kiểm tra một snapshot hoàn chỉnh.
-Tạo resolve_location tool.
-Chuyển weather tools sang location_id.
-Sửa Weather Agent prompt.
-Chạy integration test.
-Chuyển chatbot sang Redis-only.
-Sau khi ổn định mới xóa luồng gọi OpenWeather bằng tên và schema Redis cũ.
-Tiêu chí hoàn thành quan trọng nhất: request của người dùng không gọi OpenWeather, không tự suy luận tọa độ, không lưu lặp payload theo alias, và mọi dữ liệu trả lời đều truy vết được về location_id, tọa độ, snapshot và raw response.
+Ba giá trị hợp lệ của weather_requirements.status:
+not_applicable
+needs_clarification
+ready_for_weather
+ready_for_weather chỉ có nghĩa là trong query + history đã xuất hiện địa điểm và thời gian. Nó không có nghĩa là location/time đã được xác thực và hoàn toàn không tương đương với ready_for_redis
 
 
-2:27 PM
+Ví dụ thiếu location
+Input:
+Thời tiết ngày 13/7/2026 thế nào?
+Manager output:
+{
+  "weather_requirements": {
+    "status": "needs_clarification",
+    "has_location_expression": false,
+    "has_time_expression": true,
+    "missing_fields": ["location"],
+    "clarification_question": "Bạn muốn xem thời tiết ngày 13/07/2026 ở đâu?"
+  }
+}
+
+Ví dụ thiếu time
+Input:
+Thời tiết Hà Nội thế nào?
+Manager output:
+{
+  "weather_requirements": {
+    "status": "needs_clarification",
+    "has_location_expression": true,
+    "has_time_expression": false,
+    "missing_fields": ["time"],
+    "clarification_question": "Bạn muốn xem thời tiết Hà Nội vào thời điểm nào?"
+  }
+}
+
+Ví dụ đủ biểu thức nhưng chưa chắc hợp lệ
+Input:
+Thứ 4 ngày 17/7/2026 thời tiết Hà Nội thế nào?
+Manager chỉ xác định:
+{
+  "weather_requirements": {
+    "status": "ready_for_weather",
+    "has_location_expression": true,
+    "has_time_expression": true,
+    "missing_fields": [],
+    "clarification_question": null
+  }
+}
+Manager không phát hiện mâu thuẫn. Weather Agent sẽ xử lý việc đó.
+
+Thời gian nào được Manager coi là “có biểu thức”?
+Manager coi là có time expression nếu người dùng cung cấp một cụm thời gian có khả năng xử lý:
+hiện tại
+bây giờ
+hôm nay
+tối nay
+ngày mai
+3 ngày tới
+thứ Tư
+thứ Tư tới
+13/7/2026
+từ 13/7 đến 15/7
+... các cụm thời gian chính xác hoặc tương đối có thể tính toán
+Manager chưa cần quyết định cụm đó có hoàn toàn xác định hay hợp lệ.
+
+Manager clarification branch trong graph
+Không cần thêm node clarification. manager_classify_node có thể trả thẳng:
+{
+  "manager_status": "needs_clarification",
+  "final_response": "Bạn muốn xem thời tiết Hà Nội vào thời điểm nào?"
+}
+
+Conditional routing:
+manager_classify
+    ├─ manager_status=needs_clarification → END
+    └─ còn lại → weather/news/wiki/parallel/sequential
+  
+Khi main.py nhận kết quả, final_response vẫn được thêm vào history như hiện tại. Lượt sau Manager nhận lại history.
+
+## Weather Agent input schema
+{
+  "query": "Ngày mai",
+  "history": [
+    {
+      "role": "user",
+      "content": "Thời tiết Hà Nội thế nào?"
+    },
+    {
+      "role": "assistant",
+      "content": "Bạn muốn xem thời tiết Hà Nội vào thời điểm nào?"
+    },
+    {
+      "role": "user",
+      "content": "Ngày mai"
+    }
+  ]
+}
+Quy định:
+LLM2 tự trích xuất lại location từ query + history.
+LLM2 không được tạo ready_for_redis.
+LLM2 không được tự tạo location_id
+
+## Schema duy nhất LLM2 được phép trả khi extraction
+{
+  "location_text": "Hà Nội hoặc null",
+  "time_text": "ngày mai hoặc null",
+  "request_type_candidate": "current | forecast | null"
+}
+Các trường được phép null
 
 
+ví dụ {
+  "location_text": "Hà Nội",
+  "time_text": "thứ Tư ngày 17/7/2026",
+  "request_type_candidate": "forecast"
+}
 
+LLM2 chỉ trích xuất nguyên văn. Python chịu trách nhiệm parse và đối chiếu lịch.
+LLM2 không được trả:
+location_id
+start_date
+days
+time_status
+ready_for_redis
 
+## Input của hàm validator tổng hợp
+{
+  "location_text": "Hà Nội",
+  "time_text": "ngày mai",
+  "request_type_candidate": "forecast"
+}
 
+### Output khi location không hợp lệ
+{
+  "status": "needs_clarification",
+  "stage": "location",
+  "code": "location_not_found",
+  "details": {
+    "requested_text": "Paris",
+    "candidates": []
+  }
+}
+llm2 nhận kết quả và sinh: Mình chưa xác định được địa điểm “Paris”. Bạn muốn xem thời tiết ở tỉnh hoặc thành phố nào?
 
-Phân chia lại trách nhiệm Manager và Weather Agent
-Manager chỉ cần:
-Xác định đây là câu hỏi thời tiết.
-Chuyển toàn bộ câu hỏi sang Weather Agent.
-Có thể cung cấp location_hint, nhưng không canonicalize.
-Hiện lại manager agent chỉ làm việc là phân loại câu hỏi để chọn sub agent mà?
+Không cần validator sinh sẵn clarification_question.
 
+### Output khi time không hợp lệ
+{
+  "status": "needs_clarification",
+  "stage": "time",
+  "code": "weekday_date_conflict",
+  "details": {
+    "provided_date": "2026-07-17",
+    "provided_weekday": "thứ Tư",
+    "actual_weekday": "thứ Sáu",
+    "matching_weekday_date": "2026-07-15"
+  }
+}
+LLM2 sinh câu hỏi:
+Ngày 17/7/2026 là thứ Sáu. Bạn muốn xem thứ Tư ngày 15/7/2026 hay thứ Sáu ngày 17/7/2026?
 
+### Output hợp lệ — current
+{
+  "status": "ready_for_redis",
+  "request": {
+    "request_type": "current",
+    "location_id": "ha_noi"
+  }
+}
 
+### Output hợp lệ — forecast
+{
+  "status": "ready_for_redis",
+  "request": {
+    "request_type": "forecast",
+    "location_id": "ha_noi",
+    "start_date": "2026-07-14",
+    "days": 1
+  }
+}
 
+## Lưu vào tool_state
+{
+  "weather_validation": {
+    "status": "ready_for_redis",
+    "request": {
+      "request_type": "forecast",
+      "location_id": "ha_noi",
+      "start_date": "2026-07-14",
+      "days": 1
+    }
+  }
+}
+Object này chỉ do Python validator tạo
 
-
-2:31 PM
-
-
-
-
-
-
-Đúng, nhưng hiện tại Manager không chỉ chọn sub-agent. Nó còn tạo ManagerPlan gồm:
-topics
-execution_mode
-primary_intent
-dependencies
-location
-news_query
-wiki_topic
-Weather Agent hiện ưu tiên lấy intent["location"] do Manager trích xuất; nếu không có mới dùng toàn bộ câu hỏi.
-Vì vậy, với kiến trúc mới:
-Giữ Manager phân loại, chọn agent và lập kế hoạch như hiện tại.
-location từ Manager chỉ là gợi ý thô, ví dụ "nghe annn".
-Manager không fuzzy match, không tạo location_id, không tra tọa độ.
-Weather Agent nhận toàn bộ câu hỏi và location_hint.
-Weather Agent gọi resolve_location để lấy location_id hợp lệ.
-Do đó không cần thay đổi lớn trách nhiệm Manager; chỉ cần bảo đảm trường location của Manager không được coi là địa danh đã chuẩn hóa.
+## Sau đó
+LLM2 nhận ready_for_redis
+    → đề xuất get_current_weather hoặc get_weather_forecast
+    → code gate đối chiếu tool call với weather_validation["status"] == "ready_for_redis"
+    → khớp thì gọi data tool hiện tại

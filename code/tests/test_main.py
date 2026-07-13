@@ -50,7 +50,9 @@ def test_main_input_loop_prompts_user_and_invokes_workflow(monkeypatch, capsys) 
     assert prompts == ["Bạn: ", "Bạn: "]
     assert len(workflow.calls) == 1
     assert workflow.calls[0]["query"] == "Test question"
-    assert workflow.calls[0]["history"] == []
+    assert workflow.calls[0]["history"] == [
+        {"role": "user", "content": "Test question"}
+    ]
     assert "Bot:\nCau tra loi thu nghiem" in output
 
 
@@ -80,12 +82,16 @@ def test_main_passes_in_memory_history_to_follow_up_turn(monkeypatch, capsys) ->
 
     capsys.readouterr()
     assert workflow.calls == [
-        {"query": "First question", "history": []},
+        {
+            "query": "First question",
+            "history": [{"role": "user", "content": "First question"}],
+        },
         {
             "query": "Second question",
             "history": [
                 {"role": "user", "content": "First question"},
                 {"role": "assistant", "content": "Answer for First question"},
+                {"role": "user", "content": "Second question"},
             ],
         },
     ]
@@ -386,8 +392,14 @@ def test_main_workflow_error_is_printed_and_loop_continues(monkeypatch, capsys) 
 
     output = capsys.readouterr().out
     assert workflow.calls == [
-        {"query": "Broken question", "history": []},
-        {"query": "Working question", "history": []},
+        {
+            "query": "Broken question",
+            "history": [{"role": "user", "content": "Broken question"}],
+        },
+        {
+            "query": "Working question",
+            "history": [{"role": "user", "content": "Working question"}],
+        },
     ]
     assert "Lỗi khi xử lý: boom" in output
     assert main.RESPONSE_SEPARATOR in output
@@ -453,8 +465,14 @@ def test_main_clear_command_resets_conversation_history(monkeypatch, capsys) -> 
     output = capsys.readouterr().out
     assert prompts == ["Bạn: ", "Bạn: ", "Bạn: ", "Bạn: "]
     assert workflow.calls == [
-        {"query": "First question", "history": []},
-        {"query": "Second question", "history": []},
+        {
+            "query": "First question",
+            "history": [{"role": "user", "content": "First question"}],
+        },
+        {
+            "query": "Second question",
+            "history": [{"role": "user", "content": "Second question"}],
+        },
     ]
     assert "Đã xóa lịch sử hội thoại." in output
 

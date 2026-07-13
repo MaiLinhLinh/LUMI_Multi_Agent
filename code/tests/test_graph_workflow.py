@@ -20,7 +20,7 @@ def _settings() -> Settings:
 def test_graph_single_mode_runs_only_primary_agent(monkeypatch) -> None:
     calls: list[str] = []
 
-    def fake_classify_intent(client, query: str) -> dict:
+    def fake_classify_intent(client, query: str, history=None) -> dict:
         calls.append("manager")
         assert query == "Thời tiết Hà Nội hôm nay thế nào?"
         return {
@@ -74,6 +74,103 @@ def test_graph_single_mode_runs_only_primary_agent(monkeypatch) -> None:
     assert result["timings"]["aggregate"] >= 0
 
 
+def test_manager_clarification_ends_before_weather_node(monkeypatch) -> None:
+    def fake_classify_intent(client, query: str, history=None) -> dict:
+        return {
+            "topics": ["weather"],
+            "execution_mode": "single",
+            "primary_intent": "weather",
+            "dependencies": [],
+            "news_query": "",
+            "wiki_topic": "",
+            "reason": "Thiếu thời gian.",
+            "weather_requirements": {
+                "status": "needs_clarification",
+                "has_location_expression": True,
+                "has_time_expression": False,
+                "missing_fields": ["time"],
+                "clarification_question": "Bạn muốn xem thời tiết Hà Nội vào thời điểm nào?",
+            },
+        }
+
+    monkeypatch.setattr(graph, "classify_intent", fake_classify_intent)
+    monkeypatch.setattr(
+        graph,
+        "run_weather_agent",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("Weather node must not run before manager clarification")
+        ),
+    )
+
+    result = graph.build_workflow().invoke(
+        {
+            "query": "Thời tiết Hà Nội thế nào?",
+            "history": [
+                {"role": "user", "content": "Thời tiết Hà Nội thế nào?"}
+            ],
+            "settings": _settings(),
+            "manager_client": object(),
+        }
+    )
+
+    assert result["manager_status"] == "needs_clarification"
+    assert result["final_response"].endswith("nào?")
+    assert "weather_status" not in result
+
+
+def test_weather_unavailable_ends_before_aggregate_and_visualization(monkeypatch) -> None:
+    def fake_classify_intent(client, query: str, history=None) -> dict:
+        return {
+            "topics": ["weather"],
+            "execution_mode": "single",
+            "primary_intent": "weather",
+            "dependencies": [],
+            "news_query": "",
+            "wiki_topic": "",
+            "reason": "Đủ biểu thức weather.",
+            "weather_requirements": {
+                "status": "ready_for_weather",
+                "has_location_expression": True,
+                "has_time_expression": True,
+                "missing_fields": [],
+                "clarification_question": None,
+            },
+        }
+
+    monkeypatch.setattr(graph, "classify_intent", fake_classify_intent)
+    monkeypatch.setattr(
+        graph,
+        "run_weather_agent",
+        lambda state, **kwargs: {
+            "weather_status": "unavailable",
+            "weather_answer": "Không có dữ liệu ngày yêu cầu.",
+            "final_response": "Không có dữ liệu ngày yêu cầu.",
+        },
+    )
+    monkeypatch.setattr(
+        graph,
+        "run_aggregator_agent",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("Aggregate must not run for unavailable weather")
+        ),
+    )
+
+    result = graph.build_workflow().invoke(
+        {
+            "query": "Thời tiết Hà Nội ngày mai",
+            "history": [
+                {"role": "user", "content": "Thời tiết Hà Nội ngày mai"}
+            ],
+            "settings": _settings(),
+            "manager_client": object(),
+        }
+    )
+
+    assert result["weather_status"] == "unavailable"
+    assert result["final_response"] == "Không có dữ liệu ngày yêu cầu."
+    assert "visualization_output" not in result
+
+
 def test_graph_parallel_mode_runs_selected_agents_and_aggregates(monkeypatch) -> None:
     calls: list[str] = []
 
@@ -92,7 +189,7 @@ def test_graph_parallel_mode_runs_selected_agents_and_aggregates(monkeypatch) ->
             assert temperature == 0.2
             return "Combined weather and news answer"
 
-    def fake_classify_intent(client, query: str) -> dict:
+    def fake_classify_intent(client, query: str, history=None) -> dict:
         calls.append("manager")
         assert query == "Hanoi weather and latest travel news"
         return {
@@ -165,7 +262,7 @@ def test_graph_parallel_mode_runs_selected_agents_and_aggregates(monkeypatch) ->
     assert "News answer" in aggregator_client.user_message
 
 
-def test_graph_parallel_mode_keeps_successful_agent_when_one_agent_fails(monkeypatch) -> None:
+def test_graph_parallel_mode_stops_when_weather_agent_fails(monkeypatch) -> None:
     calls: list[str] = []
 
     class FakeAggregatorClient:
@@ -185,7 +282,7 @@ def test_graph_parallel_mode_keeps_successful_agent_when_one_agent_fails(monkeyp
             assert "weather failed" in user_message
             return "Partial combined answer"
 
-    def fake_classify_intent(client, query: str) -> dict:
+    def fake_classify_intent(client, query: str, history=None) -> dict:
         calls.append("manager")
         return {
             "topics": ["weather", "news"],
@@ -229,15 +326,15 @@ def test_graph_parallel_mode_keeps_successful_agent_when_one_agent_fails(monkeyp
 
     assert calls[0] == "manager"
     assert set(calls[1:3]) == {"weather", "news"}
-    assert calls[-1] == "aggregate_llm"
-    assert result["final_response"] == "Partial combined answer"
+    assert "aggregate_llm" not in calls
+    assert result["weather_status"] == "error"
+    assert "chưa thể xử lý yêu cầu thời tiết" in result["final_response"]
     assert result["news_answer"] == "News answer"
-    assert "weather_answer" not in result
+    assert "chưa thể xử lý yêu cầu thời tiết" in result["weather_answer"]
     assert result["errors"] == [{"source": "weather", "message": "weather failed"}]
     assert result["cache_stats"]["news"]["misses"] == 1
     assert result["timings"]["news"] == 0.02
-    assert "News answer" in aggregator_client.user_message
-    assert "weather failed" in aggregator_client.user_message
+    assert aggregator_client.user_message == ""
 
 
 def test_graph_sequential_mode_passes_context_between_steps(monkeypatch) -> None:
@@ -258,7 +355,7 @@ def test_graph_sequential_mode_passes_context_between_steps(monkeypatch) -> None
             assert temperature == 0.2
             return "Sequential combined answer"
 
-    def fake_classify_intent(client, query: str) -> dict:
+    def fake_classify_intent(client, query: str, history=None) -> dict:
         calls.append("manager")
         assert query == "Use Hanoi weather, then background, then news"
         return {

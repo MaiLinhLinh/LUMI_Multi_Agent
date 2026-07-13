@@ -9,7 +9,6 @@ from rag_manager.agents.aggregator import run_aggregator_agent
 from rag_manager.agents.news import build_news_query
 from rag_manager.agents.news import format_news_answer
 from rag_manager.agents.news import run_news_agent
-from rag_manager.agents.weather import extract_weather_location
 from rag_manager.agents.weather import run_weather_agent, run_weather_tool_agent
 from rag_manager.agents.wiki import build_wiki_topic
 from rag_manager.agents.wiki import format_wiki_answer
@@ -21,7 +20,6 @@ __all__ = [
     "build_news_query",
     "build_no_output_response",
     "build_wiki_topic",
-    "extract_weather_location",
     "format_news_answer",
     "format_wiki_answer",
     "get_single_agent_answer",

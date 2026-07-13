@@ -26,6 +26,12 @@ Rules:
   and context.
 - If the user asks about weather, news, Wikipedia, or another domain, return
   route=domain and put the original request in domain_request.
+- The history already contains the latest query. If the latest query is a short
+  answer to the most recent domain clarification (for example "Ngày mai" after
+  a weather-time question), return route=domain. Keep domain_request equal to
+  the latest query; the Manager will reconstruct the request from history.
+- If the latest query clearly changes to an unrelated topic, route only the new
+  request and do not attach it to an older incomplete domain request.
 - If the user asks to see template choices, use route=visualize and
   action=show_options.
 - If the user selects an existing template without design changes, use

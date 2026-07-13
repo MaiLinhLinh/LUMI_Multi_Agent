@@ -50,6 +50,7 @@ def build_workflow():
         "manager_classify",
         route_execution_mode,
         {
+            "end": END,
             "weather": "weather",
             "news": "news",
             "wiki": "wiki",
@@ -57,11 +58,23 @@ def build_workflow():
             "sequential": "plan_sequence",
         },
     )
-    graph.add_edge("weather", "aggregate")
+    graph.add_conditional_edges(
+        "weather",
+        route_after_weather_execution,
+        {"aggregate": "aggregate", "end": END},
+    )
     graph.add_edge("news", "aggregate")
     graph.add_edge("wiki", "aggregate")
-    graph.add_edge("execute_parallel", "aggregate")
-    graph.add_edge("plan_sequence", "aggregate")
+    graph.add_conditional_edges(
+        "execute_parallel",
+        route_after_weather_execution,
+        {"aggregate": "aggregate", "end": END},
+    )
+    graph.add_conditional_edges(
+        "plan_sequence",
+        route_after_weather_execution,
+        {"aggregate": "aggregate", "end": END},
+    )
     graph.add_edge("aggregate", "visualize")
     graph.add_edge("visualize", END)
     return graph.compile()
@@ -194,23 +207,55 @@ def manager_classify_node(state: GraphState) -> GraphState:
         if isinstance(domain_request, str) and domain_request.strip()
         else state.get("query", "")
     )
-    plan = classify_intent(client, manager_query)
-    return {
+    plan = classify_intent(
+        client,
+        manager_query,
+        history=state.get("history", []),
+    )
+    weather_requirements = plan.get("weather_requirements", {})
+    needs_clarification = (
+        isinstance(weather_requirements, dict)
+        and weather_requirements.get("status") == "needs_clarification"
+    )
+    update: GraphState = {
         "intent": plan,
+        "manager_status": (
+            "needs_clarification" if needs_clarification else "ready"
+        ),
         "execution_mode": plan["execution_mode"],
         "selected_agents": plan["topics"],
         "timings": {"manager": _elapsed_since(started_at)},
         **_llm_usage_update("manager", client),
     }
+    if needs_clarification:
+        question = weather_requirements.get("clarification_question")
+        update["final_response"] = (
+            question.strip()
+            if isinstance(question, str) and question.strip()
+            else "Bạn muốn xem thời tiết ở đâu và vào thời điểm nào?"
+        )
+    return update
 
 
 def route_execution_mode(state: GraphState) -> str:
+    if state.get("manager_status") == "needs_clarification":
+        return "end"
     execution_mode = state.get("execution_mode")
     if execution_mode == "parallel":
         return "parallel"
     if execution_mode == "sequential":
         return "sequential"
     return _single_agent_route(state)
+
+
+def route_after_weather_execution(state: GraphState) -> str:
+    if state.get("weather_status") in {
+        "needs_clarification",
+        "unavailable",
+        "error",
+    }:
+        return "end"
+    return "aggregate"
 
 
 def _single_agent_route(state: GraphState) -> str:
@@ -310,6 +355,12 @@ def plan_sequence_node(state: GraphState) -> GraphState:
         )
         updates.append(merged_update)
         running_state.update(merged_update)
+        if running_state.get("weather_status") in {
+            "needs_clarification",
+            "unavailable",
+            "error",
+        }:
+            break
 
     return _merge_state_updates(updates)
 
@@ -606,7 +657,7 @@ def _state_metadata(state: GraphState) -> GraphState:
 
 def _parallel_result_update(topic: str, result: object) -> GraphState:
     if isinstance(result, Exception):
-        return {
+        update: GraphState = {
             "errors": [
                 {
                     "source": topic,
@@ -614,6 +665,22 @@ def _parallel_result_update(topic: str, result: object) -> GraphState:
                 }
             ]
         }
+        if topic == "weather":
+            answer = "Hệ thống chưa thể xử lý yêu cầu thời tiết lúc này. Bạn vui lòng thử lại sau."
+            update.update(
+                {
+                    "weather_status": "error",
+                    "weather_answer": answer,
+                    "weather_error": {
+                        "stage": "weather_agent",
+                        "code": "agent_execution_failed",
+                        "message": str(result) or result.__class__.__name__,
+                        "retryable": True,
+                    },
+                    "final_response": answer,
+                }
+            )
+        return update
     return result if isinstance(result, dict) else {}
 
 
