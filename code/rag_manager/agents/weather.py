@@ -8,7 +8,6 @@ import traceback
 from datetime import date, datetime, timedelta
 from time import perf_counter
 from typing import Any
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from langchain.agents import create_agent
 from langchain_core.messages import AIMessage
@@ -892,23 +891,6 @@ def build_weather_tools(
     resolved_resolver = resolver or get_weather_location_resolver()
 
     time_validator = WeatherTimeValidator()
-
-    @tool
-    def get_current_time(timezone_name: str = WEATHER_TIMEZONE) -> dict[str, Any]:
-        """Return the current date and time for resolving relative weather timeframes."""
-        try:
-            timezone = ZoneInfo(timezone_name)
-        except ZoneInfoNotFoundError:
-            timezone = ZoneInfo("UTC")
-            timezone_name = "UTC"
-        now = datetime.now(timezone)
-        _record_support_tool_call(tool_state, "get_current_time", source="system_clock")
-        return {
-            "timezone": timezone_name,
-            "iso_datetime": now.isoformat(),
-            "date": now.date().isoformat(),
-            "weekday": now.strftime("%A"),
-        }
 
     @tool
     def resolve_weather_location(location_text: str = "") -> dict[str, Any]:
