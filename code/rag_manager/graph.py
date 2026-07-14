@@ -11,7 +11,7 @@ from langgraph.graph import END, StateGraph
 from rag_manager.agents.aggregator import run_aggregator_agent
 from rag_manager.agents.manager import classify_intent
 from rag_manager.agents.news import run_news_agent
-from rag_manager.agents.weather import run_weather_agent
+from rag_manager.agents.weather import run_weather_agent, run_weather_llm_pipeline
 from rag_manager.agents.wiki import run_wiki_agent
 from rag_manager.config import Settings, load_settings
 from rag_manager.state import GraphState
@@ -276,7 +276,7 @@ def weather_node(state: GraphState) -> GraphState:
     return _merge_state_updates(
         [
             _state_metadata(state),
-            run_weather_agent(
+            run_weather_llm_pipeline(
                 state,
                 store=state.get("weather_store"),
                 settings=_get_settings(state),

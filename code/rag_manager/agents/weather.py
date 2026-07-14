@@ -1,7 +1,8 @@
-"""Weather Agent implementation using LangChain tool calling."""
+"""Weather Agent implementation with a native two-call pipeline and legacy ReAct path."""
 
 from __future__ import annotations
 
+import json
 import sys
 import traceback
 from datetime import date, datetime, timedelta
@@ -16,7 +17,11 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 
 from rag_manager.config import Settings, load_settings
 from rag_manager.llm.gemini_client import print_llm_cache_metrics, strip_thought_tags
-from rag_manager.llm.prompts import WEATHER_TOOL_AGENT_SYSTEM_PROMPT
+from rag_manager.llm.prompts import (
+    WEATHER_PIPELINE_EXTRACTION_SYSTEM_PROMPT,
+    WEATHER_PIPELINE_RESPONSE_SYSTEM_PROMPT,
+    WEATHER_TOOL_AGENT_SYSTEM_PROMPT,
+)
 from rag_manager.services.weather_location_resolver import (
     LOCATION_RESOLVER_SOURCE,
     WeatherLocationResolver,
@@ -32,6 +37,16 @@ from rag_manager.services.weather_time_validator import (
 from rag_manager.state import AgentState
 
 WEATHER_PROVIDER = "openweathermap"
+_WEATHER_PIPELINE_STATUSES = {
+    "needs_clarification",
+    "unavailable",
+    "error",
+    "completed",
+}
+_WEATHER_PIPELINE_ERROR_ANSWER = (
+    "Hệ thống không thể tạo câu trả lời thời tiết lúc này. "
+    "Bạn vui lòng thử lại sau."
+)
 
 
 def run_weather_agent(
@@ -88,6 +103,728 @@ def run_weather_agent(
     if isinstance(usage, dict) and usage:
         update["llm_usage"] = {"weather": usage}
     return update
+
+
+def run_weather_llm_pipeline(
+    state: AgentState,
+    *,
+    store: WeatherStore | None = None,
+    settings: Settings | None = None,
+    client: object | None = None,
+) -> AgentState:
+    """Run the two-call weather pipeline without LangChain tool calling.
+
+    Python owns extraction/schema classification, location/time validation,
+    Redis access, and the final status. The second LLM call only renders the
+    response for that status.
+    """
+
+    started_at = perf_counter()
+    settings = settings or load_settings()
+    store = store or state.get("weather_store")
+    query = state.get("query", "")
+    query = query if isinstance(query, str) else ""
+    history = state.get("history", [])
+    history = history if isinstance(history, list) else []
+
+    usage: dict[str, Any] = {"call_1": {}, "call_2": {}}
+    extraction: dict[str, Any] = {}
+    validation_result: dict[str, Any] = {}
+    canonical_request: dict[str, Any] = {}
+    redis_result: dict[str, Any] | None = None
+    redis_error: dict[str, Any] | None = None
+    weather_error: dict[str, Any] = {}
+    weather_data: dict[str, Any] | None = None
+    status = "error"
+
+    pipeline_client = client
+    if pipeline_client is None:
+        try:
+            from rag_manager.llm.gemini_client import GeminiClient
+
+            pipeline_client = GeminiClient(settings)
+        except Exception as exc:  # noqa: BLE001 - external LLM boundary
+            weather_error = _pipeline_error(
+                stage="llm1_extraction",
+                code="llm1_api_error",
+                message=str(exc) or exc.__class__.__name__,
+                retryable=True,
+            )
+            _log_pipeline_event(
+                stage="llm1_extraction",
+                code="llm1_api_error",
+                status="error",
+                message=weather_error["message"],
+            )
+
+    if pipeline_client is not None:
+        try:
+            if not hasattr(pipeline_client, "chat_json"):
+                raise TypeError("Weather pipeline client must provide chat_json().")
+            raw_extraction = pipeline_client.chat_json(
+                WEATHER_PIPELINE_EXTRACTION_SYSTEM_PROMPT,
+                _pipeline_extraction_message(query, history),
+            )
+            usage["call_1"] = _pipeline_client_usage(pipeline_client)
+            extraction_error = _validate_pipeline_extraction(raw_extraction)
+            if extraction_error:
+                weather_error = extraction_error
+                status = "error"
+                extraction = raw_extraction if isinstance(raw_extraction, dict) else {}
+                _log_pipeline_event(
+                    stage="llm1_extraction",
+                    code=extraction_error["code"],
+                    status=status,
+                    message=extraction_error.get("message", ""),
+                )
+            else:
+                extraction = raw_extraction
+                missing_fields = _pipeline_missing_extraction_fields(extraction)
+                if missing_fields:
+                    status = "needs_clarification"
+                    validation_result = {
+                        "status": "needs_clarification",
+                        "stage": "extraction",
+                        "code": "missing_weather_requirements",
+                        "details": {"missing_fields": missing_fields},
+                    }
+                    _log_pipeline_event(
+                        stage="llm1_extraction",
+                        code="missing_weather_requirements",
+                        status=status,
+                        missing_fields=missing_fields,
+                    )
+                else:
+                    (
+                        status,
+                        validation_result,
+                        canonical_request,
+                        weather_error,
+                        location_result,
+                    ) = _pipeline_validate_request(
+                        extraction,
+                        settings=settings,
+                    )
+                    if isinstance(location_result, dict) and location_result.get("ok"):
+                        validation_result["location_resolution"] = location_result
+                    _log_pipeline_event(
+                        stage="validation",
+                        code=str(validation_result.get("code", "ready_for_redis")),
+                        status=status,
+                        message=weather_error.get(
+                            "message",
+                            validation_result.get("details", {}),
+                        ),
+                    )
+
+                    if status == "ready_for_redis":
+                        if store is None:
+                            try:
+                                store = RedisWeatherStore.from_settings(settings)
+                            except Exception as exc:  # noqa: BLE001 - Redis setup boundary
+                                redis_error = _pipeline_error(
+                                    stage="redis",
+                                    code="redis_client_unavailable",
+                                    message=str(exc) or exc.__class__.__name__,
+                                    retryable=True,
+                                )
+                                _log_pipeline_event(
+                                    stage="redis",
+                                    code="redis_client_unavailable",
+                                    status="error",
+                                    message=redis_error["message"],
+                                )
+                        if store is None:
+                            status = "error"
+                            redis_error = redis_error or _pipeline_error(
+                                stage="redis",
+                                code="redis_client_unavailable",
+                                message="Weather Redis store is unavailable.",
+                                retryable=True,
+                            )
+                        else:
+                            try:
+                                (
+                                    status,
+                                    redis_result,
+                                    redis_error,
+                                    weather_data,
+                                ) = _pipeline_read_redis(
+                                    store,
+                                    canonical_request,
+                                    validation_result,
+                                )
+                            except Exception as exc:  # noqa: BLE001 - Redis boundary
+                                status = "error"
+                                redis_error = _pipeline_error(
+                                    stage="redis",
+                                    code="redis_response_error",
+                                    message=str(exc) or exc.__class__.__name__,
+                                    retryable=True,
+                                )
+                                weather_data = None
+                        if redis_error:
+                            weather_error = redis_error if status == "error" else {}
+                        _log_pipeline_event(
+                            stage="redis",
+                            code=(
+                                str(redis_error.get("code"))
+                                if redis_error
+                                else status
+                            ),
+                            status=status,
+                            message=(
+                                redis_error.get("message", "")
+                                if redis_error
+                                else _pipeline_response_error_message(redis_result)
+                            ),
+                        )
+        except Exception as exc:  # noqa: BLE001 - normalize LLM1 failures
+            status = "error"
+            weather_error = _pipeline_error(
+                stage="llm1_extraction",
+                code="llm1_api_error",
+                message=str(exc) or exc.__class__.__name__,
+                retryable=True,
+            )
+            _log_pipeline_event(
+                stage="llm1_extraction",
+                code="llm1_api_error",
+                status=status,
+                message=weather_error["message"],
+            )
+
+    # Internal validation uses ready_for_redis; it must never escape as the
+    # public weather status.
+    if status == "ready_for_redis":
+        status = "error"
+        weather_error = _pipeline_error(
+            stage="pipeline",
+            code="redis_not_executed",
+            message="Validated weather request did not reach Redis.",
+            retryable=False,
+        )
+
+    pre_llm2_status = status if status in _WEATHER_PIPELINE_STATUSES else "error"
+    pre_llm2_error = weather_error
+    final_answer = ""
+    if pipeline_client is not None:
+        try:
+            if not hasattr(pipeline_client, "chat_text"):
+                raise TypeError("Weather pipeline client must provide chat_text().")
+            final_answer = pipeline_client.chat_text(
+                WEATHER_PIPELINE_RESPONSE_SYSTEM_PROMPT,
+                _pipeline_response_message(
+                    query=query,
+                    history=history,
+                    extraction=extraction,
+                    status=pre_llm2_status,
+                    validation_result=validation_result,
+                    canonical_request=canonical_request,
+                    redis_result=redis_result,
+                    redis_error=redis_error,
+                    processing_error=pre_llm2_error,
+                ),
+            )
+            usage["call_2"] = _pipeline_client_usage(pipeline_client)
+            if not isinstance(final_answer, str) or not final_answer.strip():
+                raise ValueError("LLM2 returned an empty response.")
+            final_answer = strip_thought_tags(final_answer)
+            if not final_answer:
+                raise ValueError("LLM2 returned an empty response after sanitization.")
+        except Exception as exc:  # noqa: BLE001 - LLM2 has no fallback response
+            status = "error"
+            final_answer = _WEATHER_PIPELINE_ERROR_ANSWER
+            weather_error = _pipeline_error(
+                stage="llm2_response",
+                code=(
+                    "llm2_invalid_output"
+                    if isinstance(exc, ValueError)
+                    else "llm2_api_error"
+                ),
+                message=str(exc) or exc.__class__.__name__,
+                retryable=True,
+                details={
+                    "pre_llm2_status": pre_llm2_status,
+                    "pre_llm2_error": pre_llm2_error,
+                },
+            )
+            _log_pipeline_event(
+                stage="llm2_response",
+                code=weather_error["code"],
+                pre_llm2_status=pre_llm2_status,
+                final_status="error",
+                message=weather_error["message"],
+            )
+    else:
+        status = "error"
+        final_answer = _WEATHER_PIPELINE_ERROR_ANSWER
+        weather_error = _pipeline_error(
+            stage="llm2_response",
+            code="llm2_api_error",
+            message="Weather pipeline client is unavailable.",
+            retryable=True,
+            details={
+                "pre_llm2_status": pre_llm2_status,
+                "pre_llm2_error": pre_llm2_error,
+            },
+        )
+        _log_pipeline_event(
+            stage="llm2_response",
+            code="llm2_api_error",
+            pre_llm2_status=pre_llm2_status,
+            final_status="error",
+        )
+
+    update: AgentState = {
+        "weather_status": status,
+        "weather_answer": final_answer,
+        "final_response": final_answer,
+        "cache_stats": {"weather": _pipeline_store_stats(store)},
+        "timings": {"weather": _elapsed_since(started_at)},
+        "llm_usage": {"weather": usage},
+    }
+    if status == "completed" and isinstance(weather_data, dict):
+        update["weather_data"] = weather_data
+    if weather_error:
+        update["weather_error"] = weather_error
+    return update
+
+
+def _pipeline_extraction_message(query: str, history: list[Any]) -> str:
+    return json.dumps(
+        {
+            "query": query,
+            "relevant_history": _weather_conversation_messages(query, history),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+
+
+def _pipeline_response_message(
+    *,
+    query: str,
+    history: list[Any],
+    extraction: dict[str, Any],
+    status: str,
+    validation_result: dict[str, Any],
+    canonical_request: dict[str, Any],
+    redis_result: dict[str, Any] | None,
+    redis_error: dict[str, Any] | None,
+    processing_error: dict[str, Any],
+) -> str:
+    return json.dumps(
+        {
+            "query": query,
+            "relevant_history": _weather_conversation_messages(query, history),
+            "extraction": extraction,
+            "status": status,
+            "validation_result": validation_result,
+            "canonical_request": canonical_request,
+            "redis_result": redis_result,
+            "redis_error": redis_error,
+            "processing_error": processing_error,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+
+
+def _validate_pipeline_extraction(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return _pipeline_error(
+            stage="llm1_extraction",
+            code="llm1_invalid_json" if isinstance(value, str) else "llm1_schema_error",
+            message=(
+                "LLM1 returned non-JSON text."
+                if isinstance(value, str)
+                else "LLM1 did not return a JSON object."
+            ),
+            retryable=False,
+        )
+    error_marker = value.get("error")
+    if isinstance(error_marker, str) and error_marker in {
+        "invalid_json",
+        "json_not_object",
+    }:
+        return _pipeline_error(
+            stage="llm1_extraction",
+            code="llm1_invalid_json",
+            message=str(value.get("message", "LLM1 returned invalid JSON.")),
+            retryable=False,
+        )
+    required_fields = {"location_text", "time_text", "request_type_candidate"}
+    missing = sorted(required_fields.difference(value))
+    if missing:
+        return _pipeline_error(
+            stage="llm1_extraction",
+            code="llm1_schema_error",
+            message=f"LLM1 extraction is missing fields: {', '.join(missing)}.",
+            retryable=False,
+            details={"missing_fields": missing},
+        )
+    for field in ("location_text", "time_text"):
+        field_value = value.get(field)
+        if field_value is not None and not isinstance(field_value, str):
+            return _pipeline_error(
+                stage="llm1_extraction",
+                code="llm1_schema_error",
+                message=f"LLM1 field {field!r} must be a string or null.",
+                retryable=False,
+            )
+    candidate = value.get("request_type_candidate")
+    if candidate is not None and candidate not in {"current", "forecast"}:
+        return _pipeline_error(
+            stage="llm1_extraction",
+            code="llm1_schema_error",
+            message="LLM1 request_type_candidate must be current, forecast, or null.",
+            retryable=False,
+        )
+    return {}
+
+
+def _pipeline_missing_extraction_fields(extraction: dict[str, Any]) -> list[str]:
+    missing: list[str] = []
+    for field in ("location_text", "time_text"):
+        value = extraction.get(field)
+        if not isinstance(value, str) or not value.strip():
+            missing.append("location" if field == "location_text" else "time")
+    return missing
+
+
+def _pipeline_validate_request(
+    extraction: dict[str, Any],
+    *,
+    settings: Settings,
+) -> tuple[str, dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
+    location_text = str(extraction.get("location_text", "")).strip()
+    time_text = str(extraction.get("time_text", "")).strip()
+    try:
+        resolver = get_weather_location_resolver(settings.weather_locations_file or None)
+        location_result = resolver.resolve(location_text)
+    except Exception as exc:  # noqa: BLE001 - resolver boundary
+        error = _pipeline_error(
+            stage="validation",
+            code="location_resolver_error",
+            message=str(exc) or exc.__class__.__name__,
+            retryable=False,
+        )
+        return "error", {"status": "error", "code": error["code"]}, {}, error, {}
+
+    if not isinstance(location_result, dict):
+        error = _pipeline_error(
+            stage="validation",
+            code="location_resolver_invalid_response",
+            message="Location resolver returned an invalid response.",
+            retryable=False,
+        )
+        return "error", {"status": "error", "code": error["code"]}, {}, error, {}
+    if not location_result.get("ok"):
+        raw_error = location_result.get("error", {})
+        raw_error = raw_error if isinstance(raw_error, dict) else {}
+        validation = {
+            "status": "needs_clarification",
+            "stage": "location",
+            "code": str(raw_error.get("code", "location_not_found")),
+            "details": {
+                "requested_text": location_text,
+                "candidates": location_result.get("candidates", []),
+                "message": raw_error.get("message", ""),
+            },
+        }
+        return "needs_clarification", validation, {}, {}, location_result
+
+    location_id = location_result.get("location_id")
+    if not isinstance(location_id, str) or not location_id.strip():
+        error = _pipeline_error(
+            stage="validation",
+            code="invalid_resolved_location",
+            message="Location resolver did not return a valid location_id.",
+            retryable=False,
+        )
+        return "error", {"status": "error", "code": error["code"]}, {}, error, location_result
+
+    try:
+        time_result = WeatherTimeValidator().validate(
+            time_text,
+            request_type_candidate=extraction.get("request_type_candidate"),
+        )
+    except Exception as exc:  # noqa: BLE001 - validator boundary
+        error = _pipeline_error(
+            stage="validation",
+            code="time_validator_error",
+            message=str(exc) or exc.__class__.__name__,
+            retryable=False,
+        )
+        return "error", {"status": "error", "code": error["code"]}, {}, error, location_result
+
+    if not isinstance(time_result, dict):
+        error = _pipeline_error(
+            stage="validation",
+            code="time_validator_invalid_response",
+            message="Time validator returned an invalid response.",
+            retryable=False,
+        )
+        return "error", {"status": "error", "code": error["code"]}, {}, error, location_result
+    validation = {
+        "status": time_result.get("status"),
+        "location_resolution": location_result,
+        "time_validation": time_result,
+    }
+    if time_result.get("status") != "valid":
+        validation.update(
+            {
+                "stage": "time",
+                "code": str(time_result.get("code", "invalid_time")),
+                "details": time_result.get("details", {}),
+            }
+        )
+        return "needs_clarification", validation, {}, {}, location_result
+
+    request_type = time_result.get("request_type")
+    request: dict[str, Any] = {
+        "request_type": request_type,
+        "location_id": location_id,
+    }
+    if request_type == "forecast":
+        start_date = time_result.get("start_date")
+        days = time_result.get("days")
+        if not _valid_canonical_forecast_time(start_date, days):
+            error = _pipeline_error(
+                stage="validation",
+                code="invalid_canonical_time",
+                message="Time validator returned an invalid canonical forecast request.",
+                retryable=False,
+            )
+            return "error", {"status": "error", "code": error["code"]}, {}, error, location_result
+        request.update({"start_date": start_date, "days": days})
+    elif request_type != "current":
+        error = _pipeline_error(
+            stage="validation",
+            code="invalid_request_type",
+            message="Time validator returned an unsupported request type.",
+            retryable=False,
+        )
+        return "error", {"status": "error", "code": error["code"]}, {}, error, location_result
+
+    validation.update(
+        {
+            "status": "ready_for_redis",
+            "request": request,
+            "reference_datetime": time_result.get("reference_datetime"),
+            "timezone": WEATHER_TIMEZONE,
+            "expected_timezone_offset_seconds": EXPECTED_TIMEZONE_OFFSET_SECONDS,
+        }
+    )
+    return "ready_for_redis", validation, request, {}, location_result
+
+
+def _pipeline_read_redis(
+    store: WeatherStore,
+    request: dict[str, Any],
+    validation_result: dict[str, Any],
+) -> tuple[str, dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None]:
+    location_id = str(request["location_id"])
+    lookup_started_at = perf_counter()
+    try:
+        if request.get("request_type") == "current":
+            response = store.get_current(location_id)
+            tool_name = "get_current_weather"
+        else:
+            response = store.get_forecast(
+                location_id,
+                days=int(request["days"]),
+                start_date=str(request["start_date"]),
+            )
+            tool_name = "get_weather_forecast"
+    except Exception as exc:  # noqa: BLE001 - Redis boundary
+        error_code = (
+            "redis_invalid_json"
+            if isinstance(exc, (json.JSONDecodeError, ValueError))
+            else "redis_connection_error"
+        )
+        error = _pipeline_error(
+            stage="redis",
+            code=error_code,
+            message=str(exc) or exc.__class__.__name__,
+            retryable=True,
+        )
+        _log_pipeline_event(stage="redis", code=error["code"], status="error")
+        return "error", None, error, None
+
+    if not isinstance(response, dict):
+        error = _pipeline_error(
+            stage="redis",
+            code="redis_invalid_response",
+            message="Redis returned an invalid response object.",
+            retryable=True,
+        )
+        return "error", None, error, None
+    _print_redis_lookup(tool_name, location_id, response, lookup_started_at)
+    if not response.get("ok"):
+        if _pipeline_is_unavailable_response(response):
+            return "unavailable", response, None, None
+        raw_error = response.get("error", {})
+        message = (
+            str(raw_error.get("message", "Redis weather lookup failed."))
+            if isinstance(raw_error, dict)
+            else "Redis weather lookup failed."
+        )
+        error = _pipeline_error(
+            stage="redis",
+            code=_pipeline_redis_error_code(raw_error),
+            message=message,
+            retryable=True,
+        )
+        return "error", response, error, None
+
+    data = response.get("data")
+    if not isinstance(data, dict):
+        error = _pipeline_error(
+            stage="redis_response_validation",
+            code="invalid_redis_weather_payload",
+            message="Redis returned an invalid weather data payload.",
+            retryable=False,
+        )
+        return "error", response, error, None
+    timezone_offset = data.get("timezone_offset_seconds", data.get("timezone"))
+    if timezone_offset != EXPECTED_TIMEZONE_OFFSET_SECONDS:
+        error = _pipeline_error(
+            stage="redis_response_validation",
+            code="snapshot_timezone_mismatch",
+            message=(
+                "Weather snapshot timezone does not match Asia/Ho_Chi_Minh "
+                f"({EXPECTED_TIMEZONE_OFFSET_SECONDS} seconds)."
+            ),
+            retryable=False,
+        )
+        return "error", response, error, None
+    if request.get("request_type") == "forecast":
+        expected_dates = _expected_forecast_dates(
+            str(request["start_date"]),
+            int(request["days"]),
+        )
+        returned_days = data.get("days")
+        returned_dates = [
+            item.get("date")
+            for item in returned_days
+            if isinstance(item, dict) and isinstance(item.get("date"), str)
+        ] if isinstance(returned_days, list) else []
+        if returned_dates != expected_dates:
+            unavailable = {
+                "ok": False,
+                "error": {
+                    "source": "weather_response_validation",
+                    "code": "forecast_date_unavailable",
+                    "message": "The active snapshot does not contain the exact requested forecast range.",
+                    "status_code": None,
+                },
+                "details": {
+                    "requested_dates": expected_dates,
+                    "returned_dates": returned_dates,
+                },
+            }
+            return "unavailable", unavailable, None, None
+
+    tool_state: dict[str, Any] = {
+        "weather_validation": validation_result,
+        "resolved_locations": {
+            location_id: validation_result.get("location_resolution", {})
+        },
+        "tool_calls": [{"name": tool_name, "cached": True}],
+    }
+    if request.get("request_type") == "current":
+        tool_state["current_weather_data"] = data
+    else:
+        tool_state["forecast_weather_data"] = data
+    return "completed", response, None, _build_weather_visualization_data(tool_state)
+
+
+def _pipeline_is_unavailable_response(response: dict[str, Any]) -> bool:
+    error = response.get("error", {})
+    if not isinstance(error, dict):
+        return False
+    code = str(error.get("code", "")).casefold()
+    if code in {
+        "snapshot_unavailable",
+        "snapshot_not_found",
+        "location_not_in_snapshot",
+        "forecast_date_unavailable",
+        "requested_forecast_unavailable",
+    }:
+        return True
+    return _is_unavailable_redis_response(response)
+
+
+def _pipeline_redis_error_code(error: Any) -> str:
+    if isinstance(error, dict):
+        explicit_code = error.get("code")
+        if isinstance(explicit_code, str) and explicit_code.strip():
+            return explicit_code
+        message = str(error.get("message", "")).casefold()
+    else:
+        message = str(error).casefold()
+    if "not valid json" in message or "invalid json" in message:
+        return "redis_invalid_json"
+    if any(marker in message for marker in ("connection", "connect", "timed out", "timeout")):
+        return "redis_connection_error"
+    return "redis_lookup_failed"
+
+
+def _pipeline_response_error_message(response: dict[str, Any] | None) -> str:
+    if not isinstance(response, dict):
+        return ""
+    error = response.get("error")
+    if isinstance(error, dict):
+        return str(error.get("message", ""))
+    return ""
+
+
+def _pipeline_error(
+    *,
+    stage: str,
+    code: str,
+    message: str,
+    retryable: bool,
+    details: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    error: dict[str, Any] = {
+        "stage": stage,
+        "code": code,
+        "message": message,
+        "retryable": retryable,
+    }
+    if details:
+        error["details"] = details
+    return error
+
+
+def _pipeline_client_usage(client: object) -> dict[str, Any]:
+    usage = getattr(client, "last_usage", {})
+    return dict(usage) if isinstance(usage, dict) else {}
+
+
+def _pipeline_store_stats(store: WeatherStore | None) -> dict[str, int]:
+    if store is None:
+        return {}
+    try:
+        stats = store.stats()
+    except Exception:  # noqa: BLE001 - diagnostics must not mask the result
+        return {}
+    return stats if isinstance(stats, dict) else {}
+
+
+def _log_pipeline_event(*, stage: str, code: str, status: str | None = None, **details: Any) -> None:
+    payload: dict[str, Any] = {"stage": stage, "code": code}
+    if status is not None:
+        payload["status"] = status
+    payload.update(details)
+    print(
+        "[WEATHER_PIPELINE] "
+        + json.dumps(payload, ensure_ascii=False, default=str, sort_keys=True),
+        flush=True,
+    )
 
 
 def run_weather_tool_agent(
