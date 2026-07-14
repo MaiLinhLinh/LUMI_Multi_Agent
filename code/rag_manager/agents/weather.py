@@ -743,6 +743,14 @@ def _print_redis_lookup(
     started_at: float,
 ) -> None:
     elapsed_ms = (perf_counter() - started_at) * 1000
+    error = response.get("error")
+    error_details = ""
+    if not response.get("ok") and isinstance(error, dict):
+        error_details = (
+            f" error_source={error.get('source')!r}"
+            f" error_code={error.get('code')!r}"
+            f" error_message={error.get('message')!r}"
+        )
     print(
         "[WEATHER_REDIS] "
         f"tool={tool_name} "
@@ -750,6 +758,7 @@ def _print_redis_lookup(
         f"ok={bool(response.get('ok'))} "
         f"snapshot_id={response.get('snapshot_id')!r} "
         f"lookup_ms={elapsed_ms:.2f}"
+        f"{error_details}"
     )
 
 
@@ -1103,7 +1112,7 @@ def _extract_langchain_usage(result: dict[str, Any], model: str) -> dict[str, An
     usage: dict[str, Any] = {}
     call_id = 0
     for message in messages:
-        if not isinstance(message, AIMessage):
+        if not isinstance(message, AIMessage) or not _ai_message_has_usage(message):
             continue
         call_id += 1
         message_usage = _usage_from_ai_message(message)
@@ -1118,6 +1127,17 @@ def _extract_langchain_usage(result: dict[str, Any], model: str) -> dict[str, An
         return {}
     usage["model"] = model
     return usage
+
+
+def _ai_message_has_usage(message: AIMessage) -> bool:
+    usage_metadata = message.usage_metadata
+    if isinstance(usage_metadata, dict) and bool(usage_metadata):
+        return True
+    response_metadata = message.response_metadata
+    if not isinstance(response_metadata, dict):
+        return False
+    token_usage = response_metadata.get("token_usage")
+    return isinstance(token_usage, dict) and bool(token_usage)
 
 
 def _usage_from_ai_message(message: AIMessage) -> dict[str, Any]:

@@ -3,3 +3,4 @@
 
 # Bỏ qua file .env nằm trong thư mục code
 /code/.env
+/outputs

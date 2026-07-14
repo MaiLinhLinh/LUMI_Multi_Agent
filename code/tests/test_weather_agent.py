@@ -131,6 +131,79 @@ def test_weather_langchain_usage_logs_each_llm_cache_result(capsys) -> None:
     assert "saved_tokens_estimated=80" in terminal_output
 
 
+def test_weather_langchain_usage_ignores_historical_ai_messages(capsys) -> None:
+    historical_message = AIMessage(content="old assistant answer")
+    current_message_from_usage_metadata = AIMessage(
+        content="tool call",
+        usage_metadata={
+            "input_tokens": 100,
+            "output_tokens": 10,
+            "total_tokens": 110,
+            "input_token_details": {"cache_read": 0},
+        },
+    )
+    current_message_from_response_metadata = AIMessage(
+        content="weather answer",
+        response_metadata={
+            "token_usage": {
+                "prompt_tokens": 200,
+                "completion_tokens": 20,
+                "total_tokens": 220,
+                "cached_content_token_count": 50,
+            }
+        },
+    )
+
+    usage = weather_agent._extract_langchain_usage(
+        {
+            "messages": [
+                historical_message,
+                current_message_from_usage_metadata,
+                current_message_from_response_metadata,
+            ]
+        },
+        "gemini-weather",
+    )
+
+    assert usage["prompt_tokens"] == 300
+    assert usage["completion_tokens"] == 30
+    assert usage["total_tokens"] == 330
+    assert usage["cached_tokens"] == 50
+    assert usage["cache_hit_ratio"] == 0.1667
+    terminal_output = capsys.readouterr().out
+    assert "[LLM_CACHE][source=weather_langchain][call=1]" in terminal_output
+    assert "[LLM_CACHE][source=weather_langchain][call=2]" in terminal_output
+    assert "[LLM_CACHE][source=weather_langchain][call=3]" not in terminal_output
+    assert "cached_tokens=unknown" not in terminal_output
+
+
+def test_weather_redis_error_log_includes_error_details(capsys) -> None:
+    weather_agent._print_redis_lookup(
+        "get_weather_forecast",
+        "ha_noi",
+        {
+            "ok": False,
+            "error": {
+                "source": "weather_redis",
+                "code": "redis_lookup_failed",
+                "message": "Redis weather lookup failed: connection timed out",
+            },
+        },
+        weather_agent.perf_counter(),
+    )
+
+    terminal_output = capsys.readouterr().out
+
+    assert "[WEATHER_REDIS]" in terminal_output
+    assert "ok=False" in terminal_output
+    assert "error_source='weather_redis'" in terminal_output
+    assert "error_code='redis_lookup_failed'" in terminal_output
+    assert (
+        "error_message='Redis weather lookup failed: connection timed out'"
+        in terminal_output
+    )
+
+
 def test_weather_agent_returns_tool_agent_result(monkeypatch) -> None:
     calls = []
 
