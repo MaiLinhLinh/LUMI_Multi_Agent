@@ -75,6 +75,38 @@ def test_orchestrator_uses_forecast_template_for_forecast_only_data(tmp_path) ->
     assert "°C" in result.html
 
 
+def test_orchestrator_uses_current_card_for_one_hour_forecast(tmp_path) -> None:
+    envelope = _load_sample("weather.combined.v1")
+    envelope["data"]["presentation"] = {
+        "mode": "hourly_forecast",
+        "time_label": "Dự báo lúc 09:00 ngày 17/07/2026",
+        "interval_notice": "",
+    }
+    envelope["available_fields"].extend(
+        [
+            "presentation.mode",
+            "presentation.time_label",
+        ]
+    )
+
+    result = VisualizationOrchestrator().run(
+        VisualizationRequest(
+            domain_result={
+                "weather_data": envelope,
+                "weather_answer": "Dự báo thời tiết theo giờ.",
+            },
+            mode="auto",
+            output_dir=tmp_path,
+        )
+    )
+
+    assert result.ok is True
+    assert result.template_id == "weather_basic"
+    assert "Dự báo lúc 09:00 ngày 17/07/2026" in result.html
+    assert "Forecast data is not available." not in result.html
+    assert "<h2>Forecast</h2>" not in result.html
+
+
 def test_orchestrator_lists_templates_for_choose_mode_without_id(tmp_path) -> None:
     envelope = _load_sample("weather.current.v1")
     result = VisualizationOrchestrator().run(

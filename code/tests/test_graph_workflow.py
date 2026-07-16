@@ -17,6 +17,45 @@ def _settings() -> Settings:
     )
 
 
+def test_manager_node_passes_history_for_clarification_follow_up(monkeypatch) -> None:
+    captured: dict = {}
+    history = [
+        {"role": "user", "content": "Thời tiết Hà Nội thế nào?"},
+        {
+            "role": "assistant",
+            "content": "Bạn muốn biết thời tiết Hà Nội vào thời điểm nào?",
+        },
+        {"role": "user", "content": "hôm nay"},
+    ]
+
+    def fake_classify_intent(client, query: str, history=None) -> dict:
+        captured["query"] = query
+        captured["history"] = history
+        return {
+            "topics": ["weather"],
+            "execution_mode": "single",
+            "primary_intent": "weather",
+            "dependencies": [],
+            "news_query": "",
+            "wiki_topic": "",
+        }
+
+    monkeypatch.setattr(graph, "classify_intent", fake_classify_intent)
+
+    result = graph.manager_classify_node(
+        {
+            "query": "hôm nay",
+            "history": history,
+            "semantic_result": {"domain_request": "hôm nay"},
+            "manager_client": object(),
+            "settings": _settings(),
+        }
+    )
+
+    assert captured == {"query": "hôm nay", "history": history}
+    assert result["selected_agents"] == ["weather"]
+
+
 def test_graph_single_mode_runs_only_primary_agent(monkeypatch) -> None:
     calls: list[str] = []
 
@@ -28,10 +67,8 @@ def test_graph_single_mode_runs_only_primary_agent(monkeypatch) -> None:
             "execution_mode": "single",
             "primary_intent": "weather",
             "dependencies": [],
-            "location": "Hà Nội",
             "news_query": "",
             "wiki_topic": "",
-            "reason": "Người dùng hỏi thời tiết.",
         }
 
     def fake_weather_agent(state, *, store=None, settings=None, client=None) -> dict:
@@ -47,7 +84,7 @@ def test_graph_single_mode_runs_only_primary_agent(monkeypatch) -> None:
         raise AssertionError("Single weather mode must not run news or wiki")
 
     monkeypatch.setattr(graph, "classify_intent", fake_classify_intent)
-    monkeypatch.setattr(graph, "run_weather_agent", fake_weather_agent)
+    monkeypatch.setattr(graph, "run_weather_llm_pipeline", fake_weather_agent)
     monkeypatch.setattr(graph, "run_news_agent", unexpected_agent)
     monkeypatch.setattr(graph, "run_wiki_agent", unexpected_agent)
 
@@ -74,8 +111,11 @@ def test_graph_single_mode_runs_only_primary_agent(monkeypatch) -> None:
     assert result["timings"]["aggregate"] >= 0
 
 
-def test_manager_clarification_ends_before_weather_node(monkeypatch) -> None:
+def test_weather_agent_handles_clarification_after_manager_routes(monkeypatch) -> None:
+    calls: list[str] = []
+
     def fake_classify_intent(client, query: str, history=None) -> dict:
+        calls.append("manager")
         return {
             "topics": ["weather"],
             "execution_mode": "single",
@@ -83,24 +123,18 @@ def test_manager_clarification_ends_before_weather_node(monkeypatch) -> None:
             "dependencies": [],
             "news_query": "",
             "wiki_topic": "",
-            "reason": "Thiếu thời gian.",
-            "weather_requirements": {
-                "status": "needs_clarification",
-                "has_location_expression": True,
-                "has_time_expression": False,
-                "missing_fields": ["time"],
-                "clarification_question": "Bạn muốn xem thời tiết Hà Nội vào thời điểm nào?",
-            },
+        }
+
+    def fake_weather_agent(state, **kwargs) -> dict:
+        calls.append("weather")
+        return {
+            "weather_status": "needs_clarification",
+            "weather_answer": "Bạn muốn xem thời tiết Hà Nội vào thời điểm nào?",
+            "final_response": "Bạn muốn xem thời tiết Hà Nội vào thời điểm nào?",
         }
 
     monkeypatch.setattr(graph, "classify_intent", fake_classify_intent)
-    monkeypatch.setattr(
-        graph,
-        "run_weather_agent",
-        lambda *args, **kwargs: (_ for _ in ()).throw(
-            AssertionError("Weather node must not run before manager clarification")
-        ),
-    )
+    monkeypatch.setattr(graph, "run_weather_llm_pipeline", fake_weather_agent)
 
     result = graph.build_workflow().invoke(
         {
@@ -113,9 +147,10 @@ def test_manager_clarification_ends_before_weather_node(monkeypatch) -> None:
         }
     )
 
-    assert result["manager_status"] == "needs_clarification"
+    assert calls == ["manager", "weather"]
+    assert result["weather_status"] == "needs_clarification"
     assert result["final_response"].endswith("nào?")
-    assert "weather_status" not in result
+    assert "manager_status" not in result
 
 
 def test_weather_unavailable_ends_before_aggregate_and_visualization(monkeypatch) -> None:
@@ -127,20 +162,12 @@ def test_weather_unavailable_ends_before_aggregate_and_visualization(monkeypatch
             "dependencies": [],
             "news_query": "",
             "wiki_topic": "",
-            "reason": "Đủ biểu thức weather.",
-            "weather_requirements": {
-                "status": "ready_for_weather",
-                "has_location_expression": True,
-                "has_time_expression": True,
-                "missing_fields": [],
-                "clarification_question": None,
-            },
         }
 
     monkeypatch.setattr(graph, "classify_intent", fake_classify_intent)
     monkeypatch.setattr(
         graph,
-        "run_weather_agent",
+        "run_weather_llm_pipeline",
         lambda state, **kwargs: {
             "weather_status": "unavailable",
             "weather_answer": "Không có dữ liệu ngày yêu cầu.",
@@ -197,10 +224,8 @@ def test_graph_parallel_mode_runs_selected_agents_and_aggregates(monkeypatch) ->
             "execution_mode": "parallel",
             "primary_intent": "weather",
             "dependencies": [],
-            "location": "Hanoi",
             "news_query": "Hanoi travel news",
             "wiki_topic": "",
-            "reason": "Independent weather and news request.",
         }
 
     def fake_weather_agent(state, *, store=None, settings=None, client=None) -> dict:
@@ -228,7 +253,7 @@ def test_graph_parallel_mode_runs_selected_agents_and_aggregates(monkeypatch) ->
 
     aggregator_client = FakeAggregatorClient()
     monkeypatch.setattr(graph, "classify_intent", fake_classify_intent)
-    monkeypatch.setattr(graph, "run_weather_agent", fake_weather_agent)
+    monkeypatch.setattr(graph, "run_weather_llm_pipeline", fake_weather_agent)
     monkeypatch.setattr(graph, "run_news_agent", fake_news_agent)
     monkeypatch.setattr(graph, "run_wiki_agent", unexpected_wiki_agent)
 
@@ -289,10 +314,8 @@ def test_graph_parallel_mode_stops_when_weather_agent_fails(monkeypatch) -> None
             "execution_mode": "parallel",
             "primary_intent": "weather",
             "dependencies": [],
-            "location": "Hanoi",
             "news_query": "Hanoi travel news",
             "wiki_topic": "",
-            "reason": "Independent weather and news request.",
         }
 
     def failing_weather_agent(state, *, store=None, settings=None, client=None) -> dict:
@@ -310,7 +333,7 @@ def test_graph_parallel_mode_stops_when_weather_agent_fails(monkeypatch) -> None
 
     aggregator_client = FakeAggregatorClient()
     monkeypatch.setattr(graph, "classify_intent", fake_classify_intent)
-    monkeypatch.setattr(graph, "run_weather_agent", failing_weather_agent)
+    monkeypatch.setattr(graph, "run_weather_llm_pipeline", failing_weather_agent)
     monkeypatch.setattr(graph, "run_news_agent", fake_news_agent)
 
     workflow = graph.build_workflow()
@@ -366,18 +389,14 @@ def test_graph_sequential_mode_passes_context_between_steps(monkeypatch) -> None
                 {
                     "from_topic": "weather",
                     "to_topic": "wiki",
-                    "reason": "Weather context is needed first.",
                 },
                 {
                     "from_topic": "wiki",
                     "to_topic": "news",
-                    "reason": "Wiki context is needed before news.",
                 },
             ],
-            "location": "Hanoi",
             "news_query": "Hanoi travel news",
             "wiki_topic": "Hanoi",
-            "reason": "Dependent multi-step request.",
         }
 
     def fake_weather_agent(state, *, store=None, settings=None, client=None) -> dict:
@@ -419,7 +438,7 @@ def test_graph_sequential_mode_passes_context_between_steps(monkeypatch) -> None
 
     aggregator_client = FakeAggregatorClient()
     monkeypatch.setattr(graph, "classify_intent", fake_classify_intent)
-    monkeypatch.setattr(graph, "run_weather_agent", fake_weather_agent)
+    monkeypatch.setattr(graph, "run_weather_llm_pipeline", fake_weather_agent)
     monkeypatch.setattr(graph, "run_wiki_agent", fake_wiki_agent)
     monkeypatch.setattr(graph, "run_news_agent", fake_news_agent)
 

@@ -4,3 +4,9 @@
 # Bỏ qua file .env nằm trong thư mục code
 /code/.env
 /outputs
+/benchmark
+/benchmark_analysis.md
+/kehoach.md
+/phantich.md
+/yeucau.md
+/yeucaumorong.md

@@ -26,137 +26,152 @@ Input + history
 
 
 Node weather
+    run_weather_llm_pipeline(
+    state,
+    store,
+    settings,
+    client
+)
     │
-    ├─ LLM2 nhận:
-    │   ├─ query
-    │   ├─ history
-    │  
+    ├─ Chuẩn bị query + relevant_history
     │
-    ├─ LLM2 extract đồng thời:
-    │   ├─ location_text
-    │   └─ time_text
+    ├─ LLM call 1: client.chat_json(...)
+    │   └─ Trích xuất:
+    │       ├─ location_text
+    │       ├─ time_text
+    │       └─ request_type_candidate
     │
-    ├─ Kiểm tra extraction
+    ├─ Python kiểm tra kết quả extraction
     │   │
-    │   ├─ Thiếu location_text hoặc time_text
-    │   │   → weather_status = needs_clarification
-    │   │   → weather_answer = câu hỏi bổ sung
-    │   │   → final_response = weather_answer
+    │   ├─ LLM API lỗi
+    │   │   → status = error
+    │   │   → code = llm1_api_error
     │   │   → không gọi location resolver
-    │   │   → không gọi data tool
-    │   │   → không truy cập Redis
-    │   │   → END
+    │   │   → không gọi Redis
     │   │
-    │   └─ Extract đủ
+    │   ├─ JSON lỗi hoặc không phải object
+    │   │   → status = error
+    │   │   → code = llm1_invalid_json
+    │   │   → không gọi resolver/Redis
+    │   │
+    │   ├─ Thiếu field hoặc sai kiểu dữ liệu
+    │   │   → status = error
+    │   │   → code = llm1_schema_error
+    │   │   → không gọi resolver/Redis
+    │   │
+    │   ├─ JSON hợp lệ nhưng thiếu location/time
+    │   │   → status = needs_clarification
+    │   │   → validation_result ghi rõ field bị thiếu
+    │   │   → không gọi resolver
+    │   │   → không gọi Redis
+    │   │
+    │   └─ Extraction đầy đủ
     │       → tiếp tục validate
-
-LLM2 gọi validate_weather_request(...)
     │
-    ├─ Bước 1: resolve_weather_location(location_text)   # giữ nguyên
-    │   ├─ location không hợp lệ
-    │   │   → return needs_clarification/location
-    │   │   → LLM2 sinh câu hỏi địa điểm
-    │   │   → không kiểm tra time
-    │   │   → không gọi Redis
+    ├─ Python resolve + validate
     │   │
-    │   └─ location hợp lệ
-    │       → location_id nằm trong resolved_locations
+    │   ├─ WeatherLocationResolver.resolve(location_text)
+    │   │   │
+    │   │   ├─ Resolver lỗi hoặc response sai
+    │   │   │   → status = error
+    │   │   │   → không gọi time validator/Redis
+    │   │   │
+    │   │   ├─ Không tìm thấy hoặc location mơ hồ
+    │   │   │   → status = needs_clarification
+    │   │   │   → không gọi time validator/Redis
+    │   │   │
+    │   │   └─ Location hợp lệ
+    │   │       → lấy location_id
+    │   │
+    │   └─ WeatherTimeValidator.validate(
+    │         time_text,
+    │         request_type_candidate
+    │       )
+    │       ├─ Time không hợp lệ, mơ hồ,
+    │       │   sai thứ/ngày hoặc vượt quá 5 ngày
+    │       │   → status = needs_clarification
+    │       │   → không gọi Redis
+    │       │
+    │       ├─ Validator lỗi hoặc response sai
+    │       │   → status = error
+    │       │   → không gọi Redis
+    │       │
+    │       └─ Time hợp lệ
+    │           → tạo canonical_request:
+    │               ├─ request_type
+    │               ├─ location_id
+    │               ├─ start_date nếu forecast
+    │               └─ days nếu forecast
+    │           → status nội bộ = ready_for_redis
     │
-    ├─ Bước 2: validate time bằng Python
-    │   ├─ dùng Asia/Ho_Chi_Minh
-    │   ├─ parse thời gian tương đối/tuyệt đối
-    │   ├─ đối chiếu ngày–thứ
-    │   └─ kiểm tra tối đa 5 ngày
-    │
-    │   ├─ time không hợp lệ
-    │   │   → return needs_clarification/time
-    │   │   → LLM2 sinh câu hỏi thời gian
-    │   │   → không gọi Redis
+    ├─ Python gọi Redis trực tiếp
     │   │
-    │   └─ time hợp lệ
-    │
-    └─ Bước 3: code tạo ready_for_redis
-        → lưu vào tool_state
-        → trả kết quả cho LLM2
-
-    
-    ├─ LLM2 đề xuất data tool call
+    │   ├─ Chỉ thực hiện khi status nội bộ = ready_for_redis
     │   │
-    │   ├─ ready_for_redis.request_type = current
-    │   │   → get_current_weather(location_id)
+    │   ├─ request_type = current
+    │   │   → store.get_current(location_id)
     │   │
-    │   └─ ready_for_redis.request_type = forecast
-    │       → get_weather_forecast(
+    │   └─ request_type = forecast
+    │       → store.get_forecast(
     │             location_id,
     │             days,
     │             start_date
     │         )
     │
-    ├─ WeatherDataToolGate kiểm tra tool call
+    ├─ Python kiểm tra Redis response
     │   │
-    │   ├─ validated request có status = ready_for_redis?
-    │   ├─ tool name có khớp request_type?
-    │   ├─ location_id có khớp validated request?
-    │   ├─ start_date có khớp validated request?
-    │   └─ days có khớp validated request?
+    │   ├─ Không có snapshot/location/ngày yêu cầu
+    │   │   → status = unavailable
+    │   │
+    │   ├─ Forecast không trả đúng khoảng ngày yêu cầu
+    │   │   → status = unavailable
+    │   │
+    │   ├─ Redis mất kết nối, JSON lỗi,
+    │   │   response sai, payload sai hoặc timezone sai
+    │   │   → status = error
+    │   │
+    │   └─ Response hợp lệ
+    │       → status = completed
+    │       → tạo weather_data envelope
     │
-    │   ├─ Tool call không khớp
-    │   │   → chặn tool call kèm ghi log lỗi kĩ thuật
-    │   │   → không truy cập Redis
-    │   │   → weather_status = error - có nghĩa là tool gặp lỗi kĩ thuật không khớp validated weather request
+    ├─ Chuẩn hóa pre_llm2_status
+    │   └─ Chỉ gồm:
+    │       needs_clarification
+    │       unavailable
+    │       error
+    │       completed
+    │
+    ├─ LLM call 2: client.chat_text(...)
+    │   ├─ Nhận:
+    │   │   ├─ query
+    │   │   ├─ relevant_history
+    │   │   ├─ extraction
+    │   │   ├─ pre_llm2_status
+    │   │   ├─ validation_result
+    │   │   ├─ canonical_request
+    │   │   ├─ redis_result
+    │   │   ├─ redis_error
+    │   │   └─ processing_error
     │   │
-    │   └─ Tool call khớp
-    │       → cho phép thực thi tool hiện tại
-
-
-    ├─ Truy xuất Redis bằng 6 hàm hiện tại
+    │   ├─ needs_clarification
+    │   │   → hỏi lại đúng location/time còn thiếu hoặc mâu thuẫn
     │   │
-    │   ├─ Current
-    │   │   → get_current_weather(location_id)
-    │   │   → _require_resolved_location(tool_state, location_id)
-    │   │       ├─ chưa resolve → location_not_resolved
-    │   │       └─ đã resolve
-    │   │           → RedisWeatherStore.get_current(location_id)
-    │   │           → đọc section current từ active snapshot
+    │   ├─ unavailable
+    │   │   → thông báo cache/snapshot không khả dụng
+    │   │   → không hỏi lại location/time đã hợp lệ
     │   │
-    │   └─ Forecast
-    │       → get_weather_forecast(location_id, days, start_date)
-    │       → _require_resolved_location(tool_state, location_id)
-    │           ├─ chưa resolve → location_not_resolved
-    │           └─ đã resolve
-    │               → RedisWeatherStore.get_forecast(
-    │                     location_id,
-    │                     days=days,
-    │                     start_date=start_date
-    │                 )
-    │               → đọc section forecast từ active snapshot
-    │               → lọc từ start_date
-    │               → lấy tối đa days
-
-
-    ├─ Kiểm tra response Redis
+    │   ├─ error
+    │   │   → thông báo lỗi hệ thống
     │   │
-    │   ├─ Không có active snapshot/dữ liệu location
-    │   │   → weather_status = unavailable
-    │   │   → weather_answer = thông báo thiếu dữ liệu cache
-    │   │   → final_response = weather_answer
-    │   │   → không bịa dữ liệu
-    │   │   → không Visualization
-    │   │   → END
-    │   │
-    │   ├─ Forecast response không chứa đúng start_date
-    │   │   → weather_status = unavailable
-    │   │   → weather_answer = thông báo snapshot không có ngày yêu cầu
-    │   │   → final_response = weather_answer
-    │   │   → không dùng ngày kế tiếp thay thế
-    │   │   → không Visualization
-    │   │   → END
-    │   │
-    │   └─ Redis response hợp lệ
-    │       → lưu current_weather_data hoặc forecast_weather_data
-    │       → build weather_data envelope
-    │       → LLM2 tạo weather_answer từ tool result
-    │       → weather_status = completed
+    │   └─ completed
+    │       → trả lời chỉ từ dữ liệu Redis
+    │
+    └─ Nếu LLM call 2 lỗi API, timeout hoặc output rỗng
+        → weather_status = error
+        → code = llm2_api_error hoặc llm2_invalid_output
+        → không fallback clarification
+        → không fallback câu trả lời thời tiết
+        → ghi log pre_llm2_status và final_status
 
 
     └─ Graph routing sau node weather

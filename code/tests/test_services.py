@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -195,6 +196,10 @@ def test_fetch_weather_forecast_uses_http_helper_and_compacts_daily_response(mon
     assert response["ok"] is True
     assert response["data"]["location"] == "Ha Noi"
     assert response["data"]["requested_days"] == 3
+    assert response["data"]["available_day_count"] == 1
+    assert response["data"]["interval_count"] == 2
+    assert response["data"]["coverage_start_local"] == "2026-07-10T14:53:20+07:00"
+    assert response["data"]["coverage_end_local"] == "2026-07-10T17:53:20+07:00"
     assert response["data"]["days"][0]["date"] == "2026-07-10"
     assert response["data"]["days"][0]["temperature"]["min_celsius"] == 28.5
     assert response["data"]["days"][0]["temperature"]["max_celsius"] == 30.0
@@ -216,6 +221,57 @@ def test_fetch_weather_forecast_uses_http_helper_and_compacts_daily_response(mon
     assert "[OpenWeather][forecast][RAW_API_RESPONSE]" in terminal_output
     assert '"dt_txt": "2026-07-10 00:00:00"' in terminal_output
     assert "weather-key" not in terminal_output
+
+
+def test_fetch_weather_forecast_full_mode_omits_cnt_and_keeps_all_provider_data(
+    monkeypatch,
+) -> None:
+    calls = []
+    first = datetime(2026, 7, 10, tzinfo=timezone.utc)
+    raw_items = []
+    for offset in range(6):
+        timestamp = int((first + timedelta(days=offset)).timestamp())
+        raw_items.append(
+            {
+                "dt": timestamp,
+                "dt_txt": "provider value",
+                "weather": [{"main": "Clouds", "description": "có mây"}],
+                "main": {
+                    "temp": 30,
+                    "feels_like": 32,
+                    "humidity": 70,
+                    "pressure": 1005,
+                },
+                "wind": {"speed": 2},
+                "clouds": {"all": 50},
+                "pop": 0.1,
+            }
+        )
+
+    def fake_get_json(url, *, source, params, timeout_seconds):
+        calls.append(params)
+        return {
+            "ok": True,
+            "data": {
+                "city": {"name": "Hà Nội", "country": "VN", "timezone": 25200},
+                "list": raw_items,
+            },
+        }
+
+    monkeypatch.setattr(weather_api, "get_json", fake_get_json)
+
+    response = weather_api.fetch_weather_forecast(
+        "Hà Nội",
+        api_key="weather-key",
+    )
+
+    assert "cnt" not in calls[0]
+    assert response["ok"] is True
+    assert response["data"]["requested_days"] is None
+    assert response["data"]["available_day_count"] == 6
+    assert response["data"]["interval_count"] == 6
+    assert len(response["data"]["days"]) == 6
+    assert len(response["raw_data"]["list"]) == 6
 
 
 def test_forecast_normalizer_groups_and_summarizes_by_vietnam_local_date() -> None:
@@ -258,6 +314,8 @@ def test_forecast_normalizer_groups_and_summarizes_by_vietnam_local_date() -> No
 
     assert result["day_grouping"] == "location_local_date"
     assert result["interval_time_basis"] == "location_local_time"
+    assert result["available_day_count"] == 2
+    assert result["interval_count"] == 9
     assert [day["date"] for day in result["days"]] == [
         "2026-07-14",
         "2026-07-15",

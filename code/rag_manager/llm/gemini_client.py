@@ -6,6 +6,7 @@ import json
 import re
 import sys
 import time
+from dataclasses import dataclass
 from typing import Any
 
 from rag_manager.config import Settings
@@ -18,6 +19,15 @@ TRANSIENT_STATUS_CODES = {408, 409, 429, 500, 502, 503, 504}
 
 class GeminiRequestError(RuntimeError):
     """Raised when Gemini still fails after bounded retry."""
+
+
+@dataclass(frozen=True)
+class _StreamResult:
+    """Fully collected response and timing metadata from one streamed call."""
+
+    text: str
+    usage_response: Any
+    timings: dict[str, float | None]
 
 
 class GeminiClient:
@@ -56,7 +66,7 @@ class GeminiClient:
             f"prompt_chars={len(prompt)} temperature={temperature}"
         )
         try:
-            response = self._generate_content_with_retry(
+            stream_result = self._generate_content_stream_with_retry(
                 prompt,
                 _generation_configs(self.model, temperature, self._types),
                 call_id=call_id,
@@ -67,13 +77,17 @@ class GeminiClient:
                 f"type={type(exc).__name__} detail={exc}"
             )
             raise
-        self.last_usage = extract_llm_usage_native(response, self.model)
+        self.last_usage = extract_llm_usage_native(
+            stream_result.usage_response,
+            self.model,
+        )
+        self.last_usage.update(stream_result.timings)
         print_llm_cache_metrics(
             self.last_usage,
             source="gemini_native",
             call_id=call_id,
         )
-        text = strip_thought_tags(_response_text(response))
+        text = strip_thought_tags(stream_result.text)
         _debug_print(f"[Gemini][call={call_id}] RESULT {text}")
         return text
 
@@ -92,28 +106,121 @@ class GeminiClient:
         )
         return parse_json_object(text)
 
-    def _generate_content_with_retry(
+    def chat_structured_json(
+        self,
+        system_prompt: str,
+        user_message: str,
+        *,
+        response_schema: type[Any],
+        temperature: float = 0.0,
+    ) -> dict[str, Any]:
+        """Call Gemini with an API-constrained JSON response schema."""
+
+        self._call_sequence += 1
+        call_id = self._call_sequence
+        _debug_print(
+            f"[Gemini][call={call_id}] START_STRUCTURED model={self.model} "
+            f"input_chars={len(user_message)} temperature={temperature}"
+        )
+        try:
+            stream_result = self._generate_content_stream_with_retry(
+                user_message,
+                _structured_generation_configs(
+                    self.model,
+                    system_prompt,
+                    response_schema,
+                    temperature,
+                    self._types,
+                ),
+                call_id=call_id,
+            )
+        except Exception as exc:
+            _debug_print(
+                f"[Gemini][call={call_id}] ERROR "
+                f"type={type(exc).__name__} detail={exc}"
+            )
+            raise
+
+        self.last_usage = extract_llm_usage_native(
+            stream_result.usage_response,
+            self.model,
+        )
+        self.last_usage.update(stream_result.timings)
+        print_llm_cache_metrics(
+            self.last_usage,
+            source="gemini_native_structured",
+            call_id=call_id,
+        )
+        text = stream_result.text.strip()
+        try:
+            parsed = response_schema.model_validate_json(text)
+        except Exception as exc:  # Pydantic exception type is schema-owned
+            raise GeminiRequestError(
+                "Gemini returned output that does not match the response schema."
+            ) from exc
+
+        result = parsed.model_dump()
+        if not isinstance(result, dict):
+            raise GeminiRequestError("Structured response must be a JSON object.")
+        _debug_print(f"[Gemini][call={call_id}] STRUCTURED_RESULT {result}")
+        return result
+
+    def _generate_content_stream_with_retry(
         self,
         prompt: str,
         configs: list[Any],
         *,
         call_id: int,
-    ) -> Any:
-        """Call Gemini with retry logic and thinking-config fallback."""
+    ) -> _StreamResult:
+        """Stream Gemini with retry logic, then return one collected response."""
         last_error: Exception | None = None
+        logical_started_at = time.perf_counter()
 
         for config_index, config in enumerate(configs):
             for attempt in range(MAX_TRANSIENT_RETRIES + 1):
                 try:
                     _debug_print(
-                        f"[Gemini][call={call_id}] HTTP_ATTEMPT "
+                        f"[Gemini][call={call_id}] HTTP_STREAM_ATTEMPT "
                         f"config={config_index + 1}/{len(configs)} "
                         f"attempt={attempt + 1}/{MAX_TRANSIENT_RETRIES + 1}"
                     )
-                    return self.client.models.generate_content(
+                    chunks = self.client.models.generate_content_stream(
                         model=self.model,
                         contents=prompt,
                         config=config,
+                    )
+                    text_parts: list[str] = []
+                    usage_response: Any = None
+                    last_chunk: Any = None
+                    first_token_at: float | None = None
+                    first_visible_at: float | None = None
+                    last_visible_at: float | None = None
+
+                    for chunk in chunks:
+                        received_at = time.perf_counter()
+                        last_chunk = chunk
+                        token_present, visible_text = _stream_chunk_content(chunk)
+                        if token_present and first_token_at is None:
+                            first_token_at = received_at
+                        if visible_text:
+                            if first_visible_at is None:
+                                first_visible_at = received_at
+                            last_visible_at = received_at
+                            text_parts.append(visible_text)
+                        if _native_usage_metadata(chunk):
+                            usage_response = chunk
+
+                    completed_at = time.perf_counter()
+                    return _StreamResult(
+                        text="".join(text_parts),
+                        usage_response=usage_response or last_chunk,
+                        timings=_stream_timings(
+                            started_at=logical_started_at,
+                            first_token_at=first_token_at,
+                            first_visible_at=first_visible_at,
+                            last_visible_at=last_visible_at,
+                            completed_at=completed_at,
+                        ),
                     )
                 except Exception as exc:  # noqa: BLE001 - SDK exception classes vary by version
                     last_error = exc
@@ -154,6 +261,44 @@ def _generation_configs(model: str, temperature: float, types: Any) -> list[Any]
     base_kwargs: dict[str, Any] = {
         "temperature": temperature,
         "max_output_tokens": MAX_OUTPUT_TOKENS,
+    }
+
+    if _uses_thinking_level(model):
+        return [
+            types.GenerateContentConfig(
+                **base_kwargs,
+                thinking_config=types.ThinkingConfig(thinking_level="minimal"),
+            )
+        ]
+
+    return [
+        types.GenerateContentConfig(
+            **base_kwargs,
+            thinking_config=types.ThinkingConfig(thinking_budget=0),
+        ),
+        types.GenerateContentConfig(
+            **base_kwargs,
+            thinking_config=types.ThinkingConfig(thinking_level="minimal"),
+        ),
+        types.GenerateContentConfig(**base_kwargs),
+    ]
+
+
+def _structured_generation_configs(
+    model: str,
+    system_prompt: str,
+    response_schema: type[Any],
+    temperature: float,
+    types: Any,
+) -> list[Any]:
+    """Build Structured Output configs while preserving model thinking support."""
+
+    base_kwargs: dict[str, Any] = {
+        "system_instruction": system_prompt,
+        "temperature": temperature,
+        "max_output_tokens": MAX_OUTPUT_TOKENS,
+        "response_mime_type": "application/json",
+        "response_schema": response_schema,
     }
 
     if _uses_thinking_level(model):
@@ -273,29 +418,81 @@ def strip_thought_tags(text: str) -> str:
     return cleaned.strip()
 
 
-def _response_text(response: Any) -> str:
-    text = getattr(response, "text", None)
-    if isinstance(text, str):
-        return text
+def _stream_chunk_content(chunk: Any) -> tuple[bool, str]:
+    """Return whether a chunk contains tokens and its non-thinking text."""
 
-    parts = []
-    for candidate in getattr(response, "candidates", []) or []:
+    saw_parts = False
+    token_present = False
+    visible_parts: list[str] = []
+    for candidate in getattr(chunk, "candidates", []) or []:
         content = getattr(candidate, "content", None)
         for part in getattr(content, "parts", []) or []:
-            if getattr(part, "thought", False):
-                continue
+            saw_parts = True
             part_text = getattr(part, "text", None)
-            if isinstance(part_text, str):
-                parts.append(part_text)
+            if not isinstance(part_text, str) or not part_text:
+                continue
+            token_present = True
+            if not getattr(part, "thought", False):
+                visible_parts.append(part_text)
 
-    return "".join(parts)
+    if saw_parts:
+        return token_present, "".join(visible_parts)
+
+    text = getattr(chunk, "text", None)
+    if isinstance(text, str) and text:
+        return True, text
+    return False, ""
+
+
+def _native_usage_metadata(response: Any) -> dict[str, Any]:
+    """Read native usage metadata from either SDK naming convention."""
+
+    usage_metadata = _object_to_dict(getattr(response, "usage_metadata", None))
+    if not usage_metadata:
+        usage_metadata = _object_to_dict(getattr(response, "usageMetadata", None))
+    return usage_metadata
+
+
+def _stream_timings(
+    *,
+    started_at: float,
+    first_token_at: float | None,
+    first_visible_at: float | None,
+    last_visible_at: float | None,
+    completed_at: float,
+) -> dict[str, float | None]:
+    """Build stream latency measurements in seconds from request start."""
+
+    return {
+        "time_to_first_token": _elapsed_timestamp(started_at, first_token_at),
+        "time_to_first_visible": _elapsed_timestamp(started_at, first_visible_at),
+        "time_to_last_visible": _elapsed_timestamp(started_at, last_visible_at),
+        "visible_generation_duration": _between_timestamps(
+            first_visible_at,
+            last_visible_at,
+        ),
+        "total_request_time": round(max(0.0, completed_at - started_at), 6),
+    }
+
+
+def _elapsed_timestamp(started_at: float, timestamp: float | None) -> float | None:
+    if timestamp is None:
+        return None
+    return round(max(0.0, timestamp - started_at), 6)
+
+
+def _between_timestamps(
+    started_at: float | None,
+    completed_at: float | None,
+) -> float | None:
+    if started_at is None or completed_at is None:
+        return None
+    return round(max(0.0, completed_at - started_at), 6)
 
 
 def extract_llm_usage_native(response: Any, model: str) -> dict[str, Any]:
     """Extract token/cache metadata from native Gemini API response."""
-    usage_metadata = _object_to_dict(getattr(response, "usage_metadata", None))
-    if not usage_metadata:
-        usage_metadata = _object_to_dict(getattr(response, "usageMetadata", None))
+    usage_metadata = _native_usage_metadata(response)
 
     prompt_tokens = _int_value(
         usage_metadata.get("promptTokenCount"),

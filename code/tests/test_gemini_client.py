@@ -1,6 +1,7 @@
 import pytest
 from google.genai import types
 
+from rag_manager.agents.manager_structured_schema import ManagerPlanResponse
 from rag_manager.llm import gemini_client
 from rag_manager.llm.gemini_client import GeminiClient, GeminiRequestError
 
@@ -11,13 +12,15 @@ class _FakeModels:
         self.calls = 0
         self.kwargs: list[dict[str, object]] = []
 
-    def generate_content(self, **kwargs):
+    def generate_content_stream(self, **kwargs):
         self.calls += 1
         self.kwargs.append(kwargs)
         outcome = self.outcomes.pop(0)
         if isinstance(outcome, Exception):
             raise outcome
-        return outcome
+        if isinstance(outcome, tuple):
+            return iter(outcome)
+        return iter((outcome,))
 
 
 class _FakeNativeClient:
@@ -60,6 +63,106 @@ def test_gemma_client_uses_native_generate_content_with_minimal_thinking() -> No
         "maxOutputTokens": gemini_client.MAX_OUTPUT_TOKENS,
         "thinkingConfig": {"thinkingLevel": types.ThinkingLevel.MINIMAL},
     }
+    assert client.last_usage["time_to_first_token"] is not None
+    assert client.last_usage["time_to_first_visible"] is not None
+    assert client.last_usage["time_to_last_visible"] is not None
+    assert client.last_usage["visible_generation_duration"] == 0.0
+    assert client.last_usage["total_request_time"] is not None
+
+
+def test_streaming_records_first_token_and_visible_latency_separately(monkeypatch) -> None:
+    class Part:
+        def __init__(self, text: str, *, thought: bool) -> None:
+            self.text = text
+            self.thought = thought
+
+    class Content:
+        def __init__(self, parts: list[Part]) -> None:
+            self.parts = parts
+
+    class Candidate:
+        def __init__(self, parts: list[Part]) -> None:
+            self.content = Content(parts)
+
+    class Chunk:
+        def __init__(
+            self,
+            text: str,
+            *,
+            thought: bool = False,
+            usage_metadata: dict | None = None,
+        ) -> None:
+            self.candidates = [Candidate([Part(text, thought=thought)])]
+            self.usage_metadata = usage_metadata
+
+    client, _models = _client_with_outcomes(
+        [
+            (
+                Chunk("hidden", thought=True),
+                Chunk("Visible "),
+                Chunk(
+                    "answer",
+                    usage_metadata={
+                        "promptTokenCount": 10,
+                        "candidatesTokenCount": 2,
+                        "totalTokenCount": 12,
+                    },
+                ),
+            )
+        ]
+    )
+    timestamps = iter((10.0, 10.2, 10.5, 10.8, 11.0))
+    monkeypatch.setattr(gemini_client.time, "perf_counter", lambda: next(timestamps))
+
+    result = client.chat_text("system", "user")
+
+    assert result == "Visible answer"
+    assert client.last_usage["time_to_first_token"] == 0.2
+    assert client.last_usage["time_to_first_visible"] == 0.5
+    assert client.last_usage["time_to_last_visible"] == 0.8
+    assert client.last_usage["visible_generation_duration"] == 0.3
+    assert client.last_usage["total_request_time"] == 1.0
+
+
+def test_structured_json_uses_system_instruction_and_response_schema() -> None:
+    class StructuredResponse:
+        text = (
+            '{"topics":["weather"],"execution_mode":"single",'
+            '"primary_intent":"weather","dependencies":[],'
+            '"news_query":"","wiki_topic":""}'
+        )
+
+    client, models = _client_with_outcomes([StructuredResponse()])
+
+    result = client.chat_structured_json(
+        "manager system prompt",
+        '{"query":"Thời tiết Hà Nội"}',
+        response_schema=ManagerPlanResponse,
+    )
+
+    assert result["topics"] == ["weather"]
+    assert models.kwargs[0]["contents"] == '{"query":"Thời tiết Hà Nội"}'
+    config = _config_dict(models.kwargs[0]["config"])
+    assert config["systemInstruction"] == "manager system prompt"
+    assert config["responseMimeType"] == "application/json"
+    assert config["responseSchema"] is ManagerPlanResponse
+    assert config["thinkingConfig"] == {
+        "thinkingLevel": types.ThinkingLevel.MINIMAL
+    }
+
+
+def test_structured_json_rejects_output_outside_schema() -> None:
+    class InvalidStructuredResponse:
+        text = '{"topics":["unsupported"]}'
+
+    client, _models = _client_with_outcomes([InvalidStructuredResponse()])
+
+    with pytest.raises(GeminiRequestError, match="does not match"):
+        client.chat_structured_json(
+            "manager system prompt",
+            '{"query":"test"}',
+            response_schema=ManagerPlanResponse,
+        )
 
 
 def test_gemini_client_retries_transient_error_then_returns_text(monkeypatch) -> None:

@@ -104,7 +104,7 @@ def fetch_weather_forecast(
     *,
     api_key: str,
     timeout_seconds: float = 8,
-    days: int = 3,
+    days: int | None = None,
     latitude: float | None = None,
     longitude: float | None = None,
 ) -> ServiceResponse:
@@ -118,17 +118,19 @@ def fetch_weather_forecast(
     if isinstance(query_params, str):
         return _weather_error(query_params)
 
-    bounded_days = max(1, min(days, 5))
+    bounded_days = max(1, min(int(days), 5)) if days is not None else None
+    params: dict[str, Any] = {
+        **query_params,
+        "appid": api_key,
+        "units": "metric",
+        "lang": "vi",
+    }
+    if bounded_days is not None:
+        params["cnt"] = bounded_days * 8
     response = get_json(
         OPENWEATHER_FORECAST_URL,
         source=WEATHER_SOURCE,
-        params={
-            **query_params,
-            "appid": api_key,
-            "units": "metric",
-            "lang": "vi",
-            "cnt": bounded_days * 8,
-        },
+        params=params,
         timeout_seconds=timeout_seconds,
     )
     _print_raw_api_response("forecast", location, response)
@@ -237,7 +239,11 @@ def compact_weather_data(data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def compact_forecast_data(data: dict[str, Any], *, days: int) -> dict[str, Any]:
+def compact_forecast_data(
+    data: dict[str, Any],
+    *,
+    days: int | None = None,
+) -> dict[str, Any]:
     city = _dict_field(data, "city")
     timezone_offset = _validated_timezone_offset(city.get("timezone"))
     raw_forecasts = data.get("list", [])
@@ -257,9 +263,16 @@ def compact_forecast_data(data: dict[str, Any], *, days: int) -> dict[str, Any]:
     for items in forecasts_by_date.values():
         items.sort(key=lambda item: item["timestamp"])
 
-    daily = [
+    all_daily = [
         _compact_daily_forecast(date, items)
-        for date, items in sorted(forecasts_by_date.items())[:days]
+        for date, items in sorted(forecasts_by_date.items())
+    ]
+    daily = all_daily[:days] if days is not None else all_daily
+    all_intervals = [
+        interval
+        for day in daily
+        for interval in day.get("intervals", [])
+        if isinstance(interval, dict)
     ]
 
     return {
@@ -268,6 +281,14 @@ def compact_forecast_data(data: dict[str, Any], *, days: int) -> dict[str, Any]:
         "timezone": timezone_offset,
         "timezone_offset_seconds": timezone_offset,
         "requested_days": days,
+        "available_day_count": len(daily),
+        "interval_count": len(all_intervals),
+        "coverage_start_local": (
+            all_intervals[0].get("forecast_at_local") if all_intervals else None
+        ),
+        "coverage_end_local": (
+            all_intervals[-1].get("forecast_at_local") if all_intervals else None
+        ),
         "source_granularity": "3-hour forecast intervals",
         "day_grouping": "location_local_date",
         "interval_time_basis": "location_local_time",

@@ -221,6 +221,13 @@
         <div>
           <h1>{{ data.location.name }}</h1>
           <p class="location-meta">{{ data.location.country }}</p>
+          {% if data.presentation and data.presentation.mode == 'hourly_forecast' %}
+            <p class="location-meta">{{ data.presentation.time_label }}</p>
+            {% if data.presentation.interval_notice %}
+              <p class="location-meta">{{ data.presentation.interval_notice }}</p>
+            {% endif %}
+            <p class="location-meta">Source: {{ data.source.provider }}</p>
+          {% endif %}
           <p class="condition">{{ data.current.condition.description }}</p>
           <div class="temp">{{ data.current.temperature.current_celsius }}<span>&deg;C</span></div>
         </div>
@@ -248,6 +255,7 @@
         </div>
       </div>
 
+      {% if not data.presentation or data.presentation.mode != 'hourly_forecast' %}
       <section class="forecast" data-slot="chart">
         <h2>Forecast</h2>
         <div class="forecast-list">
@@ -272,6 +280,7 @@
         </div>
         <p class="source-note">Source: {{ data.source.provider }} {{ data.forecast.source_granularity }}</p>
       </section>
+      {% endif %}
 
       <section class="answer" data-slot="footer">{{ answer }}</section>
     </section>

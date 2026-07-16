@@ -1,4 +1,4 @@
-"""Background worker that refreshes Redis weather snapshots from OpenWeather."""
+"""Background worker that refreshes Redis weather snapshots from Open-Meteo."""
 
 from __future__ import annotations
 
@@ -13,9 +13,8 @@ from pathlib import Path
 from typing import Any
 
 from rag_manager.config import Settings, load_settings
+from rag_manager.services.open_meteo_api import fetch_open_meteo_weather
 from rag_manager.services.weather_api import (
-    fetch_weather,
-    fetch_weather_forecast,
     geocode_weather_location,
 )
 from rag_manager.services.weather_redis import (
@@ -160,7 +159,10 @@ def preflight_weather_locations(
         any(not location.has_coordinates for location in resolved_locations)
         and not settings.openweather_api_key.strip()
     ):
-        return _refresh_error("Missing OPENWEATHER_API_KEY.")
+        return _refresh_error(
+            "Missing OPENWEATHER_API_KEY.",
+            code="missing_openweather_api_key",
+        )
     resolved: list[dict[str, Any]] = []
     suspicious: list[dict[str, Any]] = []
     failed: list[dict[str, Any]] = []
@@ -287,9 +289,6 @@ def refresh_weather_snapshot(
 ) -> dict[str, Any]:
     """Fetch a complete snapshot and atomically make it active in Redis."""
 
-    if not settings.openweather_api_key.strip():
-        return _refresh_error("Missing OPENWEATHER_API_KEY.")
-
     resolved_store = store or RedisWeatherStore.from_settings(settings)
     resolved_locations = locations or load_weather_locations(
         settings.weather_locations_file or None
@@ -298,42 +297,120 @@ def refresh_weather_snapshot(
     entries: list[WeatherSnapshotEntry] = []
     failures: list[dict[str, Any]] = []
 
-    for location in resolved_locations:
-        current = fetch_weather(
-            location.query,
-            api_key=settings.openweather_api_key,
-            timeout_seconds=settings.request_timeout_seconds,
-            latitude=location.latitude,
-            longitude=location.longitude,
+    total_locations = len(resolved_locations)
+    for index, location in enumerate(resolved_locations, start=1):
+        _print_fetch_progress(
+            event="FETCH_START",
+            index=index,
+            total=total_locations,
+            location=location,
         )
-        forecast = fetch_weather_forecast(
-            location.query,
-            api_key=settings.openweather_api_key,
-            timeout_seconds=settings.request_timeout_seconds,
-            days=5,
-            latitude=location.latitude,
-            longitude=location.longitude,
-        )
-        if not current.get("ok") or not forecast.get("ok"):
+        if not location.has_coordinates:
+            _print_fetch_progress(
+                event="FETCH_FAILED",
+                index=index,
+                total=total_locations,
+                location=location,
+                details="reason=missing_coordinates",
+            )
             failures.append(
                 {
                     "location": location.name,
                     "location_id": location.location_id,
                     "latitude": location.latitude,
                     "longitude": location.longitude,
-                    "current_error": current.get("error"),
-                    "forecast_error": forecast.get("error"),
+                    "weather_error": {
+                        "source": "weather_snapshot_worker",
+                        "code": "missing_location_coordinates",
+                        "message": (
+                            "Open-Meteo snapshot refresh requires configured "
+                            "latitude and longitude."
+                        ),
+                    },
                 }
             )
             continue
+
+        fetch_started_at = time.perf_counter()
+        weather = fetch_open_meteo_weather(
+            timeout_seconds=settings.request_timeout_seconds,
+            latitude=location.latitude,
+            longitude=location.longitude,
+        )
+        if not weather.get("ok"):
+            elapsed_seconds = time.perf_counter() - fetch_started_at
+            raw_error = weather.get("error", {})
+            error_message = (
+                str(raw_error.get("message", "provider_request_failed"))
+                if isinstance(raw_error, dict)
+                else "provider_request_failed"
+            )
+            _print_fetch_progress(
+                event="FETCH_FAILED",
+                index=index,
+                total=total_locations,
+                location=location,
+                elapsed_seconds=elapsed_seconds,
+                details=f"reason={error_message!r}",
+            )
+            failures.append(
+                {
+                    "location": location.name,
+                    "location_id": location.location_id,
+                    "latitude": location.latitude,
+                    "longitude": location.longitude,
+                    "weather_error": weather.get("error"),
+                }
+            )
+            continue
+        weather_data = weather.get("data", {})
+        current_data = weather_data.get("current")
+        forecast_data = weather_data.get("forecast")
+        if not isinstance(current_data, dict) or not isinstance(forecast_data, dict):
+            _print_fetch_progress(
+                event="FETCH_FAILED",
+                index=index,
+                total=total_locations,
+                location=location,
+                elapsed_seconds=time.perf_counter() - fetch_started_at,
+                details="reason=provider_payload_invalid",
+            )
+            failures.append(
+                {
+                    "location": location.name,
+                    "location_id": location.location_id,
+                    "latitude": location.latitude,
+                    "longitude": location.longitude,
+                    "weather_error": {
+                        "source": "weather_snapshot_worker",
+                        "code": "provider_payload_invalid",
+                        "message": (
+                            "Open-Meteo response is missing normalized current or "
+                            "forecast data."
+                        ),
+                    },
+                }
+            )
+            continue
+        _print_fetch_progress(
+            event="FETCH_OK",
+            index=index,
+            total=total_locations,
+            location=location,
+            elapsed_seconds=time.perf_counter() - fetch_started_at,
+            details=(
+                f"observed_at_local={current_data.get('observed_at_local')!r} "
+                f"hourly_intervals={forecast_data.get('interval_count')!r}"
+            ),
+        )
         entries.append(
             WeatherSnapshotEntry(
                 location_id=location.location_id,
                 location=location.name,
-                current=_canonical_weather_data(current["data"], location),
-                forecast=_canonical_weather_data(forecast["data"], location),
-                raw_current=current.get("raw_data", current["data"]),
-                raw_forecast=forecast.get("raw_data", forecast["data"]),
+                current=_canonical_weather_data(current_data, location),
+                forecast=_canonical_weather_data(forecast_data, location),
+                raw_current=weather.get("raw_current", current_data),
+                raw_forecast=weather.get("raw_forecast", forecast_data),
             )
         )
 
@@ -345,8 +422,11 @@ def refresh_weather_snapshot(
             "failed_locations": failures,
             "error": {
                 "source": "weather_snapshot_worker",
+                "code": "snapshot_fetch_incomplete",
                 "message": "Snapshot was not activated because some locations failed.",
+                "retryable": True,
                 "status_code": None,
+                "details": {"failed_location_count": len(failures)},
             },
         }
 
@@ -355,14 +435,13 @@ def refresh_weather_snapshot(
         "schema_version": WEATHER_SNAPSHOT_SCHEMA_VERSION,
         "snapshot_id": snapshot_id,
         "generated_at_utc": generated_at,
-        "provider": "openweathermap",
+        "provider": "open-meteo",
         "location_count": len(entries),
-        "forecast_days": 5,
         "location_catalog": "vietnam_63_pre_2025_merger",
         "lookup_mode": "verified_coordinates",
         "day_grouping": "location_local_date",
         "interval_time_basis": "location_local_time",
-        "timezone_source": "openweather_city_timezone_offset",
+        "timezone_source": "open_meteo_timezone_auto",
     }
     try:
         resolved_store.save_snapshot(
@@ -372,7 +451,12 @@ def refresh_weather_snapshot(
             ttl_seconds=settings.weather_snapshot_ttl_seconds,
         )
     except Exception as exc:  # noqa: BLE001 - Redis is an external boundary
-        return _refresh_error(f"Could not publish weather snapshot to Redis: {exc}")
+        return _refresh_error(
+            f"Could not publish weather snapshot to Redis: {exc}",
+            code="redis_publish_failed",
+            retryable=True,
+            details={"exception_type": exc.__class__.__name__},
+        )
     return {"ok": True, **metadata}
 
 
@@ -441,13 +525,22 @@ def main() -> None:
     run_refresh_loop(settings, locations=locations)
 
 
-def _refresh_error(message: str) -> dict[str, Any]:
+def _refresh_error(
+    message: str,
+    *,
+    code: str = "snapshot_refresh_failed",
+    retryable: bool = False,
+    details: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     return {
         "ok": False,
         "error": {
             "source": "weather_snapshot_worker",
+            "code": code,
             "message": message,
+            "retryable": retryable,
             "status_code": None,
+            "details": details or {},
         },
     }
 
@@ -499,6 +592,36 @@ def _canonical_weather_data(
 
 def _print_json_result(result: dict[str, Any]) -> None:
     message = json.dumps(result, ensure_ascii=False, indent=2)
+    try:
+        print(message, flush=True)
+    except UnicodeEncodeError:
+        buffer = getattr(sys.stdout, "buffer", None)
+        if buffer is None:
+            raise
+        buffer.write((message + "\n").encode("utf-8"))
+        buffer.flush()
+
+
+def _print_fetch_progress(
+    *,
+    event: str,
+    index: int,
+    total: int,
+    location: WeatherLocation,
+    elapsed_seconds: float | None = None,
+    details: str = "",
+) -> None:
+    fields = [
+        f"[Open-Meteo][{index}/{total}][{event}]",
+        f"location={location.name!r}",
+        f"latitude={location.latitude!r}",
+        f"longitude={location.longitude!r}",
+    ]
+    if elapsed_seconds is not None:
+        fields.append(f"elapsed={elapsed_seconds:.3f}s")
+    if details:
+        fields.append(details)
+    message = " ".join(fields)
     try:
         print(message, flush=True)
     except UnicodeEncodeError:

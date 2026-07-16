@@ -11,7 +11,7 @@ from langgraph.graph import END, StateGraph
 from rag_manager.agents.aggregator import run_aggregator_agent
 from rag_manager.agents.manager import classify_intent
 from rag_manager.agents.news import run_news_agent
-from rag_manager.agents.weather import run_weather_agent, run_weather_llm_pipeline
+from rag_manager.agents.weather import run_weather_llm_pipeline
 from rag_manager.agents.wiki import run_wiki_agent
 from rag_manager.config import Settings, load_settings
 from rag_manager.state import GraphState
@@ -50,7 +50,6 @@ def build_workflow():
         "manager_classify",
         route_execution_mode,
         {
-            "end": END,
             "weather": "weather",
             "news": "news",
             "wiki": "wiki",
@@ -207,39 +206,19 @@ def manager_classify_node(state: GraphState) -> GraphState:
         if isinstance(domain_request, str) and domain_request.strip()
         else state.get("query", "")
     )
-    plan = classify_intent(
-        client,
-        manager_query,
-        history=state.get("history", []),
-    )
-    weather_requirements = plan.get("weather_requirements", {})
-    needs_clarification = (
-        isinstance(weather_requirements, dict)
-        and weather_requirements.get("status") == "needs_clarification"
-    )
-    update: GraphState = {
+    raw_history = state.get("history", [])
+    history = raw_history if isinstance(raw_history, list) else []
+    plan = classify_intent(client, manager_query, history=history)
+    return {
         "intent": plan,
-        "manager_status": (
-            "needs_clarification" if needs_clarification else "ready"
-        ),
         "execution_mode": plan["execution_mode"],
         "selected_agents": plan["topics"],
         "timings": {"manager": _elapsed_since(started_at)},
         **_llm_usage_update("manager", client),
     }
-    if needs_clarification:
-        question = weather_requirements.get("clarification_question")
-        update["final_response"] = (
-            question.strip()
-            if isinstance(question, str) and question.strip()
-            else "Bạn muốn xem thời tiết ở đâu và vào thời điểm nào?"
-        )
-    return update
 
 
 def route_execution_mode(state: GraphState) -> str:
-    if state.get("manager_status") == "needs_clarification":
-        return "end"
     execution_mode = state.get("execution_mode")
     if execution_mode == "parallel":
         return "parallel"

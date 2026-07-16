@@ -1,17 +1,38 @@
-﻿from rag_manager.agents.manager import classify_intent
+import json
+
+import pytest
+
+from rag_manager.agents.manager import classify_intent
+from rag_manager.agents.manager_structured_schema import ManagerPlanResponse
+from rag_manager.llm.gemini_client import GeminiRequestError
 
 
 class FakeGeminiClient:
-    def __init__(self, response: dict) -> None:
+    def __init__(self, response: dict | None = None, error: Exception | None = None) -> None:
         self.response = response
+        self.error = error
+        self.system_prompt = ""
         self.user_message = ""
+        self.response_schema = None
 
-    def chat_json(self, system_prompt: str, user_message: str) -> dict:
+    def chat_structured_json(
+        self,
+        system_prompt: str,
+        user_message: str,
+        *,
+        response_schema: type,
+        temperature: float = 0.0,
+    ) -> dict:
+        self.system_prompt = system_prompt
         self.user_message = user_message
-        return self.response
+        self.response_schema = response_schema
+        if self.error is not None:
+            raise self.error
+        assert self.response is not None
+        return response_schema.model_validate(self.response).model_dump()
 
 
-def test_weather_only_routing() -> None:
+def test_manager_routes_weather_with_six_field_structured_output() -> None:
     client = FakeGeminiClient(
         {
             "topics": ["weather"],
@@ -20,65 +41,31 @@ def test_weather_only_routing() -> None:
             "dependencies": [],
             "news_query": "",
             "wiki_topic": "",
-            "reason": "Người dùng hỏi thời tiết hiện tại.",
-            "weather_requirements": {
-                "status": "ready_for_weather",
-                "has_location_expression": True,
-                "has_time_expression": True,
-                "missing_fields": [],
-                "clarification_question": None,
-            },
         }
     )
 
     plan = classify_intent(client, "Thời tiết Hà Nội hôm nay thế nào?")
 
-    assert plan["topics"] == ["weather"]
-    assert plan["execution_mode"] == "single"
-    assert plan["primary_intent"] == "weather"
-    assert plan["weather_requirements"]["status"] == "ready_for_weather"
+    assert plan == {
+        "topics": ["weather"],
+        "execution_mode": "single",
+        "primary_intent": "weather",
+        "dependencies": [],
+        "news_query": "",
+        "wiki_topic": "",
+    }
+    assert set(plan) == {
+        "topics",
+        "execution_mode",
+        "primary_intent",
+        "dependencies",
+        "news_query",
+        "wiki_topic",
+    }
+    assert client.response_schema is ManagerPlanResponse
 
 
-def test_invalid_manager_json_falls_back_to_weather_for_weather_query() -> None:
-    client = FakeGeminiClient(
-        {
-            "error": "invalid_json",
-            "message": "Expecting property name enclosed in double quotes",
-            "raw": "{topics:['weather']}",
-        }
-    )
-
-    plan = classify_intent(client, "Thời tiết Hà Nội hôm nay thế nào?")
-
-    assert plan["topics"] == ["weather"]
-    assert plan["execution_mode"] == "single"
-    assert plan["primary_intent"] == "weather"
-    assert plan["weather_requirements"]["status"] == "ready_for_weather"
-    assert "keyword fallback" in plan["reason"]
-
-
-def test_news_only_routing() -> None:
-    client = FakeGeminiClient(
-        {
-            "topics": ["news"],
-            "execution_mode": "single",
-            "primary_intent": "news",
-            "dependencies": [],
-            "news_query": "tin công nghệ mới nhất hôm nay",
-            "wiki_topic": "",
-            "reason": "Người dùng hỏi tin mới.",
-        }
-    )
-
-    plan = classify_intent(client, "Tin công nghệ mới nhất hôm nay")
-
-    assert plan["topics"] == ["news"]
-    assert plan["execution_mode"] == "single"
-    assert plan["primary_intent"] == "news"
-    assert plan["news_query"] == "tin công nghệ mới nhất hôm nay"
-
-
-def test_wiki_only_routing() -> None:
+def test_manager_sends_current_query_with_empty_relevant_history() -> None:
     client = FakeGeminiClient(
         {
             "topics": ["wiki"],
@@ -87,52 +74,55 @@ def test_wiki_only_routing() -> None:
             "dependencies": [],
             "news_query": "",
             "wiki_topic": "Albert Einstein",
-            "reason": "Người dùng hỏi kiến thức nền.",
         }
     )
 
-    plan = classify_intent(client, "Albert Einstein là ai?")
+    classify_intent(client, "Albert Einstein là ai?")
 
-    assert plan["topics"] == ["wiki"]
-    assert plan["execution_mode"] == "single"
-    assert plan["primary_intent"] == "wiki"
-    assert plan["wiki_topic"] == "Albert Einstein"
+    assert json.loads(client.user_message) == {
+        "query": "Albert Einstein là ai?",
+        "relevant_history": [],
+    }
 
 
-def test_parallel_routing_for_independent_topics() -> None:
+def test_manager_sends_relevant_history_for_short_weather_follow_up() -> None:
     client = FakeGeminiClient(
         {
-            "topics": ["weather", "news"],
-            "execution_mode": "parallel",
+            "topics": ["weather"],
+            "execution_mode": "single",
             "primary_intent": "weather",
             "dependencies": [],
-            "news_query": "tin du lịch Đà Nẵng mới nhất",
+            "news_query": "",
             "wiki_topic": "",
-            "reason": "Người dùng hỏi hai nhu cầu độc lập.",
-            "weather_requirements": {
-                "status": "ready_for_weather",
-                "has_location_expression": True,
-                "has_time_expression": True,
-                "missing_fields": [],
-                "clarification_question": None,
-            },
         }
     )
 
-    plan = classify_intent(
+    classify_intent(
         client,
-        "Thời tiết Đà Nẵng hôm nay và tin du lịch Đà Nẵng mới nhất?",
+        "hôm nay",
+        history=[
+            {"role": "user", "content": "Thời tiết Hà Nội thế nào?"},
+            {
+                "role": "assistant",
+                "content": "Bạn muốn biết thời tiết Hà Nội vào thời điểm nào?",
+            },
+            {"role": "user", "content": "hôm nay"},
+        ],
     )
 
-    assert plan["topics"] == ["weather", "news"]
-    assert plan["execution_mode"] == "parallel"
-    assert plan["primary_intent"] == "weather"
-    assert plan["dependencies"] == []
-    assert plan["weather_requirements"]["status"] == "ready_for_weather"
-    assert plan["news_query"] == "tin du lịch Đà Nẵng mới nhất"
+    assert json.loads(client.user_message) == {
+        "query": "hôm nay",
+        "relevant_history": [
+            {"role": "user", "content": "Thời tiết Hà Nội thế nào?"},
+            {
+                "role": "assistant",
+                "content": "Bạn muốn biết thời tiết Hà Nội vào thời điểm nào?",
+            },
+        ],
+    }
 
 
-def test_sequential_routing_for_dependent_topics() -> None:
+def test_manager_keeps_schema_constrained_dependency_shape() -> None:
     client = FakeGeminiClient(
         {
             "topics": ["wiki", "news"],
@@ -142,89 +132,37 @@ def test_sequential_routing_for_dependent_topics() -> None:
                 {
                     "from_topic": "wiki",
                     "to_topic": "news",
-                    "reason": "Cần xác định chủ thể trước khi tìm tin mới.",
                 }
             ],
             "news_query": "tin mới về OpenAI",
             "wiki_topic": "OpenAI",
-            "reason": "Người dùng hỏi thông tin nền rồi tin mới về cùng chủ thể.",
         }
     )
 
-    plan = classify_intent(
-        client,
-        "OpenAI là gì và có tin mới gì về OpenAI?",
-    )
+    plan = classify_intent(client, "OpenAI là gì và có tin mới gì về OpenAI?")
 
-    assert plan["topics"] == ["wiki", "news"]
-    assert plan["execution_mode"] == "sequential"
-    assert plan["primary_intent"] == "wiki"
     assert plan["dependencies"] == [
-        {
-            "from_topic": "wiki",
-            "to_topic": "news",
-            "reason": "Cần xác định chủ thể trước khi tìm tin mới.",
-        }
-    ]
-    assert plan["wiki_topic"] == "OpenAI"
-    assert plan["news_query"] == "tin mới về OpenAI"
-
-
-def test_manager_uses_history_for_weather_clarification_follow_up() -> None:
-    client = FakeGeminiClient(
-        {
-            "topics": ["weather"],
-            "execution_mode": "single",
-            "primary_intent": "weather",
-            "dependencies": [],
-            "news_query": "",
-            "wiki_topic": "",
-            "reason": "Câu trả lời tiếp nối yêu cầu thời tiết.",
-            "weather_requirements": {
-                "status": "ready_for_weather",
-                "has_location_expression": True,
-                "has_time_expression": True,
-                "missing_fields": [],
-                "clarification_question": None,
-            },
-        }
-    )
-    history = [
-        {"role": "user", "content": "Thời tiết Hà Nội thế nào?"},
-        {
-            "role": "assistant",
-            "content": "Bạn muốn xem thời tiết Hà Nội vào thời điểm nào?",
-        },
-        {"role": "user", "content": "Ngày mai"},
+        {"from_topic": "wiki", "to_topic": "news"}
     ]
 
-    plan = classify_intent(client, "Ngày mai", history)
 
-    assert plan["weather_requirements"]["status"] == "ready_for_weather"
-    assert client.user_message.count("Ngày mai") == 2
+def test_manager_does_not_fallback_when_structured_request_fails() -> None:
+    client = FakeGeminiClient(error=GeminiRequestError("structured request failed"))
+
+    with pytest.raises(GeminiRequestError, match="structured request failed"):
+        classify_intent(client, "Tin công nghệ mới nhất")
 
 
-def test_manager_returns_weather_clarification_when_time_is_missing() -> None:
-    client = FakeGeminiClient(
-        {
-            "topics": ["weather"],
-            "execution_mode": "single",
-            "primary_intent": "weather",
-            "dependencies": [],
-            "news_query": "",
-            "wiki_topic": "",
-            "reason": "Thiếu thời gian.",
-            "weather_requirements": {
-                "status": "needs_clarification",
-                "has_location_expression": True,
-                "has_time_expression": False,
-                "missing_fields": ["time"],
-                "clarification_question": "Bạn muốn xem thời tiết Hà Nội vào thời điểm nào?",
-            },
-        }
-    )
+def test_manager_response_schema_has_exactly_six_required_fields() -> None:
+    schema = ManagerPlanResponse.model_json_schema()
+    expected_fields = {
+        "topics",
+        "execution_mode",
+        "primary_intent",
+        "dependencies",
+        "news_query",
+        "wiki_topic",
+    }
 
-    plan = classify_intent(client, "Thời tiết Hà Nội thế nào?")
-
-    assert plan["weather_requirements"]["missing_fields"] == ["time"]
-    assert plan["weather_requirements"]["clarification_question"].endswith("nào?")
+    assert set(schema["properties"]) == expected_fields
+    assert set(schema["required"]) == expected_fields

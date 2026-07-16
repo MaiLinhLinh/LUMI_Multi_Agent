@@ -62,6 +62,7 @@ class Settings:
     redis_url: str = "redis://localhost:6379/0"
     weather_redis_prefix: str = "weather"
     weather_snapshot_ttl_seconds: int = 14400
+    weather_snapshot_max_age_seconds: int = 14400
     weather_refresh_interval_seconds: int = 10800
     weather_locations_file: str = ""
 
@@ -91,6 +92,9 @@ def load_settings() -> Settings:
         or "weather",
         weather_snapshot_ttl_seconds=_get_int_env(
             "WEATHER_SNAPSHOT_TTL_SECONDS", 14400
+        ),
+        weather_snapshot_max_age_seconds=_get_int_env(
+            "WEATHER_SNAPSHOT_MAX_AGE_SECONDS", 14400
         ),
         weather_refresh_interval_seconds=_get_int_env(
             "WEATHER_REFRESH_INTERVAL_SECONDS", 10800

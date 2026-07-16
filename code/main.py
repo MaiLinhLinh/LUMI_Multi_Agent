@@ -280,21 +280,75 @@ def _print_llm_usage(llm_usage: object) -> None:
         if not isinstance(usage, dict):
             continue
         print(f"  - LLM usage [{agent_name}]:")
-        print(f"    model: {_usage_value(usage, 'model')}")
-        print(f"    prompt_tokens: {_usage_value(usage, 'prompt_tokens')}")
-        print(f"    completion_tokens: {_usage_value(usage, 'completion_tokens')}")
-        print(f"    thoughts_tokens: {_usage_value(usage, 'thoughts_tokens')}")
-        print(f"    total_tokens: {_usage_value(usage, 'total_tokens')}")
-        print(f"    cached_tokens: {_usage_value(usage, 'cached_tokens')}")
-        print(f"    prefix_cache_hit: {_yes_no(usage.get('prefix_cache_hit'))}")
-        print(f"    cache_hit_ratio: {_usage_value(usage, 'cache_hit_ratio')}")
-        print(f"    kv_cache_hit: {usage.get('kv_cache_hit', 'not_exposed_by_gemini_api')}")
-        print(f"    raw_usage_keys: {_usage_value(usage, 'raw_usage_keys')}")
+        if _is_llm_usage_record(usage):
+            _print_llm_usage_record(usage, indent="    ")
+            continue
+
+        for call_name, call_usage in usage.items():
+            if not isinstance(call_usage, dict):
+                continue
+            print(f"    {call_name}:")
+            _print_llm_usage_record(call_usage, indent="      ")
+
+
+def _is_llm_usage_record(usage: dict) -> bool:
+    return any(
+        key in usage
+        for key in (
+            "model",
+            "prompt_tokens",
+            "completion_tokens",
+            "time_to_first_token",
+        )
+    )
+
+
+def _print_llm_usage_record(usage: dict, *, indent: str) -> None:
+    print(f"{indent}model: {_usage_value(usage, 'model')}")
+    print(f"{indent}prompt_tokens: {_usage_value(usage, 'prompt_tokens')}")
+    print(f"{indent}completion_tokens: {_usage_value(usage, 'completion_tokens')}")
+    print(f"{indent}thoughts_tokens: {_usage_value(usage, 'thoughts_tokens')}")
+    print(f"{indent}total_tokens: {_usage_value(usage, 'total_tokens')}")
+    print(
+        f"{indent}time_to_first_token: "
+        f"{_usage_seconds_value(usage, 'time_to_first_token')}"
+    )
+    print(
+        f"{indent}time_to_first_visible: "
+        f"{_usage_seconds_value(usage, 'time_to_first_visible')}"
+    )
+    print(
+        f"{indent}time_to_last_visible: "
+        f"{_usage_seconds_value(usage, 'time_to_last_visible')}"
+    )
+    print(
+        f"{indent}visible_generation_duration: "
+        f"{_usage_seconds_value(usage, 'visible_generation_duration')}"
+    )
+    print(
+        f"{indent}total_request_time: "
+        f"{_usage_seconds_value(usage, 'total_request_time')}"
+    )
+    print(f"{indent}cached_tokens: {_usage_value(usage, 'cached_tokens')}")
+    print(f"{indent}prefix_cache_hit: {_yes_no(usage.get('prefix_cache_hit'))}")
+    print(f"{indent}cache_hit_ratio: {_usage_value(usage, 'cache_hit_ratio')}")
+    print(
+        f"{indent}kv_cache_hit: "
+        f"{usage.get('kv_cache_hit', 'not_exposed_by_gemini_api')}"
+    )
+    print(f"{indent}raw_usage_keys: {_usage_value(usage, 'raw_usage_keys')}")
 
 
 def _usage_value(usage: dict, key: str) -> object:
     value = usage.get(key)
     return "unknown" if value is None else value
+
+
+def _usage_seconds_value(usage: dict, key: str) -> str:
+    value = usage.get(key)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return "unknown"
+    return f"{value:.6f}s"
 
 
 def _yes_no(value: object) -> str:

@@ -1,32 +1,25 @@
-"""Weather Agent implementation with a native two-call pipeline and legacy ReAct path."""
+"""Weather Agent implementation using the native two-call LLM pipeline."""
 
 from __future__ import annotations
 
 import json
-import sys
-import traceback
 from datetime import date, datetime, timedelta
 from time import perf_counter
 from typing import Any
 
-from langchain.agents import create_agent
-from langchain_core.messages import AIMessage
-from langchain_core.tools import tool
-from langchain_google_genai import ChatGoogleGenerativeAI
-
+from rag_manager.agents.weather_structured_schema import WeatherExtractionResponse
 from rag_manager.config import Settings, load_settings
-from rag_manager.llm.gemini_client import print_llm_cache_metrics, strip_thought_tags
+from rag_manager.llm.gemini_client import strip_thought_tags
 from rag_manager.llm.prompts import (
     WEATHER_PIPELINE_EXTRACTION_SYSTEM_PROMPT,
     WEATHER_PIPELINE_RESPONSE_SYSTEM_PROMPT,
-    WEATHER_TOOL_AGENT_SYSTEM_PROMPT,
 )
-from rag_manager.services.weather_location_resolver import (
-    LOCATION_RESOLVER_SOURCE,
-    WeatherLocationResolver,
-    get_weather_location_resolver,
+from rag_manager.services.weather_location_resolver import get_weather_location_resolver
+from rag_manager.services.weather_redis import (
+    WEATHER_REDIS_UNAVAILABLE_CODES,
+    RedisWeatherStore,
+    WeatherStore,
 )
-from rag_manager.services.weather_redis import RedisWeatherStore, WeatherStore
 from rag_manager.services.weather_time_validator import (
     EXPECTED_TIMEZONE_OFFSET_SECONDS,
     MAX_FORECAST_DAYS,
@@ -35,7 +28,7 @@ from rag_manager.services.weather_time_validator import (
 )
 from rag_manager.state import AgentState
 
-WEATHER_PROVIDER = "openweathermap"
+WEATHER_PROVIDER = "open-meteo"
 _WEATHER_PIPELINE_STATUSES = {
     "needs_clarification",
     "unavailable",
@@ -46,62 +39,6 @@ _WEATHER_PIPELINE_ERROR_ANSWER = (
     "Hệ thống không thể tạo câu trả lời thời tiết lúc này. "
     "Bạn vui lòng thử lại sau."
 )
-
-
-def run_weather_agent(
-    state: AgentState,
-    *,
-    store: WeatherStore | None = None,
-    settings: Settings | None = None,
-    client: object | None = None,
-) -> AgentState:
-    """Run the tool-calling weather agent and return state updates."""
-    started_at = perf_counter()
-    settings = settings or load_settings()
-    store = store or state.get("weather_store") or RedisWeatherStore.from_settings(settings)
-    query = state.get("query", "")
-    history = state.get("history", [])
-    try:
-        agent_result = run_weather_tool_agent(
-            query=query if isinstance(query, str) else "",
-            history=history if isinstance(history, list) else [],
-            store=store,
-            settings=settings,
-        )
-    except Exception as exc:  # noqa: BLE001 - convert agent failure into graph state
-        answer = "Hệ thống chưa thể xử lý yêu cầu thời tiết lúc này. Bạn vui lòng thử lại sau."
-        return {
-            "weather_status": "error",
-            "weather_answer": answer,
-            "weather_error": {
-                "stage": "weather_agent",
-                "code": "agent_execution_failed",
-                "message": str(exc) or exc.__class__.__name__,
-                "retryable": True,
-            },
-            "final_response": answer,
-            "cache_stats": {"weather": store.stats()},
-            "timings": {"weather": _elapsed_since(started_at)},
-        }
-
-    update: AgentState = {
-        "weather_status": agent_result["status"],
-        "weather_answer": agent_result["answer"],
-        "cache_stats": {"weather": store.stats()},
-        "timings": {"weather": _elapsed_since(started_at)},
-    }
-    weather_data = agent_result.get("weather_data")
-    if agent_result["status"] == "completed" and isinstance(weather_data, dict):
-        update["weather_data"] = weather_data
-    if agent_result["status"] in {"needs_clarification", "unavailable", "error"}:
-        update["final_response"] = agent_result["answer"]
-    weather_error = agent_result.get("weather_error")
-    if isinstance(weather_error, dict) and weather_error:
-        update["weather_error"] = weather_error
-    usage = agent_result.get("llm_usage")
-    if isinstance(usage, dict) and usage:
-        update["llm_usage"] = {"weather": usage}
-    return update
 
 
 def run_weather_llm_pipeline(
@@ -158,126 +95,121 @@ def run_weather_llm_pipeline(
 
     if pipeline_client is not None:
         try:
-            if not hasattr(pipeline_client, "chat_json"):
-                raise TypeError("Weather pipeline client must provide chat_json().")
-            raw_extraction = pipeline_client.chat_json(
+            if not hasattr(pipeline_client, "chat_structured_json"):
+                raise TypeError(
+                    "Weather pipeline client must provide chat_structured_json()."
+                )
+            extraction = pipeline_client.chat_structured_json(
                 WEATHER_PIPELINE_EXTRACTION_SYSTEM_PROMPT,
                 _pipeline_extraction_message(query, history),
+                response_schema=WeatherExtractionResponse,
             )
             usage["call_1"] = _pipeline_client_usage(pipeline_client)
-            extraction_error = _validate_pipeline_extraction(raw_extraction)
-            if extraction_error:
-                weather_error = extraction_error
-                status = "error"
-                extraction = raw_extraction if isinstance(raw_extraction, dict) else {}
+            _log_pipeline_event(
+                stage="llm1_extraction",
+                code="llm1_result",
+                status="received",
+                result=extraction,
+            )
+            missing_fields = _pipeline_missing_extraction_fields(extraction)
+            if missing_fields:
+                status = "needs_clarification"
+                validation_result = {
+                    "status": "needs_clarification",
+                    "stage": "extraction",
+                    "code": "missing_weather_requirements",
+                    "details": {"missing_fields": missing_fields},
+                }
                 _log_pipeline_event(
                     stage="llm1_extraction",
-                    code=extraction_error["code"],
+                    code="missing_weather_requirements",
                     status=status,
-                    message=extraction_error.get("message", ""),
+                    missing_fields=missing_fields,
                 )
             else:
-                extraction = raw_extraction
-                missing_fields = _pipeline_missing_extraction_fields(extraction)
-                if missing_fields:
-                    status = "needs_clarification"
-                    validation_result = {
-                        "status": "needs_clarification",
-                        "stage": "extraction",
-                        "code": "missing_weather_requirements",
-                        "details": {"missing_fields": missing_fields},
-                    }
-                    _log_pipeline_event(
-                        stage="llm1_extraction",
-                        code="missing_weather_requirements",
-                        status=status,
-                        missing_fields=missing_fields,
-                    )
-                else:
-                    (
-                        status,
-                        validation_result,
-                        canonical_request,
-                        weather_error,
-                        location_result,
-                    ) = _pipeline_validate_request(
-                        extraction,
-                        settings=settings,
-                    )
-                    if isinstance(location_result, dict) and location_result.get("ok"):
-                        validation_result["location_resolution"] = location_result
-                    _log_pipeline_event(
-                        stage="validation",
-                        code=str(validation_result.get("code", "ready_for_redis")),
-                        status=status,
-                        message=weather_error.get(
-                            "message",
-                            validation_result.get("details", {}),
-                        ),
-                    )
+                (
+                    status,
+                    validation_result,
+                    canonical_request,
+                    weather_error,
+                    location_result,
+                ) = _pipeline_validate_request(
+                    extraction,
+                    settings=settings,
+                )
+                _log_pipeline_event(
+                    stage="validation",
+                    code=str(validation_result.get("code", "ready_for_redis")),
+                    status=status,
+                    message=weather_error.get(
+                        "message",
+                        validation_result.get("details", {}),
+                    ),
+                )
 
-                    if status == "ready_for_redis":
-                        if store is None:
-                            try:
-                                store = RedisWeatherStore.from_settings(settings)
-                            except Exception as exc:  # noqa: BLE001 - Redis setup boundary
-                                redis_error = _pipeline_error(
-                                    stage="redis",
-                                    code="redis_client_unavailable",
-                                    message=str(exc) or exc.__class__.__name__,
-                                    retryable=True,
-                                )
-                                _log_pipeline_event(
-                                    stage="redis",
-                                    code="redis_client_unavailable",
-                                    status="error",
-                                    message=redis_error["message"],
-                                )
-                        if store is None:
-                            status = "error"
-                            redis_error = redis_error or _pipeline_error(
+                if status == "ready_for_redis":
+                    if store is None:
+                        try:
+                            store = RedisWeatherStore.from_settings(settings)
+                        except Exception as exc:  # noqa: BLE001 - Redis setup boundary
+                            redis_error = _pipeline_error(
                                 stage="redis",
                                 code="redis_client_unavailable",
-                                message="Weather Redis store is unavailable.",
+                                message=str(exc) or exc.__class__.__name__,
                                 retryable=True,
                             )
-                        else:
-                            try:
-                                (
-                                    status,
-                                    redis_result,
-                                    redis_error,
-                                    weather_data,
-                                ) = _pipeline_read_redis(
-                                    store,
-                                    canonical_request,
-                                    validation_result,
-                                )
-                            except Exception as exc:  # noqa: BLE001 - Redis boundary
-                                status = "error"
-                                redis_error = _pipeline_error(
-                                    stage="redis",
-                                    code="redis_response_error",
-                                    message=str(exc) or exc.__class__.__name__,
-                                    retryable=True,
-                                )
-                                weather_data = None
-                        if redis_error:
-                            weather_error = redis_error if status == "error" else {}
-                        _log_pipeline_event(
+                            _log_pipeline_event(
+                                stage="redis",
+                                code="redis_client_unavailable",
+                                status="error",
+                                message=redis_error["message"],
+                            )
+                    if store is None:
+                        status = "error"
+                        redis_error = redis_error or _pipeline_error(
                             stage="redis",
-                            code=(
-                                str(redis_error.get("code"))
-                                if redis_error
-                                else status
-                            ),
-                            status=status,
-                            message=(
-                                redis_error.get("message", "")
-                                if redis_error
-                                else _pipeline_response_error_message(redis_result)
-                            ),
+                            code="redis_client_unavailable",
+                            message="Weather Redis store is unavailable.",
+                            retryable=True,
                         )
+                    else:
+                        try:
+                            (
+                                status,
+                                redis_result,
+                                redis_error,
+                                weather_data,
+                            ) = _pipeline_read_redis(
+                                store,
+                                canonical_request,
+                                validation_result,
+                            )
+                        except Exception as exc:  # noqa: BLE001 - Redis boundary
+                            status = "error"
+                            redis_error = _pipeline_error(
+                                stage="redis",
+                                code="redis_store_exception",
+                                message=str(exc) or exc.__class__.__name__,
+                                retryable=True,
+                                details={"exception_type": exc.__class__.__name__},
+                            )
+                            weather_data = None
+                    if redis_error:
+                        weather_error = redis_error if status == "error" else {}
+                    _log_pipeline_event(
+                        stage="redis",
+                        code=(
+                            str(redis_error.get("code"))
+                            if redis_error
+                            else status
+                        ),
+                        status=status,
+                        message=(
+                            redis_error.get("message", "")
+                            if redis_error
+                            else _pipeline_response_error_message(redis_result)
+                        ),
+                    )
         except Exception as exc:  # noqa: BLE001 - normalize LLM1 failures
             status = "error"
             weather_error = _pipeline_error(
@@ -430,65 +362,21 @@ def _pipeline_response_message(
     )
 
 
-def _validate_pipeline_extraction(value: Any) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        return _pipeline_error(
-            stage="llm1_extraction",
-            code="llm1_invalid_json" if isinstance(value, str) else "llm1_schema_error",
-            message=(
-                "LLM1 returned non-JSON text."
-                if isinstance(value, str)
-                else "LLM1 did not return a JSON object."
-            ),
-            retryable=False,
-        )
-    error_marker = value.get("error")
-    if isinstance(error_marker, str) and error_marker in {
-        "invalid_json",
-        "json_not_object",
-    }:
-        return _pipeline_error(
-            stage="llm1_extraction",
-            code="llm1_invalid_json",
-            message=str(value.get("message", "LLM1 returned invalid JSON.")),
-            retryable=False,
-        )
-    required_fields = {"location_text", "time_text", "request_type_candidate"}
-    missing = sorted(required_fields.difference(value))
-    if missing:
-        return _pipeline_error(
-            stage="llm1_extraction",
-            code="llm1_schema_error",
-            message=f"LLM1 extraction is missing fields: {', '.join(missing)}.",
-            retryable=False,
-            details={"missing_fields": missing},
-        )
-    for field in ("location_text", "time_text"):
-        field_value = value.get(field)
-        if field_value is not None and not isinstance(field_value, str):
-            return _pipeline_error(
-                stage="llm1_extraction",
-                code="llm1_schema_error",
-                message=f"LLM1 field {field!r} must be a string or null.",
-                retryable=False,
-            )
-    candidate = value.get("request_type_candidate")
-    if candidate is not None and candidate not in {"current", "forecast"}:
-        return _pipeline_error(
-            stage="llm1_extraction",
-            code="llm1_schema_error",
-            message="LLM1 request_type_candidate must be current, forecast, or null.",
-            retryable=False,
-        )
-    return {}
-
-
 def _pipeline_missing_extraction_fields(extraction: dict[str, Any]) -> list[str]:
     missing: list[str] = []
-    for field in ("location_text", "time_text"):
-        value = extraction.get(field)
-        if not isinstance(value, str) or not value.strip():
-            missing.append("location" if field == "location_text" else "time")
+    location_text = extraction.get("location_text")
+    if not isinstance(location_text, str) or not location_text.strip():
+        missing.append("location")
+
+    date_text = extraction.get("date_text")
+    time_of_day_text = extraction.get("time_of_day_text")
+    request_type = extraction.get("request_type_candidate")
+    has_date = isinstance(date_text, str) and bool(date_text.strip())
+    has_time_of_day = isinstance(time_of_day_text, str) and bool(
+        time_of_day_text.strip()
+    )
+    if not has_date and (request_type != "current" or has_time_of_day):
+        missing.append("date")
     return missing
 
 
@@ -498,7 +386,8 @@ def _pipeline_validate_request(
     settings: Settings,
 ) -> tuple[str, dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
     location_text = str(extraction.get("location_text", "")).strip()
-    time_text = str(extraction.get("time_text", "")).strip()
+    date_text = _optional_text(extraction.get("date_text"))
+    time_of_day_text = _optional_text(extraction.get("time_of_day_text"))
     try:
         resolver = get_weather_location_resolver(settings.weather_locations_file or None)
         location_result = resolver.resolve(location_text)
@@ -546,7 +435,8 @@ def _pipeline_validate_request(
 
     try:
         time_result = WeatherTimeValidator().validate(
-            time_text,
+            date_text,
+            time_of_day_text=time_of_day_text,
             request_type_candidate=extraction.get("request_type_candidate"),
         )
     except Exception as exc:  # noqa: BLE001 - validator boundary
@@ -598,6 +488,16 @@ def _pipeline_validate_request(
             )
             return "error", {"status": "error", "code": error["code"]}, {}, error, location_result
         request.update({"start_date": start_date, "days": days})
+        for field in (
+            "time_of_day_text",
+            "requested_time_of_day",
+            "forecast_interval_start_time",
+            "requested_hour",
+            "requested_minute",
+            "forecast_interval_minutes",
+        ):
+            if field in time_result:
+                request[field] = time_result[field]
     elif request_type != "current":
         error = _pipeline_error(
             stage="validation",
@@ -638,16 +538,12 @@ def _pipeline_read_redis(
             )
             tool_name = "get_weather_forecast"
     except Exception as exc:  # noqa: BLE001 - Redis boundary
-        error_code = (
-            "redis_invalid_json"
-            if isinstance(exc, (json.JSONDecodeError, ValueError))
-            else "redis_connection_error"
-        )
         error = _pipeline_error(
             stage="redis",
-            code=error_code,
+            code="redis_store_exception",
             message=str(exc) or exc.__class__.__name__,
             retryable=True,
+            details={"exception_type": exc.__class__.__name__},
         )
         _log_pipeline_event(stage="redis", code=error["code"], status="error")
         return "error", None, error, None
@@ -662,9 +558,20 @@ def _pipeline_read_redis(
         return "error", None, error, None
     _print_redis_lookup(tool_name, location_id, response, lookup_started_at)
     if not response.get("ok"):
-        if _pipeline_is_unavailable_response(response):
-            return "unavailable", response, None, None
         raw_error = response.get("error", {})
+        explicit_code = raw_error.get("code") if isinstance(raw_error, dict) else None
+        if not isinstance(explicit_code, str) or not explicit_code.strip():
+            error = _pipeline_error(
+                stage="redis",
+                code="redis_error_contract_violation",
+                message="Redis weather error response is missing a machine-readable code.",
+                retryable=False,
+                details={"redis_error": raw_error},
+            )
+            return "error", response, error, None
+        error_code = explicit_code.strip()
+        if error_code in WEATHER_REDIS_UNAVAILABLE_CODES:
+            return "unavailable", response, None, None
         message = (
             str(raw_error.get("message", "Redis weather lookup failed."))
             if isinstance(raw_error, dict)
@@ -672,9 +579,19 @@ def _pipeline_read_redis(
         )
         error = _pipeline_error(
             stage="redis",
-            code=_pipeline_redis_error_code(raw_error),
+            code=error_code,
             message=message,
-            retryable=True,
+            retryable=(
+                bool(raw_error.get("retryable"))
+                if isinstance(raw_error, dict)
+                else False
+            ),
+            details=(
+                raw_error.get("details")
+                if isinstance(raw_error, dict)
+                and isinstance(raw_error.get("details"), dict)
+                else None
+            ),
         )
         return "error", response, error, None
 
@@ -726,6 +643,16 @@ def _pipeline_read_redis(
             }
             return "unavailable", unavailable, None, None
 
+        if "requested_time_of_day" in request:
+            selected_data, selection_issue = _select_hourly_forecast(
+                data,
+                request=request,
+            )
+            if selection_issue is not None:
+                return "unavailable", selection_issue, None, None
+            data = selected_data
+            response = {**response, "data": data}
+
     tool_state: dict[str, Any] = {
         "weather_validation": validation_result,
         "resolved_locations": {
@@ -738,37 +665,6 @@ def _pipeline_read_redis(
     else:
         tool_state["forecast_weather_data"] = data
     return "completed", response, None, _build_weather_visualization_data(tool_state)
-
-
-def _pipeline_is_unavailable_response(response: dict[str, Any]) -> bool:
-    error = response.get("error", {})
-    if not isinstance(error, dict):
-        return False
-    code = str(error.get("code", "")).casefold()
-    if code in {
-        "snapshot_unavailable",
-        "snapshot_not_found",
-        "location_not_in_snapshot",
-        "forecast_date_unavailable",
-        "requested_forecast_unavailable",
-    }:
-        return True
-    return _is_unavailable_redis_response(response)
-
-
-def _pipeline_redis_error_code(error: Any) -> str:
-    if isinstance(error, dict):
-        explicit_code = error.get("code")
-        if isinstance(explicit_code, str) and explicit_code.strip():
-            return explicit_code
-        message = str(error.get("message", "")).casefold()
-    else:
-        message = str(error).casefold()
-    if "not valid json" in message or "invalid json" in message:
-        return "redis_invalid_json"
-    if any(marker in message for marker in ("connection", "connect", "timed out", "timeout")):
-        return "redis_connection_error"
-    return "redis_lookup_failed"
 
 
 def _pipeline_response_error_message(response: dict[str, Any] | None) -> str:
@@ -804,6 +700,13 @@ def _pipeline_client_usage(client: object) -> dict[str, Any]:
     return dict(usage) if isinstance(usage, dict) else {}
 
 
+def _optional_text(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
 def _pipeline_store_stats(store: WeatherStore | None) -> dict[str, int]:
     if store is None:
         return {}
@@ -826,314 +729,6 @@ def _log_pipeline_event(*, stage: str, code: str, status: str | None = None, **d
     )
 
 
-def run_weather_tool_agent(
-    *,
-    query: str,
-    history: list[dict[str, str]],
-    store: WeatherStore,
-    settings: Settings,
-) -> dict[str, Any]:
-    """Invoke a LangChain agent that chooses weather tools for the query."""
-    tools, tool_state = build_weather_tools(
-        store=store,
-        query=query,
-        resolver=get_weather_location_resolver(
-            settings.weather_locations_file or None
-        ),
-    )
-    try:
-        model = _create_weather_model(settings)
-        agent = create_agent(
-            model=model,
-            tools=tools,
-            system_prompt=WEATHER_TOOL_AGENT_SYSTEM_PROMPT,
-        )
-        result = agent.invoke(
-            {
-                "messages": _weather_conversation_messages(query, history)
-            }
-        )
-    except Exception as exc:  # noqa: BLE001 - preserve the original workflow error
-        _print_weather_exception_debug(
-            exc,
-            query=query,
-            history=history,
-            tool_state=tool_state,
-        )
-        raise
-    answer = strip_thought_tags(_last_ai_text(result))
-    status = _weather_status(tool_state, answer)
-    final_answer = answer or _fallback_weather_answer(tool_state, status=status)
-    weather_error = tool_state.get("weather_error")
-    return {
-        "status": status,
-        "answer": final_answer,
-        "weather_data": (
-            _build_weather_visualization_data(tool_state)
-            if status == "completed"
-            else None
-        ),
-        "weather_error": weather_error if isinstance(weather_error, dict) else {},
-        "llm_usage": _extract_langchain_usage(result, settings.gemini_model),
-    }
-
-
-def build_weather_tools(
-    *,
-    store: WeatherStore,
-    location_hint: str = "",
-    query: str = "",
-    resolver: WeatherLocationResolver | None = None,
-    reference_datetime: datetime | None = None,
-) -> tuple[list[Any], dict[str, Any]]:
-    """Create weather tools bound to the current request context."""
-    tool_state: dict[str, Any] = {}
-    resolved_resolver = resolver or get_weather_location_resolver()
-
-    time_validator = WeatherTimeValidator()
-
-    @tool
-    def resolve_weather_location(location_text: str = "") -> dict[str, Any]:
-        """Resolve one extracted Vietnamese place phrase to a stable location_id."""
-        requested = location_text.strip() or location_hint.strip()
-        response = resolved_resolver.resolve(requested)
-        _record_support_tool_call(
-            tool_state,
-            "resolve_weather_location",
-            source="location_catalog",
-        )
-        resolutions = tool_state.setdefault("location_resolutions", [])
-        if isinstance(resolutions, list):
-            resolutions.append(response)
-        if response.get("ok"):
-            location_id = str(response.get("location_id", ""))
-            resolved_locations = tool_state.setdefault("resolved_locations", {})
-            if isinstance(resolved_locations, dict):
-                resolved_locations[location_id] = response
-        else:
-            _record_weather_error(tool_state, response)
-        _print_location_resolution(requested, response)
-        return response
-
-    @tool
-    def get_current_weather(location_id: str) -> dict[str, Any]:
-        """Read current weather by a resolver-confirmed location_id from Redis."""
-        resolution_error = _require_resolved_location(tool_state, location_id)
-        if resolution_error:
-            _record_weather_error(tool_state, resolution_error)
-            return resolution_error
-        lookup_started_at = perf_counter()
-        response = store.get_current(location_id)
-        _print_redis_lookup("get_current_weather", location_id, response, lookup_started_at)
-        if response.get("ok"):
-            _record_weather_tool_call(tool_state, "get_current_weather", cached=True)
-            tool_state["current_weather_data"] = response["data"]
-            tool_state["last_weather_data"] = response["data"]
-        else:
-            error_data = {
-                "location": _resolved_location_name(tool_state, location_id),
-                "location_id": location_id,
-                "error": response.get("error", {}),
-            }
-            _record_weather_tool_call(tool_state, "get_current_weather", cached=False)
-            _record_weather_error(tool_state, error_data)
-            tool_state["last_weather_data"] = error_data
-        return response
-
-    @tool
-    def get_weather_forecast(
-        location_id: str,
-        days: int = 3,
-        start_date: str = "",
-    ) -> dict[str, Any]:
-        """Read forecast days by location_id, optional YYYY-MM-DD start date."""
-        resolution_error = _require_resolved_location(tool_state, location_id)
-        if resolution_error:
-            _record_weather_error(tool_state, resolution_error)
-            return resolution_error
-        bounded_days = max(1, min(int(days), 5))
-        lookup_started_at = perf_counter()
-        response = store.get_forecast(
-            location_id,
-            days=bounded_days,
-            start_date=start_date.strip() or None,
-        )
-        _print_redis_lookup("get_weather_forecast", location_id, response, lookup_started_at)
-        if response.get("ok"):
-            _record_weather_tool_call(tool_state, "get_weather_forecast", cached=True)
-            tool_state["forecast_weather_data"] = response["data"]
-            tool_state["last_weather_data"] = response["data"]
-        else:
-            error_data = {
-                "location": _resolved_location_name(tool_state, location_id),
-                "location_id": location_id,
-                "requested_days": bounded_days,
-                "requested_start_date": start_date.strip() or None,
-                "error": response.get("error", {}),
-            }
-            _record_weather_tool_call(tool_state, "get_weather_forecast", cached=False)
-            _record_weather_error(tool_state, error_data)
-            tool_state["last_weather_data"] = error_data
-        return response
-
-    @tool
-    def validate_weather_request(
-        location_text: str | None = None,
-        time_text: str | None = None,
-        request_type_candidate: str | None = None,
-    ) -> dict[str, Any]:
-        """Validate raw location/time text and create the internal Redis request."""
-
-        location_value = location_text.strip() if isinstance(location_text, str) else ""
-        time_value = time_text.strip() if isinstance(time_text, str) else ""
-        missing_fields = [
-            field
-            for field, value in (("location", location_value), ("time", time_value))
-            if not value
-        ]
-        if missing_fields:
-            stage = missing_fields[0] if len(missing_fields) == 1 else "extraction"
-            validation = {
-                "status": "needs_clarification",
-                "stage": stage,
-                "code": "missing_weather_requirements",
-                "details": {"missing_fields": missing_fields},
-            }
-            tool_state["weather_validation"] = validation
-            tool_state["weather_status"] = "needs_clarification"
-            return validation
-
-        location_result = resolve_weather_location.invoke(
-            {"location_text": location_value}
-        )
-        if not location_result.get("ok"):
-            raw_error = location_result.get("error", {})
-            error = raw_error if isinstance(raw_error, dict) else {}
-            validation = {
-                "status": "needs_clarification",
-                "stage": "location",
-                "code": str(error.get("code", "location_not_found")),
-                "details": {
-                    "requested_text": location_value,
-                    "candidates": location_result.get("candidates", []),
-                },
-            }
-            tool_state["weather_validation"] = validation
-            tool_state["weather_status"] = "needs_clarification"
-            return validation
-
-        location_id = str(location_result.get("location_id", ""))
-        resolved_locations = tool_state.get("resolved_locations", {})
-        if not (
-            location_id
-            and isinstance(resolved_locations, dict)
-            and location_id in resolved_locations
-        ):
-            return _set_weather_tool_error(
-                tool_state,
-                stage="location",
-                code="resolved_location_state_missing",
-                message="Resolved location was not stored in resolved_locations.",
-            )
-
-        time_result = time_validator.validate(
-            time_value,
-            request_type_candidate=request_type_candidate,
-            reference_datetime=reference_datetime,
-        )
-        if time_result.get("status") != "valid":
-            tool_state["weather_validation"] = time_result
-            tool_state["weather_status"] = "needs_clarification"
-            return time_result
-
-        request_type = time_result.get("request_type")
-        request: dict[str, Any] = {
-            "request_type": request_type,
-            "location_id": location_id,
-        }
-        if request_type == "forecast":
-            start_date = time_result.get("start_date")
-            days = time_result.get("days")
-            if not _valid_canonical_forecast_time(start_date, days):
-                return _set_weather_tool_error(
-                    tool_state,
-                    stage="time",
-                    code="invalid_canonical_time",
-                    message="Time validator returned an invalid canonical forecast request.",
-                )
-            request.update({"start_date": start_date, "days": days})
-        elif request_type != "current":
-            return _set_weather_tool_error(
-                tool_state,
-                stage="time",
-                code="invalid_request_type",
-                message="Time validator returned an unsupported request type.",
-            )
-
-        validation = {"status": "ready_for_redis", "request": request}
-        tool_state["weather_validation"] = validation
-        tool_state["validation_context"] = {
-            "reference_datetime": time_result.get("reference_datetime"),
-            "timezone": WEATHER_TIMEZONE,
-            "expected_timezone_offset_seconds": EXPECTED_TIMEZONE_OFFSET_SECONDS,
-        }
-        return validation
-
-    @tool("get_current_weather")
-    def guarded_get_current_weather(location_id: str = "") -> dict[str, Any]:
-        """Read validated current weather from the active Redis snapshot."""
-
-        request = _validated_data_request(
-            tool_state,
-            expected_request_type="current",
-        )
-        if request is None:
-            return _tool_gate_error_response(tool_state, "get_current_weather")
-        response = get_current_weather.invoke(
-            {"location_id": str(request["location_id"])}
-        )
-        return _finalize_weather_data_response(
-            tool_state,
-            response,
-            request=request,
-            data_key="current_weather_data",
-        )
-
-    @tool("get_weather_forecast")
-    def guarded_get_weather_forecast(
-        location_id: str = "",
-        days: int = 1,
-        start_date: str = "",
-    ) -> dict[str, Any]:
-        """Read a validated forecast range from the active Redis snapshot."""
-
-        request = _validated_data_request(
-            tool_state,
-            expected_request_type="forecast",
-        )
-        if request is None:
-            return _tool_gate_error_response(tool_state, "get_weather_forecast")
-        response = get_weather_forecast.invoke(
-            {
-                "location_id": str(request["location_id"]),
-                "days": int(request["days"]),
-                "start_date": str(request["start_date"]),
-            }
-        )
-        return _finalize_weather_data_response(
-            tool_state,
-            response,
-            request=request,
-            data_key="forecast_weather_data",
-        )
-
-    return [
-        validate_weather_request,
-        guarded_get_current_weather,
-        guarded_get_weather_forecast,
-    ], tool_state
-
-
 def _valid_canonical_forecast_time(start_date: Any, days: Any) -> bool:
     if not isinstance(start_date, str) or not isinstance(days, int):
         return False
@@ -1144,175 +739,6 @@ def _valid_canonical_forecast_time(start_date: Any, days: Any) -> bool:
     return 1 <= days <= MAX_FORECAST_DAYS
 
 
-def _set_weather_tool_error(
-    tool_state: dict[str, Any],
-    *,
-    stage: str,
-    code: str,
-    message: str,
-    retryable: bool = False,
-) -> dict[str, Any]:
-    weather_error = {
-        "stage": stage,
-        "code": code,
-        "message": message,
-        "retryable": retryable,
-    }
-    response = {
-        "ok": False,
-        "status": "error",
-        "error": {
-            "source": "weather_validation",
-            "code": code,
-            "message": message,
-            "status_code": None,
-        },
-    }
-    tool_state["weather_status"] = "error"
-    tool_state["weather_error"] = weather_error
-    tool_state["weather_validation"] = response
-    _record_weather_error(tool_state, response)
-    return response
-
-
-def _validated_data_request(
-    tool_state: dict[str, Any],
-    *,
-    expected_request_type: str,
-) -> dict[str, Any] | None:
-    validation = tool_state.get("weather_validation")
-    if not isinstance(validation, dict) or validation.get("status") != "ready_for_redis":
-        return None
-    request = validation.get("request")
-    if not isinstance(request, dict):
-        return None
-    if request.get("request_type") != expected_request_type:
-        return None
-    location_id = request.get("location_id")
-    resolved_locations = tool_state.get("resolved_locations", {})
-    if not (
-        isinstance(location_id, str)
-        and isinstance(resolved_locations, dict)
-        and location_id in resolved_locations
-    ):
-        return None
-    if expected_request_type == "forecast" and not _valid_canonical_forecast_time(
-        request.get("start_date"),
-        request.get("days"),
-    ):
-        return None
-    return request
-
-
-def _tool_gate_error_response(
-    tool_state: dict[str, Any],
-    requested_tool: str,
-) -> dict[str, Any]:
-    validation = tool_state.get("weather_validation")
-    expected_request_type = None
-    if isinstance(validation, dict) and isinstance(validation.get("request"), dict):
-        expected_request_type = validation["request"].get("request_type")
-    message = (
-        f"Tool {requested_tool!r} does not match the code-validated weather request."
-    )
-    response = {
-        "ok": False,
-        "error": {
-            "source": "weather_data_tool_gate",
-            "code": "tool_call_mismatch",
-            "message": message,
-            "status_code": None,
-        },
-        "details": {"expected_request_type": expected_request_type},
-    }
-    tool_state["weather_status"] = "error"
-    tool_state["weather_error"] = {
-        "stage": "data_tool_gate",
-        "code": "tool_call_mismatch",
-        "message": message,
-        "retryable": False,
-    }
-    _record_weather_error(tool_state, response)
-    return response
-
-
-def _finalize_weather_data_response(
-    tool_state: dict[str, Any],
-    response: dict[str, Any],
-    *,
-    request: dict[str, Any],
-    data_key: str,
-) -> dict[str, Any]:
-    if not response.get("ok"):
-        if _is_unavailable_redis_response(response):
-            tool_state["weather_status"] = "unavailable"
-        else:
-            error = response.get("error", {})
-            message = (
-                str(error.get("message", "Weather Redis lookup failed."))
-                if isinstance(error, dict)
-                else "Weather Redis lookup failed."
-            )
-            tool_state["weather_status"] = "error"
-            tool_state["weather_error"] = {
-                "stage": "redis",
-                "code": "redis_lookup_failed",
-                "message": message,
-                "retryable": True,
-            }
-        return response
-
-    data = response.get("data")
-    if not isinstance(data, dict):
-        return _invalidate_weather_data(
-            tool_state,
-            data_key=data_key,
-            code="invalid_redis_weather_payload",
-            message="Redis returned an invalid weather data payload.",
-            status="error",
-        )
-
-    timezone_offset = data.get("timezone_offset_seconds", data.get("timezone"))
-    if timezone_offset != EXPECTED_TIMEZONE_OFFSET_SECONDS:
-        return _invalidate_weather_data(
-            tool_state,
-            data_key=data_key,
-            code="snapshot_timezone_mismatch",
-            message=(
-                "Weather snapshot timezone does not match Asia/Ho_Chi_Minh "
-                f"({EXPECTED_TIMEZONE_OFFSET_SECONDS} seconds)."
-            ),
-            status="error",
-        )
-
-    if request.get("request_type") == "forecast":
-        expected_dates = _expected_forecast_dates(
-            str(request["start_date"]),
-            int(request["days"]),
-        )
-        returned_days = data.get("days")
-        returned_dates = [
-            item.get("date")
-            for item in returned_days
-            if isinstance(item, dict) and isinstance(item.get("date"), str)
-        ] if isinstance(returned_days, list) else []
-        if returned_dates != expected_dates:
-            return _invalidate_weather_data(
-                tool_state,
-                data_key=data_key,
-                code="forecast_date_unavailable",
-                message="The active snapshot does not contain the exact requested forecast range.",
-                status="unavailable",
-                details={
-                    "requested_dates": expected_dates,
-                    "returned_dates": returned_dates,
-                },
-            )
-
-    tool_state["weather_status"] = "completed"
-    return response
-
-
 def _expected_forecast_dates(start_date: str, days: int) -> list[str]:
     first_date = date.fromisoformat(start_date)
     return [
@@ -1321,138 +747,138 @@ def _expected_forecast_dates(start_date: str, days: int) -> list[str]:
     ]
 
 
-def _invalidate_weather_data(
-    tool_state: dict[str, Any],
+def _select_hourly_forecast(
+    data: dict[str, Any],
     *,
-    data_key: str,
+    request: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    requested_hour = request.get("requested_hour")
+    requested_minute = request.get("requested_minute")
+    requested_time = request.get("requested_time_of_day")
+    interval_start_time = request.get("forecast_interval_start_time")
+    if (
+        isinstance(requested_hour, bool)
+        or not isinstance(requested_hour, int)
+        or not 0 <= requested_hour <= 23
+        or isinstance(requested_minute, bool)
+        or not isinstance(requested_minute, int)
+        or not 0 <= requested_minute <= 59
+        or not isinstance(requested_time, str)
+        or not isinstance(interval_start_time, str)
+    ):
+        return {}, _hourly_forecast_issue(
+            "invalid_hourly_selection",
+            "The validated hourly forecast selection is invalid.",
+            request=request,
+        )
+
+    raw_days = data.get("days")
+    if not isinstance(raw_days, list):
+        return {}, _hourly_forecast_issue(
+            "forecast_time_unavailable",
+            "The active snapshot does not contain hourly forecast data.",
+            request=request,
+        )
+
+    selected_days: list[dict[str, Any]] = []
+    matched_times: list[str] = []
+    unavailable_dates: list[str] = []
+    for raw_day in raw_days:
+        if not isinstance(raw_day, dict):
+            continue
+        day_text = raw_day.get("date")
+        intervals = raw_day.get("intervals")
+        matches: list[dict[str, Any]] = []
+        if isinstance(intervals, list):
+            for interval in intervals:
+                if not isinstance(interval, dict):
+                    continue
+                forecast_at_local = interval.get("forecast_at_local")
+                if not isinstance(forecast_at_local, str):
+                    continue
+                try:
+                    parsed = datetime.fromisoformat(forecast_at_local)
+                except ValueError:
+                    continue
+                if parsed.hour == requested_hour:
+                    matches.append(interval)
+
+        if not matches:
+            unavailable_dates.append(str(day_text or ""))
+            continue
+
+        first_match_time = str(matches[0]["forecast_at_local"])
+        last_match_time = str(matches[-1]["forecast_at_local"])
+        matched_times.extend(
+            str(interval["forecast_at_local"])
+            for interval in matches
+            if isinstance(interval.get("forecast_at_local"), str)
+        )
+        selected_days.append(
+            {
+                "date": day_text,
+                "day_grouping": raw_day.get(
+                    "day_grouping", data.get("day_grouping")
+                ),
+                "interval_count": len(matches),
+                "coverage_start_local": first_match_time,
+                "coverage_end_local": last_match_time,
+                "is_partial_day": True,
+                "requested_time_of_day": requested_time,
+                "matched_interval_start_time": interval_start_time,
+                "intervals": matches,
+            }
+        )
+
+    if unavailable_dates or len(selected_days) != len(raw_days):
+        return {}, _hourly_forecast_issue(
+            "forecast_time_unavailable",
+            "The active snapshot does not contain the requested hourly interval.",
+            request=request,
+            unavailable_dates=unavailable_dates,
+        )
+
+    selected = dict(data)
+    selected["days"] = selected_days
+    selected["interval_count"] = len(matched_times)
+    selected["coverage_start_local"] = matched_times[0] if matched_times else None
+    selected["coverage_end_local"] = matched_times[-1] if matched_times else None
+    selected["hourly_selection"] = {
+        "requested_time_of_day": requested_time,
+        "matched_interval_start_time": interval_start_time,
+        "resolution_minutes": request.get("forecast_interval_minutes", 60),
+        "minute_offset_within_interval": requested_minute,
+        "matched_times_local": matched_times,
+    }
+    return selected, None
+
+
+def _hourly_forecast_issue(
     code: str,
     message: str,
-    status: str,
-    details: dict[str, Any] | None = None,
+    *,
+    request: dict[str, Any],
+    unavailable_dates: list[str] | None = None,
 ) -> dict[str, Any]:
-    tool_state.pop(data_key, None)
-    response = {
+    details: dict[str, Any] = {
+        "requested_time_of_day": request.get("requested_time_of_day"),
+        "forecast_interval_start_time": request.get(
+            "forecast_interval_start_time"
+        ),
+    }
+    if unavailable_dates:
+        details["unavailable_dates"] = unavailable_dates
+    return {
         "ok": False,
         "error": {
             "source": "weather_response_validation",
             "code": code,
             "message": message,
+            "retryable": True,
             "status_code": None,
+            "details": details,
         },
     }
-    if details:
-        response["details"] = details
-    tool_state["last_weather_data"] = {
-        "location": _validated_location_name(tool_state),
-        "error": response["error"],
-        **({"details": details} if details else {}),
-    }
-    tool_state["weather_status"] = status
-    _record_weather_error(tool_state, response)
-    if status == "error":
-        tool_state["weather_error"] = {
-            "stage": "redis_response_validation",
-            "code": code,
-            "message": message,
-            "retryable": False,
-        }
-    return response
-
-
-def _validated_location_name(tool_state: dict[str, Any]) -> str:
-    validation = tool_state.get("weather_validation", {})
-    request = validation.get("request", {}) if isinstance(validation, dict) else {}
-    location_id = request.get("location_id", "") if isinstance(request, dict) else ""
-    return _resolved_location_name(tool_state, str(location_id))
-
-
-def _is_unavailable_redis_response(response: dict[str, Any]) -> bool:
-    error = response.get("error", {})
-    message = str(error.get("message", "")).casefold() if isinstance(error, dict) else ""
-    return any(
-        marker in message
-        for marker in (
-            "no active weather snapshot",
-            "is not present in active weather snapshot",
-            "requested forecast",
-        )
-    )
-
-
-def _record_weather_tool_call(
-    tool_state: dict[str, Any],
-    tool_name: str,
-    *,
-    cached: bool,
-) -> None:
-    calls = tool_state.setdefault("tool_calls", [])
-    if isinstance(calls, list):
-        calls.append({"name": tool_name, "cached": cached})
-
-
-def _record_support_tool_call(
-    tool_state: dict[str, Any],
-    tool_name: str,
-    *,
-    source: str,
-) -> None:
-    calls = tool_state.setdefault("tool_calls", [])
-    if isinstance(calls, list):
-        calls.append({"name": tool_name, "source": source})
-
-
-def _require_resolved_location(
-    tool_state: dict[str, Any],
-    location_id: str,
-) -> dict[str, Any] | None:
-    resolved_locations = tool_state.get("resolved_locations", {})
-    if (
-        isinstance(resolved_locations, dict)
-        and location_id.strip()
-        and location_id in resolved_locations
-    ):
-        return None
-    return {
-        "ok": False,
-        "error": {
-            "source": LOCATION_RESOLVER_SOURCE,
-            "code": "location_not_resolved",
-            "message": (
-                "location_id chưa được xác nhận. "
-                "Hãy gọi resolve_weather_location trước khi đọc dữ liệu thời tiết."
-            ),
-            "status_code": None,
-        },
-    }
-
-
-def _resolved_location_name(tool_state: dict[str, Any], location_id: str) -> str:
-    resolved_locations = tool_state.get("resolved_locations", {})
-    if isinstance(resolved_locations, dict):
-        resolution = resolved_locations.get(location_id, {})
-        if isinstance(resolution, dict):
-            name = resolution.get("canonical_name")
-            if isinstance(name, str):
-                return name
-    return location_id
-
-
-def _print_location_resolution(requested: str, response: dict[str, Any]) -> None:
-    if response.get("ok"):
-        print(
-            "[WEATHER_LOCATION] "
-            f"input={requested!r} "
-            f"location_id={response.get('location_id')!r} "
-            f"match_type={response.get('match_type')} "
-            f"confidence={response.get('confidence')}"
-        )
-        return
-    error = response.get("error", {})
-    print(
-        "[WEATHER_LOCATION] "
-        f"input={requested!r} "
-        f"error={error.get('code', 'unknown') if isinstance(error, dict) else 'unknown'}"
-    )
 
 
 def _print_redis_lookup(
@@ -1481,19 +907,11 @@ def _print_redis_lookup(
     )
 
 
-def _record_weather_error(tool_state: dict[str, Any], error_data: dict[str, Any]) -> None:
-    errors = tool_state.setdefault("errors", [])
-    error = error_data.get("error", {})
-    if isinstance(errors, list) and isinstance(error, dict) and error:
-        errors.append(error)
-    error_records = tool_state.setdefault("error_records", [])
-    if isinstance(error_records, list):
-        error_records.append(error_data)
-
-
 def _build_weather_visualization_data(tool_state: dict[str, Any]) -> dict[str, Any]:
     current = _dict_or_none(tool_state.get("current_weather_data"))
     forecast = _dict_or_none(tool_state.get("forecast_weather_data"))
+    hourly_current, presentation = _hourly_forecast_presentation(forecast)
+    display_current = current or hourly_current
     errors = [error for error in tool_state.get("errors", []) if isinstance(error, dict)]
     error_records = [
         record for record in tool_state.get("error_records", []) if isinstance(record, dict)
@@ -1501,17 +919,26 @@ def _build_weather_visualization_data(tool_state: dict[str, Any]) -> dict[str, A
 
     data = {
         "location": _weather_location(
-            current=current,
+            current=display_current,
             forecast=forecast,
             error_records=error_records,
         ),
-        "current": _current_payload(current),
+        "current": _current_payload(display_current),
         "forecast": _forecast_payload(forecast),
+        "presentation": presentation,
     }
     envelope = {
         "domain": "weather",
-        "schema_version": _weather_schema_version(current=current, forecast=forecast, errors=errors),
-        "data_type": _weather_data_type(current=current, forecast=forecast, errors=errors),
+        "schema_version": _weather_schema_version(
+            current=display_current,
+            forecast=forecast,
+            errors=errors,
+        ),
+        "data_type": _weather_data_type(
+            current=display_current,
+            forecast=forecast,
+            errors=errors,
+        ),
         "location": data["location"]["name"],
         "data": data,
         "source": {
@@ -1527,6 +954,87 @@ def _build_weather_visualization_data(tool_state: dict[str, Any]) -> dict[str, A
 
 def _dict_or_none(value: Any) -> dict[str, Any] | None:
     return value if isinstance(value, dict) and not value.get("error") else None
+
+
+def _hourly_forecast_presentation(
+    forecast: dict[str, Any] | None,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    if not forecast:
+        return None, None
+    selection = forecast.get("hourly_selection")
+    days = forecast.get("days")
+    if not isinstance(selection, dict) or not isinstance(days, list) or len(days) != 1:
+        return None, None
+    day_payload = days[0]
+    if not isinstance(day_payload, dict):
+        return None, None
+    intervals = day_payload.get("intervals")
+    if not isinstance(intervals, list) or len(intervals) != 1:
+        return None, None
+    interval = intervals[0]
+    if not isinstance(interval, dict):
+        return None, None
+
+    requested_time = _optional_text(selection.get("requested_time_of_day"))
+    interval_start = _optional_text(selection.get("matched_interval_start_time"))
+    day_text = _optional_text(day_payload.get("date"))
+    if requested_time is None or interval_start is None or day_text is None:
+        return None, None
+
+    current_like = {
+        "location_id": forecast.get("location_id"),
+        "location": forecast.get("location"),
+        "country": forecast.get("country"),
+        "timezone": forecast.get("timezone"),
+        "timezone_offset_seconds": forecast.get("timezone_offset_seconds"),
+        "timestamp": interval.get("timestamp"),
+        "observed_at_utc": interval.get("forecast_at_utc"),
+        "observed_at_local": interval.get("forecast_at_local"),
+        "condition": interval.get("condition", {}),
+        "temperature": {
+            "current_celsius": interval.get("temperature_celsius"),
+            "feels_like_celsius": interval.get("feels_like_celsius"),
+            "min_celsius": None,
+            "max_celsius": None,
+        },
+        "humidity_percent": interval.get("humidity_percent"),
+        "pressure_hpa": interval.get("pressure_hpa"),
+        "wind": {
+            "speed_mps": interval.get("wind_speed_mps"),
+            "degrees": interval.get("wind_degrees"),
+        },
+        "cloudiness_percent": interval.get("cloudiness_percent"),
+        "data_origin": "forecast_interval",
+    }
+    formatted_date = day_text
+    try:
+        formatted_date = date.fromisoformat(day_text).strftime("%d/%m/%Y")
+    except ValueError:
+        pass
+    interval_end = _hourly_interval_end(interval_start)
+    interval_notice = ""
+    if requested_time != interval_start:
+        interval_notice = (
+            f"Dữ liệu theo khung giờ {interval_start}–{interval_end}."
+        )
+    presentation = {
+        "mode": "hourly_forecast",
+        "time_label": f"Dự báo lúc {requested_time} ngày {formatted_date}",
+        "requested_time_of_day": requested_time,
+        "matched_interval_start_time": interval_start,
+        "matched_interval_end_time": interval_end,
+        "interval_notice": interval_notice,
+        "source_granularity": forecast.get("source_granularity"),
+    }
+    return current_like, presentation
+
+
+def _hourly_interval_end(interval_start: str) -> str:
+    try:
+        parsed = datetime.strptime(interval_start, "%H:%M")
+    except ValueError:
+        return interval_start
+    return (parsed + timedelta(hours=1)).strftime("%H:%M")
 
 
 def _weather_schema_version(
@@ -1598,6 +1106,7 @@ def _current_payload(current: dict[str, Any] | None) -> dict[str, Any] | None:
         "pressure_hpa": current.get("pressure_hpa"),
         "wind": current.get("wind", {}),
         "cloudiness_percent": current.get("cloudiness_percent"),
+        "data_origin": current.get("data_origin"),
     }
 
 
@@ -1609,6 +1118,7 @@ def _forecast_payload(forecast: dict[str, Any] | None) -> dict[str, Any] | None:
         "source_granularity": forecast.get("source_granularity"),
         "day_grouping": forecast.get("day_grouping"),
         "interval_time_basis": forecast.get("interval_time_basis"),
+        "hourly_selection": forecast.get("hourly_selection"),
         "days": forecast.get("days", []),
     }
 
@@ -1645,18 +1155,6 @@ def _collect_available_fields(value: Any, prefix: str, fields: list[str]) -> Non
         fields.append(prefix)
 
 
-def _create_weather_model(settings: Settings) -> ChatGoogleGenerativeAI:
-    return ChatGoogleGenerativeAI(
-        model=settings.gemini_model,
-        api_key=settings.gemini_api_key,
-        temperature=0.2,
-        max_tokens=1024,
-        request_timeout=settings.request_timeout_seconds,
-        max_retries=2,
-        #thinking_level="minimal",
-    )
-
-
 def _weather_conversation_messages(
     query: str,
     history: list[dict[str, str]],
@@ -1678,269 +1176,6 @@ def _weather_conversation_messages(
     ):
         messages.append({"role": "user", "content": query})
     return messages
-
-
-def _print_weather_exception_debug(
-    error: Exception,
-    *,
-    query: str,
-    history: list[dict[str, str]],
-    tool_state: dict[str, Any],
-) -> None:
-    """Print provider and tool details before the workflow handles the error."""
-    print("\n[WEATHER DEBUG] Weather Agent failed", file=sys.stderr)
-    print(f"[WEATHER DEBUG] exception_type={error.__class__.__module__}.{error.__class__.__name__}", file=sys.stderr)
-    print(f"[WEATHER DEBUG] message={error}", file=sys.stderr)
-    print(f"[WEATHER DEBUG] args={error.args!r}", file=sys.stderr)
-    for attribute in ("status_code", "code", "type", "reason"):
-        value = getattr(error, attribute, None)
-        if value is not None:
-            print(f"[WEATHER DEBUG] {attribute}={value!r}", file=sys.stderr)
-
-    response = getattr(error, "response", None)
-    if response is not None:
-        print(
-            f"[WEATHER DEBUG] response_type={response.__class__.__module__}.{response.__class__.__name__}",
-            file=sys.stderr,
-        )
-        for attribute in ("status_code", "reason", "text", "content"):
-            value = getattr(response, attribute, None)
-            if value is not None:
-                print(f"[WEATHER DEBUG] response.{attribute}={value!r}", file=sys.stderr)
-
-    for attribute in ("body", "details", "errors"):
-        value = getattr(error, attribute, None)
-        if value is not None:
-            print(f"[WEATHER DEBUG] {attribute}={value!r}", file=sys.stderr)
-
-    print(f"[WEATHER DEBUG] query={query!r}", file=sys.stderr)
-    print(f"[WEATHER DEBUG] history_messages={len(history)}", file=sys.stderr)
-    print(f"[WEATHER DEBUG] tool_calls={tool_state.get('tool_calls', [])!r}", file=sys.stderr)
-    print(f"[WEATHER DEBUG] tool_errors={tool_state.get('errors', [])!r}", file=sys.stderr)
-    print("[WEATHER DEBUG] traceback:", file=sys.stderr)
-    traceback.print_exception(error, file=sys.stderr)
-
-
-def _last_ai_text(result: dict[str, Any]) -> str:
-    messages = result.get("messages", []) if isinstance(result, dict) else []
-    for message in reversed(messages):
-        if isinstance(message, AIMessage):
-            return _message_content_text(message.content)
-    return ""
-
-
-def _message_content_text(content: Any) -> str:
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts = []
-        for item in content:
-            if isinstance(item, dict) and isinstance(item.get("text"), str):
-                parts.append(item["text"])
-            elif isinstance(item, str):
-                parts.append(item)
-        return "".join(parts)
-    return str(content) if content is not None else ""
-
-
-def _weather_status(tool_state: dict[str, Any], answer: str) -> str:
-    status = tool_state.get("weather_status")
-    if status in {"needs_clarification", "unavailable", "error", "completed"}:
-        return status
-
-    validation = tool_state.get("weather_validation")
-    if isinstance(validation, dict):
-        if validation.get("status") == "needs_clarification":
-            return "needs_clarification"
-        if validation.get("status") == "ready_for_redis":
-            _set_weather_tool_error(
-                tool_state,
-                stage="data_tool",
-                code="data_tool_not_called",
-                message="Weather validation succeeded but no Redis data tool completed.",
-            )
-            return "error"
-
-    if answer.strip():
-        return "needs_clarification"
-    _set_weather_tool_error(
-        tool_state,
-        stage="weather_agent",
-        code="missing_weather_agent_result",
-        message="Weather Agent returned neither validation nor an answer.",
-    )
-    return "error"
-
-
-def _fallback_weather_answer(
-    tool_state: dict[str, Any],
-    *,
-    status: str,
-) -> str:
-    if status == "needs_clarification":
-        validation = tool_state.get("weather_validation")
-        if isinstance(validation, dict):
-            code = validation.get("code")
-            details = validation.get("details", {})
-            details = details if isinstance(details, dict) else {}
-            if code in {"missing_location", "location_not_found", "ambiguous_location"}:
-                return "Bạn muốn xem thời tiết ở tỉnh hoặc thành phố nào?"
-            if code == "missing_weather_requirements":
-                missing_fields = details.get("missing_fields", [])
-                if missing_fields == ["location"]:
-                    return "Bạn muốn xem thời tiết ở tỉnh hoặc thành phố nào?"
-                if missing_fields == ["time"]:
-                    return "Bạn muốn xem thời tiết vào thời điểm nào?"
-                return "Bạn muốn xem thời tiết ở đâu và vào thời điểm nào?"
-            if code == "weekday_date_conflict":
-                provided_date = _display_iso_date(details.get("provided_date"))
-                matching_date = _display_iso_date(details.get("matching_weekday_date"))
-                actual_weekday = details.get("actual_weekday", "ngày khác")
-                provided_weekday = details.get("provided_weekday", "thứ đã nêu")
-                return (
-                    f"Ngày {provided_date} là {actual_weekday}. Bạn muốn xem "
-                    f"{provided_weekday} ngày {matching_date} hay {actual_weekday} "
-                    f"ngày {provided_date}?"
-                )
-            if code == "forecast_range_exceeded":
-                return "Hệ thống chỉ hỗ trợ dự báo tối đa 5 ngày. Bạn có muốn xem 5 ngày đầu tiên không?"
-        return "Bạn vui lòng cung cấp rõ địa điểm và thời gian muốn xem thời tiết."
-    if status == "unavailable":
-        return "Dữ liệu thời tiết cache hiện không có snapshot hoặc khoảng ngày bạn yêu cầu."
-    if status == "error":
-        return "Hệ thống chưa thể xử lý yêu cầu thời tiết lúc này. Bạn vui lòng thử lại sau."
-
-    data = tool_state.get("last_weather_data", {})
-    if data:
-        return "Mình đã lấy được dữ liệu thời tiết nhưng chưa tạo được câu trả lời."
-    return "Mình chưa có dữ liệu thời tiết để trả lời."
-
-
-def _display_iso_date(value: Any) -> str:
-    if not isinstance(value, str):
-        return "không xác định"
-    try:
-        parsed = date.fromisoformat(value)
-    except ValueError:
-        return value
-    return f"{parsed.day}/{parsed.month}/{parsed.year}"
-
-
-def _extract_langchain_usage(result: dict[str, Any], model: str) -> dict[str, Any]:
-    messages = result.get("messages", []) if isinstance(result, dict) else []
-    usage: dict[str, Any] = {}
-    call_id = 0
-    for message in messages:
-        if not isinstance(message, AIMessage) or not _ai_message_has_usage(message):
-            continue
-        call_id += 1
-        message_usage = _usage_from_ai_message(message)
-        print_llm_cache_metrics(
-            message_usage,
-            source="weather_langchain",
-            call_id=call_id,
-        )
-        usage = _merge_usage_dicts(usage, message_usage)
-
-    if not usage:
-        return {}
-    usage["model"] = model
-    return usage
-
-
-def _ai_message_has_usage(message: AIMessage) -> bool:
-    usage_metadata = message.usage_metadata
-    if isinstance(usage_metadata, dict) and bool(usage_metadata):
-        return True
-    response_metadata = message.response_metadata
-    if not isinstance(response_metadata, dict):
-        return False
-    token_usage = response_metadata.get("token_usage")
-    return isinstance(token_usage, dict) and bool(token_usage)
-
-
-def _usage_from_ai_message(message: AIMessage) -> dict[str, Any]:
-    usage_metadata = message.usage_metadata or {}
-    response_metadata = message.response_metadata or {}
-    token_usage = response_metadata.get("token_usage", {})
-    if not isinstance(token_usage, dict):
-        token_usage = {}
-    input_token_details = usage_metadata.get("input_token_details", {})
-    if not isinstance(input_token_details, dict):
-        input_token_details = {}
-
-    prompt_tokens = _int_value(
-        usage_metadata.get("input_tokens"),
-        token_usage.get("prompt_tokens"),
-        token_usage.get("prompt_token_count"),
-    )
-    completion_tokens = _int_value(
-        usage_metadata.get("output_tokens"),
-        token_usage.get("completion_tokens"),
-        token_usage.get("candidates_token_count"),
-    )
-    total_tokens = _int_value(
-        usage_metadata.get("total_tokens"),
-        token_usage.get("total_tokens"),
-        token_usage.get("total_token_count"),
-    )
-    cached_tokens = _int_value(
-        input_token_details.get("cache_read"),
-        input_token_details.get("cached_tokens"),
-        usage_metadata.get("cached_content_token_count"),
-        usage_metadata.get("total_cached_tokens"),
-        token_usage.get("cached_content_token_count"),
-        token_usage.get("total_cached_tokens"),
-    )
-    cache_hit_ratio = None
-    if isinstance(prompt_tokens, int) and isinstance(cached_tokens, int) and prompt_tokens > 0:
-        cache_hit_ratio = round(cached_tokens / prompt_tokens, 4)
-
-    return {
-        "prompt_tokens": prompt_tokens,
-        "completion_tokens": completion_tokens,
-        "thoughts_tokens": _int_value(token_usage.get("thoughts_token_count")),
-        "total_tokens": total_tokens,
-        "cached_tokens": cached_tokens,
-        "prefix_cache_hit": cached_tokens > 0 if isinstance(cached_tokens, int) else None,
-        "cache_hit_ratio": cache_hit_ratio,
-        "saved_tokens_estimated": cached_tokens,
-        "kv_cache_hit": "not_exposed_by_gemini_api",
-        "raw_usage_keys": sorted(set(usage_metadata) | set(token_usage)),
-    }
-
-
-def _merge_usage_dicts(existing: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
-    if not existing:
-        return dict(new)
-    merged = dict(existing)
-    for key in ("prompt_tokens", "completion_tokens", "thoughts_tokens", "total_tokens"):
-        merged[key] = _sum_optional_ints(merged.get(key), new.get(key))
-    cached_tokens = _sum_optional_ints(merged.get("cached_tokens"), new.get("cached_tokens"))
-    merged["cached_tokens"] = cached_tokens
-    merged["prefix_cache_hit"] = (
-        cached_tokens > 0 if isinstance(cached_tokens, int) else None
-    )
-    merged["saved_tokens_estimated"] = cached_tokens
-    prompt_tokens = merged.get("prompt_tokens")
-    if isinstance(prompt_tokens, int) and isinstance(cached_tokens, int) and prompt_tokens > 0:
-        merged["cache_hit_ratio"] = round(cached_tokens / prompt_tokens, 4)
-    merged["raw_usage_keys"] = sorted(
-        set(merged.get("raw_usage_keys", [])) | set(new.get("raw_usage_keys", []))
-    )
-    return merged
-
-
-def _sum_optional_ints(left: Any, right: Any) -> int | None:
-    values = [value for value in (left, right) if isinstance(value, int)]
-    return sum(values) if values else None
-
-
-def _int_value(*values: Any) -> int | None:
-    for value in values:
-        if isinstance(value, int):
-            return value
-    return None
 
 
 def _elapsed_since(started_at: float) -> float:

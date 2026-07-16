@@ -187,6 +187,11 @@ def test_main_streams_workflow_steps_when_available(monkeypatch, capsys) -> None
                             "completion_tokens": 20,
                             "thoughts_tokens": 0,
                             "total_tokens": 120,
+                            "time_to_first_token": 0.4,
+                            "time_to_first_visible": 0.5,
+                            "time_to_last_visible": 0.8,
+                            "visible_generation_duration": 0.3,
+                            "total_request_time": 0.9,
                             "cached_tokens": 80,
                             "prefix_cache_hit": True,
                             "cache_hit_ratio": 0.8,
@@ -255,6 +260,11 @@ def test_main_streams_workflow_steps_when_available(monkeypatch, capsys) -> None
     assert "Topics: ['weather', 'news']" in output
     assert "LLM usage [manager]" in output
     assert "thoughts_tokens: 0" in output
+    assert "time_to_first_token: 0.400000s" in output
+    assert "time_to_first_visible: 0.500000s" in output
+    assert "time_to_last_visible: 0.800000s" in output
+    assert "visible_generation_duration: 0.300000s" in output
+    assert "total_request_time: 0.900000s" in output
     assert "cached_tokens: 80" in output
     assert "prefix_cache_hit: yes" in output
     assert "kv_cache_hit: not_exposed_by_gemini_api" in output
@@ -264,6 +274,31 @@ def test_main_streams_workflow_steps_when_available(monkeypatch, capsys) -> None
     assert "Visualization HTML: D:/tmp/weather.html" in output
     assert main.RESPONSE_SEPARATOR in output
     assert "Bot:\nFinal streamed answer" in output
+
+
+def test_print_llm_usage_prints_weather_pipeline_calls_separately(capsys) -> None:
+    call_usage = {
+        "model": "weather-model",
+        "prompt_tokens": 20,
+        "completion_tokens": 5,
+        "total_tokens": 25,
+        "time_to_first_token": 0.2,
+        "time_to_first_visible": 0.3,
+        "time_to_last_visible": 0.5,
+        "visible_generation_duration": 0.2,
+        "total_request_time": 0.6,
+    }
+
+    main._print_llm_usage(
+        {"weather": {"call_1": call_usage, "call_2": call_usage}}
+    )
+
+    output = capsys.readouterr().out
+    assert "LLM usage [weather]" in output
+    assert "call_1:" in output
+    assert "call_2:" in output
+    assert output.count("model: weather-model") == 2
+    assert "time_to_first_visible: 0.300000s" in output
 
 
 def test_main_prints_active_step_when_stream_fails_before_first_update(monkeypatch, capsys) -> None:

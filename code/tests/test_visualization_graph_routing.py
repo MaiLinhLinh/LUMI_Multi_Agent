@@ -68,10 +68,8 @@ def test_domain_question_runs_manager_weather_aggregate_then_visualize(monkeypat
             "execution_mode": "single",
             "primary_intent": "weather",
             "dependencies": [],
-            "location": "Ha Noi",
             "news_query": "",
             "wiki_topic": "",
-            "reason": "weather",
         }
 
     def fake_weather_agent(state, *, store=None, settings=None, client=None) -> dict:
@@ -87,7 +85,7 @@ def test_domain_question_runs_manager_weather_aggregate_then_visualize(monkeypat
 
     orchestrator = FakeVisualizationOrchestrator()
     monkeypatch.setattr(graph, "classify_intent", fake_classify_intent)
-    monkeypatch.setattr(graph, "run_weather_agent", fake_weather_agent)
+    monkeypatch.setattr(graph, "run_weather_llm_pipeline", fake_weather_agent)
     monkeypatch.setattr(graph, "run_aggregator_agent", fake_aggregator_agent)
 
     result = graph.build_workflow().invoke(

@@ -1,7 +1,6 @@
 langgraph
-langchain
-langchain-google-genai
 google-genai
+pydantic>=2
 httpx
 Jinja2>=3.1,<4
 python-dotenv

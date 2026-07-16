@@ -96,16 +96,14 @@ def test_domain_semantic_route_runs_domain_workflow(monkeypatch):
             "execution_mode": "single",
             "primary_intent": "weather",
             "dependencies": [],
-            "location": "Ha Noi",
             "news_query": "",
             "wiki_topic": "",
-            "reason": "weather",
         }
 
     monkeypatch.setattr(graph, "classify_intent", fake_manager)
     monkeypatch.setattr(
         graph,
-        "run_weather_agent",
+        "run_weather_llm_pipeline",
         lambda state, **kwargs: {"weather_data": {"domain": "weather"}},
     )
     monkeypatch.setattr(

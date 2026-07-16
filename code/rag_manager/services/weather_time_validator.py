@@ -42,49 +42,119 @@ _DMY_PATTERN = re.compile(
 _ISO_PATTERN = re.compile(
     r"(?<!\d)(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2})(?!\d)"
 )
+_NUMBER_TOKEN = r"(?:\d+|khong|mot|hai|ba|bon|tu|nam|lam|sau|bay|tam|chin|muoi)"
+_RELATIVE_AFTER_PATTERN = re.compile(
+    rf"(?<!thu )\b(?P<number>{_NUMBER_TOKEN}(?:\s+{_NUMBER_TOKEN}){{0,2}})\s+"
+    r"(?:ngay|hom|bua)\s+"
+    r"(?P<relation>sap\s+toi|tiep\s+theo|ke\s+tiep|toi|nua|sau)\b"
+)
+_RELATIVE_BEFORE_PATTERN = re.compile(
+    rf"\bsau\s+(?P<number>{_NUMBER_TOKEN}(?:\s+{_NUMBER_TOKEN}){{0,2}})\s+"
+    r"(?:ngay|hom|bua)\b"
+)
+_VIETNAMESE_NUMBER_UNITS = {
+    "khong": 0,
+    "mot": 1,
+    "hai": 2,
+    "ba": 3,
+    "bon": 4,
+    "tu": 4,
+    "nam": 5,
+    "lam": 5,
+    "sau": 6,
+    "bay": 7,
+    "tam": 8,
+    "chin": 9,
+}
+_TIME_OF_DAY_PATTERN = re.compile(
+    r"^(?:(?:vao\s+)?luc\s+|vao\s+)?"
+    r"(?P<hour>\d{1,2})\s*"
+    r"(?:(?P<separator>:|h|gio)\s*(?P<minute>\d{1,2})?)?\s*"
+    r"(?:phut\s*)?"
+    r"(?P<period>sang|trua|chieu|toi|dem|am|pm)?$"
+)
 
 
 class WeatherTimeValidator:
-    """Convert one raw Vietnamese time phrase into a canonical cache request."""
+    """Validate a Vietnamese date and optional clock time for cached weather."""
 
     def __init__(
         self,
         *,
         timezone_name: str = WEATHER_TIMEZONE,
         max_forecast_days: int = MAX_FORECAST_DAYS,
+        forecast_horizon_days: int | None = None,
     ) -> None:
         self.timezone_name = timezone_name
         self.timezone = ZoneInfo(timezone_name)
         self.max_forecast_days = max(1, int(max_forecast_days))
+        self.forecast_horizon_days = max(
+            1,
+            int(
+                forecast_horizon_days
+                if forecast_horizon_days is not None
+                else self.max_forecast_days
+            ),
+        )
 
     def validate(
         self,
-        time_text: str | None,
+        date_text: str | None,
         *,
+        time_of_day_text: str | None = None,
         request_type_candidate: str | None = None,
         reference_datetime: datetime | None = None,
     ) -> dict[str, Any]:
         """Return a valid canonical time request or a clarification result."""
 
-        raw_text = time_text.strip() if isinstance(time_text, str) else ""
-        if not raw_text:
-            return _time_issue("missing_time", {"requested_text": raw_text})
-
+        raw_text = date_text.strip() if isinstance(date_text, str) else ""
+        raw_time_of_day = (
+            time_of_day_text.strip()
+            if isinstance(time_of_day_text, str)
+            else ""
+        )
         reference = self._reference_datetime(reference_datetime)
         reference_date = reference.date()
         normalized = _normalize_text(raw_text)
+        candidate = _normalized_candidate(request_type_candidate)
 
-        if _contains_current_expression(normalized):
+        time_of_day: dict[str, Any] | None = None
+        if raw_time_of_day:
+            time_of_day = _extract_time_of_day(raw_time_of_day)
+            if time_of_day is None:
+                return _time_issue(
+                    "invalid_time_of_day",
+                    {"requested_text": raw_time_of_day},
+                )
+
+        if not raw_text:
+            if candidate == "current" and time_of_day is None:
+                return self._valid_current(reference)
+            return _time_issue(
+                "missing_date",
+                {
+                    "requested_text": raw_text,
+                    "time_of_day_text": raw_time_of_day or None,
+                },
+            )
+
+        if _contains_current_expression(normalized) and time_of_day is None:
             return self._valid_current(reference)
 
-        duration_match = re.search(r"\b(\d+)\s+ngay\s+(?:toi|sap toi)\b", normalized)
-        if duration_match:
-            requested_days = int(duration_match.group(1))
-            start_date = reference_date + timedelta(days=1)
+        relative_request = _extract_relative_request(normalized)
+        if relative_request is not None:
+            relation, quantity = relative_request
+            if relation == "range":
+                start_date = reference_date + timedelta(days=1)
+                requested_days = quantity
+            else:
+                start_date = reference_date + timedelta(days=quantity)
+                requested_days = 1
             return self._valid_forecast_or_range_issue(
                 start_date=start_date,
                 days=requested_days,
                 reference=reference,
+                time_of_day=time_of_day,
             )
 
         date_tokens, invalid_date_text = _extract_date_tokens(
@@ -126,6 +196,7 @@ class WeatherTimeValidator:
                 days=requested_days,
                 reference=reference,
                 end_date=end_date,
+                time_of_day=time_of_day,
             )
 
         if date_tokens:
@@ -137,9 +208,12 @@ class WeatherTimeValidator:
                 start_date=requested_date,
                 days=1,
                 reference=reference,
+                time_of_day=time_of_day,
             )
 
-        if _contains_today_expression(normalized):
+        if _contains_today_expression(normalized) or (
+            _contains_current_expression(normalized) and time_of_day is not None
+        ):
             weekday_issue = _weekday_date_issue(weekday, reference_date)
             if weekday_issue:
                 return weekday_issue
@@ -147,6 +221,7 @@ class WeatherTimeValidator:
                 start_date=reference_date,
                 days=1,
                 reference=reference,
+                time_of_day=time_of_day,
             )
         if _contains_day_after_tomorrow_expression(normalized):
             requested_date = reference_date + timedelta(days=2)
@@ -157,6 +232,7 @@ class WeatherTimeValidator:
                 start_date=requested_date,
                 days=1,
                 reference=reference,
+                time_of_day=time_of_day,
             )
         if _contains_tomorrow_expression(normalized):
             requested_date = reference_date + timedelta(days=1)
@@ -167,6 +243,7 @@ class WeatherTimeValidator:
                 start_date=requested_date,
                 days=1,
                 reference=reference,
+                time_of_day=time_of_day,
             )
 
         if weekday is not None:
@@ -189,6 +266,7 @@ class WeatherTimeValidator:
                 start_date=requested_date,
                 days=1,
                 reference=reference,
+                time_of_day=time_of_day,
             )
 
         return _time_issue(
@@ -223,7 +301,10 @@ class WeatherTimeValidator:
         days: int,
         reference: datetime,
         end_date: date | None = None,
+        time_of_day: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        reference_date = reference.date()
+        calculated_end = end_date or start_date + timedelta(days=max(days - 1, 0))
         if days < 1:
             return _time_issue(
                 "invalid_date_range",
@@ -232,8 +313,15 @@ class WeatherTimeValidator:
                     "days": days,
                 },
             )
+        if start_date < reference_date:
+            return _time_issue(
+                "forecast_date_in_past",
+                {
+                    "start_date": start_date.isoformat(),
+                    "reference_date": reference_date.isoformat(),
+                },
+            )
         if days > self.max_forecast_days:
-            calculated_end = end_date or start_date + timedelta(days=days - 1)
             return _time_issue(
                 "forecast_range_exceeded",
                 {
@@ -243,7 +331,20 @@ class WeatherTimeValidator:
                     "max_forecast_days": self.max_forecast_days,
                 },
             )
-        return {
+        forecast_horizon_end = reference_date + timedelta(
+            days=self.forecast_horizon_days
+        )
+        if calculated_end > forecast_horizon_end:
+            return _time_issue(
+                "forecast_horizon_exceeded",
+                {
+                    "start_date": start_date.isoformat(),
+                    "end_date": calculated_end.isoformat(),
+                    "forecast_horizon_end": forecast_horizon_end.isoformat(),
+                    "forecast_horizon_days": self.forecast_horizon_days,
+                },
+            )
+        result = {
             "status": "valid",
             "request_type": "forecast",
             "start_date": start_date.isoformat(),
@@ -251,11 +352,109 @@ class WeatherTimeValidator:
             "reference_datetime": reference.isoformat(),
             "timezone": self.timezone_name,
         }
+        if time_of_day is not None:
+            result.update(time_of_day)
+        return result
 
 
 def _normalized_candidate(value: str | None) -> str | None:
     normalized = value.strip().lower() if isinstance(value, str) else ""
     return normalized if normalized in {"current", "forecast"} else None
+
+
+def _extract_time_of_day(value: str) -> dict[str, Any] | None:
+    normalized = _normalize_text(value).strip(" .,!?")
+    match = _TIME_OF_DAY_PATTERN.fullmatch(normalized)
+    if not match:
+        return None
+
+    separator = match.group("separator")
+    minute_text = match.group("minute")
+    period = match.group("period")
+    if separator is None and period is None:
+        return None
+
+    hour = int(match.group("hour"))
+    minute = int(minute_text) if minute_text is not None else 0
+    if minute > 59:
+        return None
+
+    if period in {"am", "pm", "sang", "trua", "chieu", "toi", "dem"}:
+        if not 1 <= hour <= 12:
+            return None
+        if period in {"am", "sang"}:
+            hour = 0 if hour == 12 else hour
+        elif period in {"pm", "trua", "chieu", "toi"}:
+            hour = hour if hour == 12 else hour + 12
+        elif period == "dem":
+            if hour == 12:
+                hour = 0
+            elif hour >= 6:
+                hour += 12
+    elif hour > 23:
+        return None
+
+    return {
+        "time_of_day_text": value.strip(),
+        "requested_time_of_day": f"{hour:02d}:{minute:02d}",
+        "forecast_interval_start_time": f"{hour:02d}:00",
+        "requested_hour": hour,
+        "requested_minute": minute,
+        "forecast_interval_minutes": 60,
+    }
+
+
+def _extract_relative_request(value: str) -> tuple[str, int] | None:
+    after_match = _RELATIVE_AFTER_PATTERN.search(value)
+    if after_match:
+        quantity = _parse_vietnamese_number(after_match.group("number"))
+        if quantity is None:
+            return None
+        relation = after_match.group("relation")
+        request_kind = (
+            "range"
+            if relation in {"toi", "sap toi", "tiep theo", "ke tiep"}
+            else "date"
+        )
+        return request_kind, quantity
+
+    before_match = _RELATIVE_BEFORE_PATTERN.search(value)
+    if before_match:
+        quantity = _parse_vietnamese_number(before_match.group("number"))
+        if quantity is not None:
+            return "date", quantity
+    return None
+
+
+def _parse_vietnamese_number(value: str) -> int | None:
+    normalized = " ".join(value.split())
+    if normalized.isdigit():
+        return int(normalized)
+    tokens = normalized.split()
+    if len(tokens) == 1:
+        if tokens[0] == "muoi":
+            return 10
+        return _VIETNAMESE_NUMBER_UNITS.get(tokens[0])
+    if "muoi" not in tokens or tokens.count("muoi") != 1:
+        return None
+    marker = tokens.index("muoi")
+    if marker == 0:
+        tens = 1
+    elif marker == 1:
+        tens = _VIETNAMESE_NUMBER_UNITS.get(tokens[0], -1)
+        if tens < 1:
+            return None
+    else:
+        return None
+    if len(tokens) == marker + 1:
+        units = 0
+    elif len(tokens) == marker + 2:
+        units = _VIETNAMESE_NUMBER_UNITS.get(tokens[-1], -1)
+        if units < 0:
+            return None
+    else:
+        return None
+    return tens * 10 + units
 
 
 def _normalize_text(value: str) -> str:
