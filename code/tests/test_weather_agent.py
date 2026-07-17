@@ -1,5 +1,3 @@
-import json
-
 import pytest
 
 from rag_manager.agents import weather as weather_agent
@@ -193,20 +191,15 @@ def test_weather_pipeline_completes_current_request(monkeypatch) -> None:
     )
 
     assert result["weather_status"] == "completed"
-    assert result["weather_answer"] == "Hà Nội hiện có mây, nhiệt độ 30°C."
-    assert result["final_response"] == result["weather_answer"]
+    assert result["weather_answer"] == ""
+    assert result["final_response"] == ""
     assert result["weather_data"]["data_type"] == "current"
     assert store.current_calls == ["ha_noi"]
     assert resolver.calls == ["Hà Nội"]
-    assert [call[0] for call in client.calls] == ["extraction", "response"]
+    assert [call[0] for call in client.calls] == ["extraction"]
     assert client.extraction_response_schema is WeatherExtractionResponse
     assert result["llm_usage"]["weather"]["call_1"]["prompt_tokens"] == 20
-    assert result["llm_usage"]["weather"]["call_2"]["prompt_tokens"] == 30
-    llm2_payload = json.loads(client.calls[1][1])
-    assert llm2_payload["redis_result"]["data"]["temperature"] == {
-        "current_celsius": 30
-    }
-    assert llm2_payload["redis_result"]["snapshot"]["snapshot_id"] == "snapshot-1"
+    assert "call_2" not in result["llm_usage"]["weather"]
 
 
 def test_weather_pipeline_missing_location_never_reads_redis() -> None:
@@ -232,6 +225,8 @@ def test_weather_pipeline_missing_location_never_reads_redis() -> None:
     assert result["weather_answer"] == "Bạn muốn xem thời tiết ở địa điểm nào?"
     assert store.current_calls == []
     assert store.forecast_calls == []
+    assert [call[0] for call in client.calls] == ["extraction", "response"]
+    assert result["llm_usage"]["weather"]["call_2"]["prompt_tokens"] == 30
     assert "weather_data" not in result
 
 
@@ -275,7 +270,8 @@ def test_weather_pipeline_unavailable_snapshot_is_not_treated_as_input_error(
     )
 
     assert result["weather_status"] == "unavailable"
-    assert result["weather_answer"].startswith("Dữ liệu thời tiết")
+    assert result["weather_answer"].startswith("Hiện chưa có dữ liệu thời tiết")
+    assert [call[0] for call in client.calls] == ["extraction"]
     assert store.current_calls == ["ha_noi"]
     assert "weather_error" not in result
     assert "weather_data" not in result
@@ -514,8 +510,8 @@ def test_weather_pipeline_selects_only_the_requested_hour(monkeypatch) -> None:
     )
 
     assert result["weather_status"] == "completed"
-    llm2_payload = json.loads(client.calls[1][1])
-    selected = llm2_payload["redis_result"]["data"]
+    assert [call[0] for call in client.calls] == ["extraction"]
+    selected = result["weather_data"]["data"]["forecast"]
     assert selected["hourly_selection"]["requested_time_of_day"] == "09:30"
     assert selected["hourly_selection"]["matched_interval_start_time"] == "09:00"
     assert selected["days"][0]["intervals"] == [intervals[0]]

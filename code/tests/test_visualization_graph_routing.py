@@ -58,7 +58,7 @@ class FakeVisualizationOrchestrator:
         )
 
 
-def test_domain_question_runs_manager_weather_aggregate_then_visualize(monkeypatch) -> None:
+def test_completed_single_weather_skips_aggregate_and_visualizes(monkeypatch) -> None:
     calls: list[str] = []
 
     def fake_classify_intent(client, query: str, history=None) -> dict:
@@ -75,18 +75,19 @@ def test_domain_question_runs_manager_weather_aggregate_then_visualize(monkeypat
     def fake_weather_agent(state, *, store=None, settings=None, client=None) -> dict:
         calls.append("weather")
         return {
+            "weather_status": "completed",
             "weather_data": _weather_envelope(),
-            "weather_answer": "Weather answer",
+            "weather_answer": "",
+            "final_response": "",
         }
 
-    def fake_aggregator_agent(state, *, settings=None, client=None) -> dict:
-        calls.append("aggregate")
-        return {"final_response": "Final weather answer"}
+    def unexpected_aggregator(*args, **kwargs):
+        raise AssertionError("Completed single-weather flow must skip Aggregator")
 
     orchestrator = FakeVisualizationOrchestrator()
     monkeypatch.setattr(graph, "classify_intent", fake_classify_intent)
     monkeypatch.setattr(graph, "run_weather_llm_pipeline", fake_weather_agent)
-    monkeypatch.setattr(graph, "run_aggregator_agent", fake_aggregator_agent)
+    monkeypatch.setattr(graph, "run_aggregator_agent", unexpected_aggregator)
 
     result = graph.build_workflow().invoke(
         {
@@ -97,12 +98,12 @@ def test_domain_question_runs_manager_weather_aggregate_then_visualize(monkeypat
         }
     )
 
-    assert calls == ["manager", "weather", "aggregate"]
+    assert calls == ["manager", "weather"]
     assert len(orchestrator.requests) == 1
     request = orchestrator.requests[0]
     assert request.mode == "auto"
     assert request.domain_result["weather_data"]["schema_version"] == "weather.current.v1"
-    assert result["last_domain_result"]["weather_answer"] == "Weather answer"
+    assert result["last_domain_result"]["weather_answer"] == ""
     assert result["visualization_output"]["template_id"] == "weather_basic"
     assert result["visualization_html_path"] == "D:/tmp/weather.html"
 

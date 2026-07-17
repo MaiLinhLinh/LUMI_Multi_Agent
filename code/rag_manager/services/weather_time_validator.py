@@ -379,18 +379,22 @@ def _extract_time_of_day(value: str) -> dict[str, Any] | None:
     if minute > 59:
         return None
 
-    if period in {"am", "pm", "sang", "trua", "chieu", "toi", "dem"}:
+    if period in {"am", "sang"}:
         if not 1 <= hour <= 12:
             return None
-        if period in {"am", "sang"}:
-            hour = 0 if hour == 12 else hour
-        elif period in {"pm", "trua", "chieu", "toi"}:
-            hour = hour if hour == 12 else hour + 12
-        elif period == "dem":
-            if hour == 12:
-                hour = 0
-            elif hour >= 6:
-                hour += 12
+        hour = 0 if hour == 12 else hour
+    elif period in {"pm", "trua", "chieu", "toi"}:
+        if not 1 <= hour <= 23:
+            return None
+        if 1 <= hour <= 11:
+            hour += 12
+    elif period == "dem":
+        if not 1 <= hour <= 23:
+            return None
+        if hour == 12:
+            hour = 0
+        elif 6 <= hour <= 11:
+            hour += 12
     elif hour > 23:
         return None
 

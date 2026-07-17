@@ -68,6 +68,27 @@ def test_vietnamese_pm_period_is_supported() -> None:
     assert result["requested_time_of_day"] == "14:00"
 
 
+def test_vietnamese_pm_period_keeps_an_existing_24_hour_value() -> None:
+    result = _validate("ngày mai", time_of_day_text="13 giờ chiều")
+
+    assert result["status"] == "valid"
+    assert result["requested_time_of_day"] == "13:00"
+
+
+def test_vietnamese_pm_period_keeps_late_24_hour_value() -> None:
+    result = _validate("ngày mai", time_of_day_text="23 giờ chiều")
+
+    assert result["status"] == "valid"
+    assert result["requested_time_of_day"] == "23:00"
+
+
+def test_vietnamese_morning_period_rejects_conflicting_24_hour_value() -> None:
+    result = _validate("ngày mai", time_of_day_text="23 giờ sáng")
+
+    assert result["status"] == "needs_clarification"
+    assert result["code"] == "invalid_time_of_day"
+
+
 def test_specific_hour_without_a_date_requires_clarification() -> None:
     result = _validate(None, time_of_day_text="9h")
 

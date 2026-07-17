@@ -72,6 +72,13 @@ Kết quả:
 - date_text: "ngày mai"
 - time_of_day_text: null
 - request_type_candidate: "forecast"
+example 4:
+Query: "Thời tiết Hà Nội thế nào?"
+Kết quả:
+- location_text: "Hà Nội"
+- date_text: null
+- time_of_day_text: null
+- request_type_candidate: null
 """.strip()
 
 WEATHER_PIPELINE_RESPONSE_SYSTEM_PROMPT = """

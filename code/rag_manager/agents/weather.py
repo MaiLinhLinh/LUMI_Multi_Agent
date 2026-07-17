@@ -1,4 +1,4 @@
-"""Weather Agent implementation using the native two-call LLM pipeline."""
+"""Weather Agent implementation using a conditional two-stage LLM pipeline."""
 
 from __future__ import annotations
 
@@ -36,8 +36,12 @@ _WEATHER_PIPELINE_STATUSES = {
     "completed",
 }
 _WEATHER_PIPELINE_ERROR_ANSWER = (
-    "Hệ thống không thể tạo câu trả lời thời tiết lúc này. "
+    "Hệ thống chưa thể xử lý yêu cầu thời tiết lúc này. "
     "Bạn vui lòng thử lại sau."
+)
+_WEATHER_DATA_UNAVAILABLE_ANSWER = (
+    "Hiện chưa có dữ liệu thời tiết phù hợp với địa điểm hoặc thời gian "
+    "bạn yêu cầu. Bạn vui lòng thử lại sau."
 )
 
 
@@ -48,11 +52,12 @@ def run_weather_llm_pipeline(
     settings: Settings | None = None,
     client: object | None = None,
 ) -> AgentState:
-    """Run the two-call weather pipeline without LangChain tool calling.
+    """Run the conditional weather pipeline without LangChain tool calling.
 
     Python owns extraction/schema classification, location/time validation,
-    Redis access, and the final status. The second LLM call only renders the
-    response for that status.
+    Redis access, and the final status. LLM2 is called only when Python marks
+    the request as needing clarification; completed requests are rendered by
+    the deterministic visualization pipeline.
     """
 
     started_at = perf_counter()
@@ -63,7 +68,7 @@ def run_weather_llm_pipeline(
     history = state.get("history", [])
     history = history if isinstance(history, list) else []
 
-    usage: dict[str, Any] = {"call_1": {}, "call_2": {}}
+    usage: dict[str, Any] = {"call_1": {}}
     extraction: dict[str, Any] = {}
     validation_result: dict[str, Any] = {}
     canonical_request: dict[str, Any] = {}
@@ -236,10 +241,9 @@ def run_weather_llm_pipeline(
             retryable=False,
         )
 
-    pre_llm2_status = status if status in _WEATHER_PIPELINE_STATUSES else "error"
-    pre_llm2_error = weather_error
+    normalized_status = status if status in _WEATHER_PIPELINE_STATUSES else "error"
     final_answer = ""
-    if pipeline_client is not None:
+    if normalized_status == "needs_clarification" and pipeline_client is not None:
         try:
             if not hasattr(pipeline_client, "chat_text"):
                 raise TypeError("Weather pipeline client must provide chat_text().")
@@ -249,12 +253,12 @@ def run_weather_llm_pipeline(
                     query=query,
                     history=history,
                     extraction=extraction,
-                    status=pre_llm2_status,
+                    status=normalized_status,
                     validation_result=validation_result,
                     canonical_request=canonical_request,
                     redis_result=redis_result,
                     redis_error=redis_error,
-                    processing_error=pre_llm2_error,
+                    processing_error=weather_error,
                 ),
             )
             usage["call_2"] = _pipeline_client_usage(pipeline_client)
@@ -276,18 +280,18 @@ def run_weather_llm_pipeline(
                 message=str(exc) or exc.__class__.__name__,
                 retryable=True,
                 details={
-                    "pre_llm2_status": pre_llm2_status,
-                    "pre_llm2_error": pre_llm2_error,
+                    "pre_llm2_status": normalized_status,
+                    "pre_llm2_error": weather_error,
                 },
             )
             _log_pipeline_event(
                 stage="llm2_response",
                 code=weather_error["code"],
-                pre_llm2_status=pre_llm2_status,
+                pre_llm2_status=normalized_status,
                 final_status="error",
                 message=weather_error["message"],
             )
-    else:
+    elif normalized_status == "needs_clarification":
         status = "error"
         final_answer = _WEATHER_PIPELINE_ERROR_ANSWER
         weather_error = _pipeline_error(
@@ -296,16 +300,20 @@ def run_weather_llm_pipeline(
             message="Weather pipeline client is unavailable.",
             retryable=True,
             details={
-                "pre_llm2_status": pre_llm2_status,
-                "pre_llm2_error": pre_llm2_error,
+                "pre_llm2_status": normalized_status,
+                "pre_llm2_error": weather_error,
             },
         )
         _log_pipeline_event(
             stage="llm2_response",
             code="llm2_api_error",
-            pre_llm2_status=pre_llm2_status,
+            pre_llm2_status=normalized_status,
             final_status="error",
         )
+    elif normalized_status == "unavailable":
+        final_answer = _WEATHER_DATA_UNAVAILABLE_ANSWER
+    elif normalized_status == "error":
+        final_answer = _WEATHER_PIPELINE_ERROR_ANSWER
 
     update: AgentState = {
         "weather_status": status,

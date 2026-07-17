@@ -163,11 +163,22 @@ def _next_nodes_after_update(node_name: str, result: dict) -> list[str]:
         return ["visualize"] if result.get("input_route") == "visualize" else ["manager_classify"]
     if node_name == "manager_classify":
         return [_route_after_manager(result)]
+    if node_name == "weather" and _completed_single_weather(result):
+        return ["visualize"]
     if node_name in {"weather", "news", "wiki", "execute_parallel", "plan_sequence"}:
         return ["aggregate"]
     if node_name == "aggregate":
         return ["visualize"]
     return []
+
+
+def _completed_single_weather(result: dict) -> bool:
+    if result.get("weather_status") != "completed":
+        return False
+    if result.get("execution_mode") != "single":
+        return False
+    selected_agents = result.get("selected_agents", [])
+    return selected_agents == ["weather"]
 
 
 def _route_after_manager(result: dict) -> str:

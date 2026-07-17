@@ -60,7 +60,7 @@ def build_workflow():
     graph.add_conditional_edges(
         "weather",
         route_after_weather_execution,
-        {"aggregate": "aggregate", "end": END},
+        {"aggregate": "aggregate", "visualize": "visualize", "end": END},
     )
     graph.add_edge("news", "aggregate")
     graph.add_edge("wiki", "aggregate")
@@ -234,6 +234,12 @@ def route_after_weather_execution(state: GraphState) -> str:
         "error",
     }:
         return "end"
+    if (
+        state.get("weather_status") == "completed"
+        and state.get("execution_mode") == "single"
+        and _selected_topics(state) == ["weather"]
+    ):
+        return "visualize"
     return "aggregate"
 
 
