@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from rag_manager.agents import weather as weather_agent
@@ -178,6 +180,7 @@ def test_weather_pipeline_completes_current_request(monkeypatch) -> None:
             "location_text": "Hà Nội",
             "date_text": None,
             "time_of_day_text": None,
+            "normalized_time": None,
             "request_type_candidate": "current",
         },
         answer="Hà Nội hiện có mây, nhiệt độ 30°C.",
@@ -209,6 +212,7 @@ def test_weather_pipeline_missing_location_never_reads_redis() -> None:
             "location_text": None,
             "date_text": "ngày mai",
             "time_of_day_text": None,
+            "normalized_time": None,
             "request_type_candidate": "forecast",
         },
         answer="Bạn muốn xem thời tiết ở địa điểm nào?",
@@ -230,12 +234,49 @@ def test_weather_pipeline_missing_location_never_reads_redis() -> None:
     assert "weather_data" not in result
 
 
+def test_weather_pipeline_tells_llm2_the_exact_invalid_date_field(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        weather_agent,
+        "get_weather_location_resolver",
+        lambda _path=None: StubLocationResolver(),
+    )
+    client = StubPipelineClient(
+        {
+            "location_text": "Hà Nội",
+            "date_text": "sáng mai",
+            "time_of_day_text": "9h",
+            "normalized_time": "09:00",
+            "request_type_candidate": "forecast",
+        },
+        answer="Bạn muốn xem thời tiết vào ngày nào?",
+    )
+
+    result = weather_agent.run_weather_llm_pipeline(
+        {"query": "9h", "history": []},
+        store=StubWeatherStore(),
+        settings=_settings(),
+        client=client,
+    )
+
+    response_context = json.loads(client.calls[1][1])
+    assert result["weather_status"] == "needs_clarification"
+    assert response_context["validation_result"]["code"] == "unrecognized_date"
+    assert response_context["validation_result"]["details"]["field"] == "date_text"
+    assert response_context["clarification_target"] == {
+        "field": "date_text",
+        "reason_code": "unrecognized_date",
+    }
+
+
 def test_weather_extraction_schema_has_exact_required_fields() -> None:
     schema = WeatherExtractionResponse.model_json_schema()
     expected_fields = {
         "location_text",
         "date_text",
         "time_of_day_text",
+        "normalized_time",
         "request_type_candidate",
     }
 
@@ -257,6 +298,7 @@ def test_weather_pipeline_unavailable_snapshot_is_not_treated_as_input_error(
             "location_text": "Hà Nội",
             "date_text": None,
             "time_of_day_text": None,
+            "normalized_time": None,
             "request_type_candidate": "current",
         },
         answer="Dữ liệu thời tiết đã xác thực hiện chưa có trong bộ nhớ đệm.",
@@ -299,6 +341,7 @@ def test_weather_status_uses_redis_error_code_not_message(
             "location_text": "Hà Nội",
             "date_text": None,
             "time_of_day_text": None,
+            "normalized_time": None,
             "request_type_candidate": "current",
         }
     )
@@ -333,6 +376,7 @@ def test_weather_error_without_code_is_contract_violation(monkeypatch) -> None:
             "location_text": "Hà Nội",
             "date_text": None,
             "time_of_day_text": None,
+            "normalized_time": None,
             "request_type_candidate": "current",
         }
     )
@@ -363,6 +407,7 @@ def test_weather_store_exception_is_not_classified_from_message(monkeypatch) -> 
             "location_text": "Hà Nội",
             "date_text": None,
             "time_of_day_text": None,
+            "normalized_time": None,
             "request_type_candidate": "current",
         }
     )
@@ -418,6 +463,7 @@ def test_weather_pipeline_uses_python_forecast_request_unchanged(monkeypatch) ->
             "location_text": "Hà Nội",
             "date_text": "hai ngày tới",
             "time_of_day_text": None,
+            "normalized_time": None,
             "request_type_candidate": "forecast",
         }
     )
@@ -498,6 +544,7 @@ def test_weather_pipeline_selects_only_the_requested_hour(monkeypatch) -> None:
             "location_text": "Hà Nội",
             "date_text": "hôm nay",
             "time_of_day_text": "lúc 9 giờ 30",
+            "normalized_time": "09:30",
             "request_type_candidate": "forecast",
         }
     )

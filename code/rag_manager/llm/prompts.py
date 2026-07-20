@@ -45,16 +45,18 @@ FIELDS:
 - `location_text`: the location for the current request. Preserve the user’s wording; do not create a location_id or coordinates.
 - `date_text`: a date or date range. A newly provided date overrides the previous date.
 - `time_of_day_text`: a specific time of day. If the user only adds a time, inherit the previous date. If the user switches to a whole-day request, return null.
+- `normalized_time`: the exact time in `time_of_day_text` converted to 24-hour `HH:MM`. Return null when `time_of_day_text` is null or only describes a vague period; never infer an exact time that the user did not state.
 - `request_type_candidate`: use `current` for expressions such as “hiện tại”, “bây giờ”, or “lúc này”; use `forecast` for a date, date range, or specific time; otherwise return null.
-Only use locations and times provided by the user. Preserve the user’s original time wording whenever possible. Do not convert it into an ISO date, timestamp, start_date, or days.
+Only use locations and times provided by the user. Preserve the original wording in the raw fields; only `normalized_time` may use `HH:MM`. Do not create an ISO date, timestamp, start_date, or days.
 Only fill in fields defined by the response schema.
 example 1:
-Lịch sử: "Thời tiết Hà Nội hôm nay thế nào?"
-Query: "Không, tôi muốn chính xác lúc 9 giờ."
+Lịch sử: "Thời tiết Hà Nội ngày mai thế nào?"
+Query: "Không, tôi muốn chính xác lúc 9 giờ sáng mai."
 Kết quả:
 - location_text: "Hà Nội"
-- date_text: "hôm nay"
-- time_of_day_text: "lúc 9 giờ"
+- date_text: "ngày mai"
+- time_of_day_text: "lúc 9 giờ sáng"
+- normalized_time: "09:00"
 - request_type_candidate: "forecast"
 example 2:
 Lịch sử: "Thời tiết Hà Nội hôm nay thế nào?"
@@ -63,6 +65,7 @@ Kết quả:
 - location_text: "Đà Nẵng"
 - date_text: "hôm nay"
 - time_of_day_text: null
+- normalized_time: null
 - request_type_candidate: "forecast"
 example 3:
 Lịch sử: "Thời tiết Hà Nội hôm nay lúc 9 giờ thế nào?"
@@ -71,6 +74,7 @@ Kết quả:
 - location_text: "Hà Nội"
 - date_text: "ngày mai"
 - time_of_day_text: null
+- normalized_time: null
 - request_type_candidate: "forecast"
 example 4:
 Query: "Thời tiết Hà Nội thế nào?"
@@ -78,6 +82,7 @@ Kết quả:
 - location_text: "Hà Nội"
 - date_text: null
 - time_of_day_text: null
+- normalized_time: null
 - request_type_candidate: null
 """.strip()
 
@@ -91,6 +96,8 @@ resolve a location, recalculate a date, or invent weather data.
 Status rules:
 - needs_clarification: ask one concise Vietnamese question for the exact
   missing or contradictory location/time information described by Python.
+  Follow `clarification_target.field` exactly and do not ask again for another
+  field that is already present and valid in `extraction`.
 - unavailable: explain that the requested cached Redis snapshot/date is not
   available. Do not ask for location/time again when they were validated.
 - error: explain briefly that the system cannot process/create the response.

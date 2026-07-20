@@ -359,6 +359,9 @@ def _pipeline_response_message(
             "relevant_history": _weather_conversation_messages(query, history),
             "extraction": extraction,
             "status": status,
+            "clarification_target": _pipeline_clarification_target(
+                validation_result
+            ),
             "validation_result": validation_result,
             "canonical_request": canonical_request,
             "redis_result": redis_result,
@@ -368,6 +371,23 @@ def _pipeline_response_message(
         ensure_ascii=False,
         sort_keys=True,
     )
+
+
+def _pipeline_clarification_target(
+    validation_result: dict[str, Any],
+) -> dict[str, str] | None:
+    if validation_result.get("status") != "needs_clarification":
+        return None
+    details = validation_result.get("details")
+    details = details if isinstance(details, dict) else {}
+    field = details.get("field")
+    code = validation_result.get("code")
+    if not isinstance(field, str) or not field.strip():
+        return None
+    return {
+        "field": field.strip(),
+        "reason_code": str(code or "needs_clarification"),
+    }
 
 
 def _pipeline_missing_extraction_fields(extraction: dict[str, Any]) -> list[str]:
@@ -396,6 +416,7 @@ def _pipeline_validate_request(
     location_text = str(extraction.get("location_text", "")).strip()
     date_text = _optional_text(extraction.get("date_text"))
     time_of_day_text = _optional_text(extraction.get("time_of_day_text"))
+    normalized_time = _optional_text(extraction.get("normalized_time"))
     try:
         resolver = get_weather_location_resolver(settings.weather_locations_file or None)
         location_result = resolver.resolve(location_text)
@@ -445,6 +466,7 @@ def _pipeline_validate_request(
         time_result = WeatherTimeValidator().validate(
             date_text,
             time_of_day_text=time_of_day_text,
+            normalized_time=normalized_time,
             request_type_candidate=extraction.get("request_type_candidate"),
         )
     except Exception as exc:  # noqa: BLE001 - validator boundary
@@ -498,6 +520,7 @@ def _pipeline_validate_request(
         request.update({"start_date": start_date, "days": days})
         for field in (
             "time_of_day_text",
+            "normalized_time",
             "requested_time_of_day",
             "forecast_interval_start_time",
             "requested_hour",

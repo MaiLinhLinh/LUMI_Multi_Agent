@@ -25,6 +25,12 @@ class WeatherExtractionResponse(BaseModel):
             "or null for current or whole-day requests."
         ),
     )
+    normalized_time: str | None = Field(
+        description=(
+            "The same explicitly requested clock time normalized as 24-hour "
+            "HH:MM, or null when no exact clock time was stated."
+        ),
+    )
     request_type_candidate: Literal["current", "forecast"] | None = Field(
         description="Tentative weather request type, or null when uncertain.",
     )
