@@ -8,13 +8,18 @@ from functools import lru_cache
 from time import perf_counter
 from typing import Any, Mapping
 
-from rag_manager.agents.music_structured_schema import MusicExtractionResponse
+from rag_manager.agents.music_structured_schema import (
+    MusicCandidateResolutionResponse,
+    MusicExtractionResponse,
+)
 from rag_manager.config import Settings, load_settings
 from rag_manager.llm.gemini_client import strip_thought_tags
 from rag_manager.llm.prompts import (
+    MUSIC_PIPELINE_CANDIDATE_RESOLUTION_SYSTEM_PROMPT,
     MUSIC_PIPELINE_EXTRACTION_SYSTEM_PROMPT,
     MUSIC_PIPELINE_RESPONSE_SYSTEM_PROMPT,
 )
+from rag_manager.services.music_search_service import music_title_aliases
 from rag_manager.services.music_embedding_service import (
     OllamaMusicEmbeddingService,
 )
@@ -71,6 +76,7 @@ def run_music_agent(
     music_error: dict[str, Any] = {}
     status = "error"
     answer = ""
+    candidate_resolution_question = ""
 
     if resolved_from_query:
         decision = dict(session_resolution)
@@ -194,6 +200,42 @@ def run_music_agent(
                 message=music_error["message"],
             )
 
+    if (
+        status == "needs_clarification"
+        and decision.get("code") == "multiple_music_matches"
+        and not resolved_from_query
+        and pipeline_client is not None
+        and hasattr(pipeline_client, "chat_structured_json")
+    ):
+        candidates = search_result.get("candidates", [])
+        if isinstance(candidates, list) and candidates:
+            try:
+                resolution = pipeline_client.chat_structured_json(
+                    MUSIC_PIPELINE_CANDIDATE_RESOLUTION_SYSTEM_PROMPT,
+                    _candidate_resolution_message(query, extraction, candidates),
+                    response_schema=MusicCandidateResolutionResponse,
+                )
+                usage["call_2"] = _client_usage(pipeline_client)
+                resolved = _apply_candidate_resolution(resolution, candidates)
+                if resolved["status"] == "completed":
+                    decision = resolved
+                    status = "completed"
+                else:
+                    candidate_resolution_question = _text(resolved.get("question"))
+                _log_music_event(
+                    stage="llm2_candidate_resolution",
+                    code=str(resolved.get("code")),
+                    status=str(resolved.get("status")),
+                    selected_index=resolved.get("selected_index"),
+                )
+            except Exception as exc:  # noqa: BLE001 - deterministic fallback below
+                _log_music_event(
+                    stage="llm2_candidate_resolution",
+                    code="candidate_resolution_fallback",
+                    status=status,
+                    message=str(exc) or exc.__class__.__name__,
+                )
+
     if status == "completed":
         selected = decision.get("selected_candidate")
         if decision.get("code") == "playback_stopped":
@@ -211,16 +253,46 @@ def run_music_agent(
             answer = _completed_answer(selected)
     elif status == "needs_clarification":
         issue = decision or validation
-        answer = _clarification_fallback(issue, search_result)
+        response_request = validation.get("canonical_extraction")
+        if not isinstance(response_request, Mapping):
+            response_request = extraction
+        answer = _clarification_fallback(
+            issue,
+            search_result,
+            response_request,
+        )
+        if candidate_resolution_question:
+            answer = candidate_resolution_question
+            stream_callback = state.get("response_stream_callback")
+            if callable(stream_callback):
+                stream_callback("music", answer)
         if (
-            not resolved_from_query
+            not candidate_resolution_question
+            and "call_2" not in usage
+            and not resolved_from_query
             and pipeline_client is not None
             and hasattr(pipeline_client, "chat_text")
         ):
             try:
+                stream_callback = state.get("response_stream_callback")
+                stream_kwargs = (
+                    {
+                        "on_text_chunk": lambda chunk: stream_callback(
+                            "music",
+                            chunk,
+                        )
+                    }
+                    if callable(stream_callback)
+                    else {}
+                )
                 llm2_answer = pipeline_client.chat_text(
                     MUSIC_PIPELINE_RESPONSE_SYSTEM_PROMPT,
-                    _clarification_message(issue, search_result),
+                    _clarification_message(
+                        issue,
+                        search_result,
+                        response_request,
+                    ),
+                    **stream_kwargs,
                 )
                 usage["call_2"] = _client_usage(pipeline_client)
                 llm2_answer = strip_thought_tags(llm2_answer)
@@ -382,6 +454,7 @@ def _extraction_message(query: str, history: list[Any]) -> str:
 def _clarification_message(
     issue: Mapping[str, Any],
     search_result: Mapping[str, Any],
+    request: Mapping[str, Any],
 ) -> str:
     candidates = search_result.get("candidates", [])
     summaries = [
@@ -393,6 +466,11 @@ def _clarification_message(
         {
             "reason": issue.get("code"),
             "field": issue.get("field"),
+            "requested_music": {
+                "title": request.get("title"),
+                "artist": request.get("artist"),
+                "search_query": request.get("search_query"),
+            },
             "candidate_summaries": summaries,
         },
         ensure_ascii=False,
@@ -400,9 +478,92 @@ def _clarification_message(
     )
 
 
+def _candidate_resolution_message(
+    query: str,
+    extraction: Mapping[str, Any],
+    candidates: list[Any],
+) -> str:
+    summaries = [
+        _candidate_resolution_summary(candidate, index)
+        for index, candidate in enumerate(candidates[:5], start=1)
+        if isinstance(candidate, Mapping)
+    ]
+    return json.dumps(
+        {
+            "query": query,
+            "extraction": {
+                "title": extraction.get("title"),
+                "artist": extraction.get("artist"),
+                "version": extraction.get("version"),
+                "search_query": extraction.get("search_query"),
+            },
+            "candidate_summaries": summaries,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+
+
+def _candidate_resolution_summary(
+    candidate: Mapping[str, Any],
+    index: int,
+) -> dict[str, Any]:
+    raw_aliases = candidate.get("title_aliases")
+    aliases = (
+        [str(value) for value in raw_aliases if isinstance(value, str) and value]
+        if isinstance(raw_aliases, list)
+        else list(music_title_aliases(_text(candidate.get("title"))))
+    )
+    artists = candidate.get("artists")
+    return {
+        "index": index,
+        "title": _text(candidate.get("title")),
+        "title_aliases": aliases,
+        "artists": [
+            str(value) for value in artists if isinstance(value, str) and value.strip()
+        ] if isinstance(artists, list) else [],
+        "version": _text(candidate.get("version")) or None,
+    }
+
+
+def _apply_candidate_resolution(
+    resolution: Mapping[str, Any],
+    candidates: list[Any],
+) -> dict[str, Any]:
+    decision = resolution.get("decision")
+    confidence = resolution.get("confidence")
+    index = resolution.get("selection_index")
+    if (
+        decision == "selected"
+        and confidence == "high"
+        and isinstance(index, int)
+        and not isinstance(index, bool)
+        and 1 <= index <= min(5, len(candidates))
+        and isinstance(candidates[index - 1], Mapping)
+    ):
+        return {
+            "status": "completed",
+            "code": "music_candidate_selected",
+            "reason": "llm2_candidate_resolution",
+            "selected_candidate": dict(candidates[index - 1]),
+            "selected_index": index,
+        }
+    question = _text(resolution.get("question"))
+    if question and (
+        _UNSAFE_LLM2_OUTPUT.search(question) or len(question) > 500
+    ):
+        question = ""
+    return {
+        "status": "needs_clarification",
+        "code": "candidate_resolution_needs_clarification",
+        "question": question,
+    }
+
+
 def _clarification_fallback(
     issue: Mapping[str, Any],
     search_result: Mapping[str, Any],
+    request: Mapping[str, Any],
 ) -> str:
     code = issue.get("code")
     candidates = search_result.get("candidates", [])
@@ -415,7 +576,15 @@ def _clarification_fallback(
         if summaries:
             return "Bạn muốn nghe bài nào: " + "; ".join(summaries) + "?"
     if code == "music_not_found":
-        return "Tôi chưa tìm thấy bài phù hợp. Bạn có thể cho biết rõ tên bài hoặc nghệ sĩ không?"
+        title = _text(request.get("title"))
+        if title:
+            return f"Hiện tại tôi chưa tìm thấy bài “{title}” trong kho nhạc."
+        search_query = _text(request.get("search_query")) or _text(
+            search_result.get("query")
+        )
+        if search_query:
+            return f"Hiện tại tôi chưa tìm thấy “{search_query}” trong kho nhạc."
+        return "Hiện tại tôi chưa tìm thấy kết quả phù hợp trong kho nhạc."
     if code == "selection_context_required":
         return "Tôi chưa có danh sách bài hát trước đó. Bạn muốn tìm bài nào?"
     if code == "selection_index_out_of_range":
@@ -466,17 +635,19 @@ def _music_conversation_messages(
     for item in history:
         if not isinstance(item, dict):
             continue
+        if item.get("domain") != "music":
+            continue
         role = item.get("role")
         content = item.get("content")
         if role in {"user", "assistant"} and isinstance(content, str) and content.strip():
-            messages.append({"role": role, "content": content})
-    if not (
+            messages.append({"role": role, "content": content.strip()})
+    if (
         messages
         and messages[-1]["role"] == "user"
-        and messages[-1]["content"] == query
+        and messages[-1]["content"] == query.strip()
     ):
-        messages.append({"role": "user", "content": query})
-    return messages[-8:]
+        messages.pop()
+    return messages[-4:]
 
 
 def _music_error(

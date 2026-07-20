@@ -1,6 +1,9 @@
 import json
 
 from rag_manager.agents.music import run_music_agent
+from rag_manager.agents.music_structured_schema import (
+    MusicCandidateResolutionResponse,
+)
 from rag_manager.config import Settings
 from rag_manager.services.music_result_validator import MusicResultValidator
 
@@ -45,9 +48,15 @@ def _candidate(title: str, video_id: str) -> dict:
 
 
 class StubMusicClient:
-    def __init__(self, extraction: dict, answer: str = "Bạn muốn nghe bài nào?"):
+    def __init__(
+        self,
+        extraction: dict,
+        answer: str = "Bạn muốn nghe bài nào?",
+        candidate_resolution: dict | None = None,
+    ):
         self.extraction = extraction
         self.answer = answer
+        self.candidate_resolution = candidate_resolution
         self.calls: list[tuple[str, str]] = []
         self.last_usage: dict = {}
 
@@ -59,13 +68,33 @@ class StubMusicClient:
         response_schema: type,
         temperature: float = 0.0,
     ) -> dict:
+        if response_schema is MusicCandidateResolutionResponse:
+            self.calls.append(("llm2", user_message))
+            payload = self.candidate_resolution or {
+                "decision": "needs_clarification",
+                "selection_index": None,
+                "confidence": "low",
+                "question": self.answer,
+            }
+            self.last_usage = {"model": "music-model", "total_tokens": 8}
+            return response_schema.model_validate(payload).model_dump()
         self.calls.append(("llm1", user_message))
         self.last_usage = {"model": "music-model", "total_tokens": 20}
         return response_schema.model_validate(self.extraction).model_dump()
 
-    def chat_text(self, system_prompt: str, user_message: str) -> str:
+    def chat_text(
+        self,
+        system_prompt: str,
+        user_message: str,
+        *,
+        on_text_chunk=None,
+    ) -> str:
         self.calls.append(("llm2", user_message))
         self.last_usage = {"model": "music-model", "total_tokens": 8}
+        if on_text_chunk is not None:
+            midpoint = max(1, len(self.answer) // 2)
+            on_text_chunk(self.answer[:midpoint])
+            on_text_chunk(self.answer[midpoint:])
         return self.answer
 
 
@@ -122,6 +151,53 @@ def test_music_agent_completes_unique_exact_title_without_llm2() -> None:
     assert "call_2" not in result["llm_usage"]["music"]
 
 
+def test_music_llm1_receives_only_four_prior_music_messages() -> None:
+    client = StubMusicClient(
+        {
+            "action": "play",
+            "search_query": "Láº¡c TrÃ´i SÆ¡n TÃ¹ng",
+            "title": "Láº¡c TrÃ´i",
+            "artist": "SÆ¡n TÃ¹ng",
+            "genre": None,
+            "mood": None,
+            "language": None,
+            "version": None,
+            "sort_by": None,
+            "sort_order": None,
+            "selection_index": None,
+        }
+    )
+    query = "Báº­t bÃ i Láº¡c TrÃ´i"
+    history = [
+        {"role": "user", "content": "Nháº¡c SÆ¡n TÃ¹ng", "domain": "music"},
+        {"role": "assistant", "content": "Báº¡n muá»‘n nghe bÃ i nÃ o?", "domain": "music"},
+        {"role": "user", "content": "Thá»i tiáº¿t HÃ  Ná»™i", "domain": "weather"},
+        {"role": "assistant", "content": "HÃ  Ná»™i nhiá»u mÃ¢y", "domain": "weather"},
+        {"role": "user", "content": "BÃ i Ä‘áº§u tiÃªn", "domain": "music"},
+        {"role": "assistant", "content": "Äang phÃ¡t bÃ i Ä‘áº§u tiÃªn", "domain": "music"},
+        {"role": "user", "content": "Xin chÃ o", "domain": "other"},
+        {"role": "user", "content": "BÃ i tiáº¿p theo", "domain": "music"},
+        {"role": "assistant", "content": "Äang phÃ¡t bÃ i tiáº¿p theo", "domain": "music"},
+        {"role": "user", "content": query, "domain": "music"},
+    ]
+
+    run_music_agent(
+        {"query": query, "history": history},
+        settings=_settings(),
+        client=client,
+        search_service=StubSearchService([_candidate("Láº¡c TrÃ´i", "Llw9Q6akRo4")]),
+    )
+
+    llm1_payload = json.loads(client.calls[0][1])
+    assert llm1_payload["query"] == query
+    assert llm1_payload["relevant_history"] == [
+        {"role": "user", "content": "BÃ i Ä‘áº§u tiÃªn"},
+        {"role": "assistant", "content": "Äang phÃ¡t bÃ i Ä‘áº§u tiÃªn"},
+        {"role": "user", "content": "BÃ i tiáº¿p theo"},
+        {"role": "assistant", "content": "Äang phÃ¡t bÃ i tiáº¿p theo"},
+    ]
+
+
 def test_music_agent_asks_when_artist_request_has_multiple_results() -> None:
     client = StubMusicClient(
         {
@@ -160,6 +236,171 @@ def test_music_agent_asks_when_artist_request_has_multiple_results() -> None:
     assert len(llm2_payload["candidate_summaries"]) == 2
     assert "video_id" not in client.calls[1][1]
     assert "Llw9Q6akRo4" not in client.calls[1][1]
+
+
+def test_music_agent_selects_unique_search_alias_without_llm2() -> None:
+    client = StubMusicClient(
+        {
+            "action": "play",
+            "search_query": "nhạc chạy ngay đi",
+            "title": None,
+            "artist": None,
+            "genre": None,
+            "mood": None,
+            "language": None,
+            "version": None,
+            "sort_by": None,
+            "sort_order": None,
+            "selection_index": None,
+        }
+    )
+    search = StubSearchService(
+        [
+            _candidate("CHẠY NGAY ĐI | RUN NOW", "32sYGCOYJUM"),
+            _candidate("Lạc Trôi", "Llw9Q6akRo4"),
+            _candidate("Nơi Này Có Anh", "FN7ALfpGxiI"),
+        ]
+    )
+
+    result = run_music_agent(
+        {"query": "Bật nhạc chạy ngay đi", "history": []},
+        settings=_settings(),
+        client=client,
+        search_service=search,
+    )
+
+    assert result["music_status"] == "completed"
+    assert result["music_data"]["decision"]["reason"] == (
+        "unique_exact_search_alias"
+    )
+    assert result["music_player"]["music"]["video_id"] == "32sYGCOYJUM"
+    assert [call[0] for call in client.calls] == ["llm1"]
+
+
+def test_music_llm2_can_select_only_a_returned_candidate() -> None:
+    client = StubMusicClient(
+        {
+            "action": "play",
+            "search_query": "chạy ngay đi Sơn Tùng",
+            "title": None,
+            "artist": None,
+            "genre": None,
+            "mood": None,
+            "language": None,
+            "version": None,
+            "sort_by": None,
+            "sort_order": None,
+            "selection_index": None,
+        },
+        candidate_resolution={
+            "decision": "selected",
+            "selection_index": 2,
+            "confidence": "high",
+            "question": None,
+        },
+    )
+    search = StubSearchService(
+        [
+            _candidate("Lạc Trôi", "Llw9Q6akRo4"),
+            _candidate("CHẠY NGAY ĐI | RUN NOW", "32sYGCOYJUM"),
+        ]
+    )
+
+    result = run_music_agent(
+        {"query": "Bật nhạc chạy ngay đi Sơn Tùng", "history": []},
+        settings=_settings(),
+        client=client,
+        search_service=search,
+    )
+
+    assert result["music_status"] == "completed"
+    assert result["music_data"]["decision"]["reason"] == (
+        "llm2_candidate_resolution"
+    )
+    assert result["music_player"]["music"]["video_id"] == "32sYGCOYJUM"
+    assert [call[0] for call in client.calls] == ["llm1", "llm2"]
+
+
+def test_music_agent_not_found_names_the_requested_title() -> None:
+    client = StubMusicClient(
+        {
+            "action": "play",
+            "search_query": "Chúng Ta Của Ngày Hôm Qua",
+            "title": "Chúng Ta Của Ngày Hôm Qua",
+            "artist": None,
+            "genre": None,
+            "mood": None,
+            "language": None,
+            "version": None,
+            "sort_by": None,
+            "sort_order": None,
+            "selection_index": None,
+        },
+        # Force the safety fallback so the user-facing result is deterministic
+        # even if LLM2 ignores the music_not_found instruction.
+        answer="https://example.com/unsafe",
+    )
+
+    result = run_music_agent(
+        {"query": "Bài Chúng Ta Của Ngày Hôm Qua", "history": []},
+        settings=_settings(),
+        client=client,
+        search_service=StubSearchService([]),
+    )
+
+    assert result["music_status"] == "needs_clarification"
+    assert result["music_answer"] == (
+        "Hiện tại tôi chưa tìm thấy bài “Chúng Ta Của Ngày Hôm Qua” "
+        "trong kho nhạc."
+    )
+    assert [call[0] for call in client.calls] == ["llm1", "llm2"]
+    llm2_payload = json.loads(client.calls[1][1])
+    assert llm2_payload["reason"] == "music_not_found"
+    assert llm2_payload["requested_music"]["title"] == (
+        "Chúng Ta Của Ngày Hôm Qua"
+    )
+
+
+def test_music_llm2_forwards_text_chunks_to_web_callback() -> None:
+    client = StubMusicClient(
+        {
+            "action": "play",
+            "search_query": "nhạc Sơn Tùng",
+            "title": None,
+            "artist": "Sơn Tùng",
+            "genre": None,
+            "mood": None,
+            "language": None,
+            "version": None,
+            "sort_by": None,
+            "sort_order": None,
+            "selection_index": None,
+        },
+        answer="Bạn muốn nghe Lạc Trôi hay Nơi Này Có Anh?",
+    )
+    chunks: list[tuple[str, str]] = []
+
+    result = run_music_agent(
+        {
+            "query": "Bật nhạc Sơn Tùng",
+            "history": [],
+            "response_stream_callback": lambda domain, text: chunks.append(
+                (domain, text)
+            ),
+        },
+        settings=_settings(),
+        client=client,
+        search_service=StubSearchService(
+            [
+                _candidate("Lạc Trôi", "Llw9Q6akRo4"),
+                _candidate("Nơi Này Có Anh", "FN7ALfpGxiI"),
+            ]
+        ),
+    )
+
+    assert result["music_status"] == "needs_clarification"
+    assert {domain for domain, _text in chunks} == {"music"}
+    assert "".join(text for _domain, text in chunks) == result["music_answer"]
 
 
 def test_music_agent_selects_latest_without_llm2() -> None:

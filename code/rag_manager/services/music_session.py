@@ -5,7 +5,10 @@ from __future__ import annotations
 import re
 from typing import Any, Mapping, Sequence
 
-from rag_manager.services.music_search_service import normalize_music_text
+from rag_manager.services.music_search_service import (
+    music_title_aliases,
+    normalize_music_text,
+)
 
 
 MUSIC_SESSION_VERSION = "music.session.v1"
@@ -15,6 +18,7 @@ _CANDIDATE_FIELDS = (
     "record_id",
     "track_id",
     "title",
+    "title_aliases",
     "artists",
     "video_id",
     "content_type",
@@ -343,8 +347,8 @@ class MusicSessionManager:
             _candidate_list(session.get("last_candidates")),
             start=1,
         ):
-            title = normalize_music_text(_text(candidate.get("title")))
-            if title and (stripped == title or title == normalized_query):
+            aliases = _candidate_aliases(candidate)
+            if stripped in aliases or normalized_query in aliases:
                 matches.append(index)
         return matches[0] if len(matches) == 1 else None
 
@@ -360,7 +364,7 @@ class MusicSessionManager:
             _candidate_list(session.get("last_candidates")),
             start=1,
         ):
-            if normalize_music_text(_text(candidate.get("title"))) != title:
+            if title not in _candidate_aliases(candidate):
                 continue
             artists = candidate.get("artists", [])
             if requested_artist and not any(
@@ -422,6 +426,16 @@ def _candidate(raw: Any) -> dict[str, Any]:
     candidate["artists"] = [
         str(value) for value in artists if isinstance(value, str) and value.strip()
     ] if isinstance(artists, list) else []
+    raw_aliases = raw.get("title_aliases")
+    candidate["title_aliases"] = (
+        [
+            normalize_music_text(value)
+            for value in raw_aliases
+            if isinstance(value, str) and normalize_music_text(value)
+        ]
+        if isinstance(raw_aliases, list)
+        else list(music_title_aliases(_text(candidate.get("title"))))
+    )
     if not _text(candidate.get("record_id")) or not _text(candidate.get("video_id")):
         return {}
     return candidate
@@ -435,6 +449,12 @@ def _index_of_source(candidates: Any, source_id: Any) -> int | None:
         if candidate.get("record_id") == requested:
             return index
     return None
+
+
+def _candidate_aliases(candidate: Mapping[str, Any]) -> set[str]:
+    raw_aliases = candidate.get("title_aliases")
+    explicit = raw_aliases if isinstance(raw_aliases, list) else None
+    return set(music_title_aliases(_text(candidate.get("title")), explicit))
 
 
 def _session_completed(

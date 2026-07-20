@@ -16,7 +16,11 @@ from rag_manager.agents.weather import run_weather_llm_pipeline
 from rag_manager.agents.wiki import run_wiki_agent
 from rag_manager.config import Settings, load_settings
 from rag_manager.state import GraphState
-from rag_manager.semantic_router import analyze_input, is_high_confidence_domain_query
+from rag_manager.semantic_router import (
+    analyze_input,
+    is_explicit_visualization_query,
+    is_high_confidence_domain_query,
+)
 from rag_manager.visualization.orchestrator import (
     CREATE_NEW_TEMPLATE_ID,
     VisualizationOrchestrator,
@@ -86,10 +90,16 @@ def build_workflow():
 def input_router_node(state: GraphState) -> GraphState:
     query = state.get("query", "")
     pending_template_state = state.get("pending_template_state")
-    if is_high_confidence_domain_query(query) and not (
+    has_pending_template_request = (
         isinstance(pending_template_state, dict)
         and pending_template_state.get("status") == "collecting_requirements"
-    ):
+    )
+    is_weather_followup = _has_active_weather_context(state) and not (
+        is_explicit_visualization_query(query)
+    )
+    if (
+        is_high_confidence_domain_query(query) or is_weather_followup
+    ) and not has_pending_template_request:
         return {
             "input_route": "domain",
             "semantic_result": {},
@@ -190,6 +200,25 @@ def input_router_node(state: GraphState) -> GraphState:
             }
         )
     return update
+
+
+def _has_active_weather_context(state: GraphState) -> bool:
+    """Return True when the latest conversational domain is active Weather."""
+
+    weather_session = state.get("weather_session")
+    if isinstance(weather_session, dict) and weather_session.get("active") is True:
+        return True
+
+    history = state.get("history")
+    if not isinstance(history, list):
+        return False
+    for message in reversed(history):
+        if not isinstance(message, dict):
+            continue
+        domain = message.get("domain")
+        if isinstance(domain, str) and domain.strip():
+            return domain.strip() == "weather"
+    return False
 
 
 def route_input(state: GraphState) -> str:

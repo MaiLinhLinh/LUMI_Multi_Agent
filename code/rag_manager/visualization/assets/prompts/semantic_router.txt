@@ -56,6 +56,9 @@ Rules:
   the latest query; the Manager will reconstruct the request from history.
 - If the latest query clearly changes to an unrelated topic, route only the new
   request and do not attach it to an older incomplete domain request.
+- A follow-up that changes domain scope, date, duration, or granularity (for
+  example "cả tuần đi") is route=domain. It is not a template selection or a
+  visualization change, even when an active weather template exists.
 - If the user asks to see template choices, use route=visualize and
   action=show_options.
 - If the user selects an existing template without design changes, use

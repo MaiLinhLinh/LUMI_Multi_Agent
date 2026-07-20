@@ -81,70 +81,76 @@ SAFETY:
 """.strip()
 
 MUSIC_PIPELINE_RESPONSE_SYSTEM_PROMPT = """
-You are the clarification step for a Vietnamese Music Agent.
-Ask exactly one short question that helps the user complete or disambiguate the
-request. The backend-provided `reason`, `field`, and `candidate_summaries` are
-the only trusted evidence.
+You are the response step for unresolved Vietnamese Music Agent requests.
+Use only the backend-provided `reason`, `field`, `requested_music`, and
+`candidate_summaries`.
 
 RULES:
+- If `reason` is `music_not_found`, state in one short Vietnamese sentence that
+  the requested title/query is currently unavailable in the music catalog, and ask if the user would like to choose another song. Use
+  `requested_music` to name it, and do not ask the user to repeat information.
 - If candidates are provided, mention only those candidates; never add a song,
   artist, version, ranking, or fact that is absent from the input.
-- If no candidates are provided, ask for the missing title, artist, or search
+- For other reasons, ask exactly one short question for the missing or ambiguous
   detail without suggesting a made-up answer.
 - Do not claim that music is playing or that a result was displayed.
 - Never output a URL, video ID, iframe, HTML, database filter, or explanation.
-- Return only the Vietnamese clarification question.
+- Return only the Vietnamese notice or clarification question.
+""".strip()
+
+MUSIC_PIPELINE_CANDIDATE_RESOLUTION_SYSTEM_PROMPT = """
+You resolve an ambiguous Vietnamese music request using only the candidates
+provided by the backend.
+
+RULES:
+- Return `selected` with `confidence=high` and the candidate's one-based index
+  only when exactly one candidate clearly matches the requested song. Bilingual
+  titles, normalized spelling, and a supplied title alias may establish a match.
+- An artist-only, genre, mood, or otherwise broad request is not enough to pick
+  one song, even when one candidate is ranked first.
+- If more than one candidate remains plausible, return `needs_clarification`,
+  `confidence=low`, and one short Vietnamese question that mentions only the
+  provided candidates.
+- Never select an index outside the list and never invent a title, artist,
+  version, URL, video ID, or database fact.
+- Fill only the response schema; do not add explanations.
 """.strip()
 
 WEATHER_PIPELINE_EXTRACTION_SYSTEM_PROMPT = """
 You are the request extraction step for a Vietnamese Weather Agent.
-Read `query`, `relevant_history`, and `last_resolved_request`, then fill in the
-complete effective weather request according to the response schema.
-RULES:
-1. Prioritize the current query; any new location or time information must override the previous value.
-2. If the query is a continuation, correction, or comparison, inherit fields
-   not mentioned again from `last_resolved_request` or the relevant Weather
-   history. Return the complete effective values, not only changed fields.
-3. If the query is independent or unrelated, do not inherit information from the history.
-4. If there is insufficient evidence, return null; do not guess or fabricate information.
-FIELDS: `location_text`, `date_text`, `time_of_day_text`, `normalized_time`, `request_type_candidate`
-Only use locations and times provided by the user. Preserve the original wording in the raw fields; only `normalized_time` may use `HH:MM`. Do not create an ISO date, timestamp, start_date, or days.
-Only fill in fields defined by the response schema.
-example 1:
-Lịch sử: "Thời tiết Hà Nội ngày kia thế nào?"
-Query: "Không, tôi muốn chính xác lúc 9 giờ sáng mai ."
+Task: Read `query`, `relevant_history`, and `last_resolved_request` to populate the response schema.
+
+INHERITANCE & PRIORITY RULES:
+1. Priority: New information in `query` (location, date, time) overrides previous values.
+2. Continuations/Corrections/Comparisons: Inherit all UNCHANGED fields from `last_resolved_request` to return a complete effective request (not a patch).
+3. Independent queries: Do not inherit history.
+4. Insufficient evidence -> Return null (do not guess or fabricate information).
+
+DATE RANGE & TIME RULES:
+- Raw Wording Only: DO NOT calculate calendar dates, timestamps, or ISO dates.
+- `date_text`: Retain the raw anchor date phrase. Example: History "Hà Nội ngày 23/7" + query "vậy thì cả tuần đi" -> `date_text` remains "ngày 23/7".
+- `quantity`: Use the exact stated number (e.g., "3 ngày tới" -> quantity=3). DO NOT add or subtract from this number.
+- Current conditions: Set `date_text=null` and `date_range=null`.
+- Clock Normalization: Only `normalized_time` uses `HH:MM`. Switching to a whole-day request clears both time fields (`time_of_day_text` and `normalized_time`).
+- `request_type_candidate`:
+   - `current` ONLY when the user explicitly says “hiện tại”, “bây giờ”,
+     “lúc này”, or “ngay bây giờ”, without another requested date/time.
+   - `forecast` for “hôm nay”, “ngày mai”, any date/range/week, or a specific
+     time.
+   - Otherwise null.
+
+EXAMPLES:
+1. query: "Thời tiết hà nội 3 ngày tới"
 Kết quả:
-- location_text: "Hà Nội"
-- date_text: "ngày mai"
-- time_of_day_text: "lúc 9 giờ sáng"
-- normalized_time: "09:00"
-- request_type_candidate: "forecast"
-example 2:
-Lịch sử: "Thời tiết Hà Nội hôm nay thế nào?"
-Query: "Thế thì Đà Nẵng thế nào?"
-Kết quả:
-- location_text: "Đà Nẵng"
-- date_text: "hôm nay"
-- time_of_day_text: null
-- normalized_time: null
-- request_type_candidate: "forecast"
-example 3:
-Lịch sử: "Thời tiết Hà Nội hôm nay lúc 9 giờ thế nào?"
-Query: "Không cần lúc 9 giờ, xem ngày mai cả ngày."
-Kết quả:
-- location_text: "Hà Nội"
-- date_text: "ngày mai"
-- time_of_day_text: null
-- normalized_time: null
-- request_type_candidate: "forecast"
-example 4:
-Query: "Thời tiết Hà Nội thế nào?"
-Kết quả:
-- location_text: "Hà Nội"
-- date_text: null
-- time_of_day_text: null
-- normalized_time: null
-- request_type_candidate: null
+- location_text=null;
+- date_text=null;
+- date_range={type:"next_days", quantity:3, end_date_text:null};
+- time_of_day_text=null;
+- normalized_time=null;
+- request_type_candidate="forecast"
+2. History "thời tiết Hà Nội ngày 23/7" + query "vậy thì cả tuần đi" -> location_text="Hà Nội"; date_text="ngày 23/7"; date_range={type:"full_week", quantity:1, end_date_text:null}; time_of_day_text=null; normalized_time=null; request_type_candidate="forecast"
+3. History"thời tiết hà nội từ ngày 20/7 đến 23/7" + query:"Đà nẵng thì sao" -> location_text="Đà Nẵng"; date_text="ngày 20/7"; date_range={type:"explicit_range", quantity:null, end_date_text:"23/7"}; time_of_day_text=null; normalized_time=null; request_type_candidate="forecast"
+4. History "Hà Nội ngày kia" + query "9h sáng mai" -> location_text="Hà Nội"; date_text="ngày mai"; date_range={type:"single_day", quantity:null, end_date_text:null}; time_of_day_text="9h sáng"; normalized_time="09:00"; request_type_candidate="forecast"
 """.strip()
 
 WEATHER_PIPELINE_RESPONSE_SYSTEM_PROMPT = """

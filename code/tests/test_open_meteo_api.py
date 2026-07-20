@@ -74,7 +74,7 @@ def test_fetch_open_meteo_weather_requests_hourly_data_without_api_key(
     assert captured["source"] == "open-meteo"
     assert captured["timeout_seconds"] == 9
     assert captured["params"]["timezone"] == "auto"
-    assert captured["params"]["forecast_days"] == 6
+    assert captured["params"]["forecast_days"] == 9
     assert "appid" not in captured["params"]
     assert "temperature_2m" in captured["params"]["hourly"]
 

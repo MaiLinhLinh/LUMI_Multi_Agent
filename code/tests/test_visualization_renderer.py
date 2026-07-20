@@ -84,14 +84,18 @@ def test_render_template_executes_generic_loops_and_escapes_each_item() -> None:
     assert html == "<p>first</p><p>&lt;script&gt;alert(1)&lt;/script&gt;</p>"
 
 
-def test_forecast_template_renders_one_card_per_day_and_nested_intervals() -> None:
+def test_forecast_template_renders_eight_day_cards_and_temperature_chart() -> None:
     envelope = _load_sample("weather.forecast.v1")
     first_day = envelope["data"]["forecast"]["days"][0]
-    second_day = json.loads(json.dumps(first_day))
-    second_day["date"] = "2026-07-12"
-    second_day["intervals"][0]["time"] = "15:00"
-    second_day["intervals"][0]["condition"]["description"] = "<unsafe>"
-    envelope["data"]["forecast"]["days"].append(second_day)
+    days = []
+    for offset in range(8):
+        day = json.loads(json.dumps(first_day))
+        day["date"] = f"2026-07-{11 + offset:02d}"
+        day["temperature"]["max_celsius"] = 30 + offset
+        day["temperature"]["min_celsius"] = 24 + offset
+        days.append(day)
+    days[1]["intervals"][0]["condition"]["description"] = "<unsafe>"
+    envelope["data"]["forecast"]["days"] = days
 
     html = render_template(
         _forecast_template_html(),
@@ -99,12 +103,20 @@ def test_forecast_template_renders_one_card_per_day_and_nested_intervals() -> No
         data=envelope["data"] | {"source": envelope["source"]},
     )
 
-    assert html.count('class="daily-card"') == 2
-    assert "2026-07-12" in html
-    assert "12:00" in html
-    assert "15:00" in html
+    assert html.count('<article class="day-card') == 8
+    assert 'style="--day-count: 8"' in html
+    assert "2026-07-18" in html
+    assert "Biến động nhiệt độ cao nhất theo ngày" in html
+    assert "Dự báo 8 ngày" in html
     assert "<unsafe>" not in html
-    assert "&lt;unsafe&gt;" in html
+
+    chart = re.search(r'<polyline[^>]+points="([^"]+)"', html)
+    assert chart is not None
+    y_coordinates = {
+        round(float(point.split(",")[1]), 3)
+        for point in chart.group(1).split()
+    }
+    assert len(y_coordinates) == 8
 
 
 def test_single_day_template_renders_summary_and_hourly_strip() -> None:

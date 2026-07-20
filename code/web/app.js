@@ -24,6 +24,7 @@ const messageTemplate = document.querySelector("#messageTemplate");
 const SESSION_KEY = "lumi_web_session_id";
 const YOUTUBE_NOCOOKIE_ORIGIN = "https://www.youtube-nocookie.com";
 const YOUTUBE_VIDEO_ID_PATTERN = /^[A-Za-z0-9_-]{11}$/;
+const STREAM_CHARACTER_DELAY_MS = 18;
 const sessionId = getOrCreateSessionId();
 let state = {
   messages: [],
@@ -33,6 +34,7 @@ let state = {
 };
 let busy = false;
 let renderedPanelRevision = null;
+let streamingDraft = null;
 
 function getOrCreateSessionId() {
   const existing = window.localStorage.getItem(SESSION_KEY);
@@ -50,6 +52,34 @@ async function requestJson(url, options = {}) {
   const payload = await response.json();
   if (!response.ok) throw new Error(payload.message || "Không thể kết nối tới ứng dụng.");
   return payload;
+}
+
+async function requestNdjson(url, options = {}, onEvent = () => {}) {
+  const response = await fetch(url, {
+    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+    ...options,
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.message || "Không thể kết nối tới ứng dụng.");
+  }
+  if (!response.body) throw new Error("Trình duyệt không hỗ trợ luồng trả lời.");
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let buffer = "";
+
+  while (true) {
+    const { value, done } = await reader.read();
+    buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+    for (const line of lines) {
+      if (line.trim()) onEvent(JSON.parse(line));
+    }
+    if (done) break;
+  }
+  if (buffer.trim()) onEvent(JSON.parse(buffer));
 }
 
 function render() {
@@ -77,10 +107,18 @@ function render() {
   for (const message of state.messages || []) {
     messagesElement.appendChild(createMessage(message.role, message.content));
   }
-  if (busy) messagesElement.appendChild(createTypingMessage());
+  if (streamingDraft !== null) {
+    messagesElement.appendChild(createMessage("assistant", streamingDraft, true));
+  } else if (busy) {
+    messagesElement.appendChild(createTypingMessage());
+  }
 
   suggestions.classList.toggle("hidden", hasMessages || busy);
-  connectionStatus.textContent = busy ? "Đang xử lý..." : "Sẵn sàng";
+  connectionStatus.textContent = streamingDraft !== null
+    ? "Đang trả lời..."
+    : busy
+      ? "Đang xử lý..."
+      : "Sẵn sàng";
   connectionStatus.classList.toggle("busy", busy);
   queryInput.disabled = busy;
   sendButton.disabled = busy;
@@ -169,16 +207,72 @@ function clearActivePanel() {
   musicView.hidden = true;
 }
 
-function createMessage(role, content) {
+function createMessage(role, content, isStreaming = false) {
   const fragment = messageTemplate.content.cloneNode(true);
   const article = fragment.querySelector(".message");
   const avatar = fragment.querySelector(".avatar");
   const bubble = fragment.querySelector(".bubble");
   const isUser = role === "user";
   article.classList.add(isUser ? "user" : "assistant");
+  if (isStreaming) article.classList.add("streaming");
   avatar.textContent = isUser ? "B" : "L";
   bubble.textContent = content || "";
   return fragment;
+}
+
+function createCharacterStreamer() {
+  const characters = [];
+  let timer = null;
+  let drainResolvers = [];
+
+  function resolveDrain() {
+    if (characters.length || timer !== null) return;
+    for (const resolve of drainResolvers) resolve();
+    drainResolvers = [];
+  }
+
+  function paint() {
+    const bubble = messagesElement.querySelector(".message.streaming .bubble");
+    if (bubble) bubble.textContent = streamingDraft || "";
+    messagesElement.scrollTop = messagesElement.scrollHeight;
+  }
+
+  function pump() {
+    timer = null;
+    const character = characters.shift();
+    if (character === undefined) {
+      resolveDrain();
+      return;
+    }
+    streamingDraft = `${streamingDraft || ""}${character}`;
+    paint();
+    const delay = characters.length > 120
+      ? Math.max(8, STREAM_CHARACTER_DELAY_MS / 2)
+      : STREAM_CHARACTER_DELAY_MS;
+    timer = window.setTimeout(pump, delay);
+  }
+
+  return {
+    push(text) {
+      if (typeof text !== "string" || !text) return;
+      characters.push(...Array.from(text));
+      if (streamingDraft === null) {
+        streamingDraft = "";
+        render();
+      }
+      if (timer === null) pump();
+    },
+    drain() {
+      if (!characters.length && timer === null) return Promise.resolve();
+      return new Promise((resolve) => drainResolvers.push(resolve));
+    },
+    abort() {
+      characters.length = 0;
+      if (timer !== null) window.clearTimeout(timer);
+      timer = null;
+      resolveDrain();
+    },
+  };
 }
 
 function createTypingMessage() {
@@ -203,17 +297,34 @@ async function submitQuery(query) {
   resizeInput();
   render();
 
+  const characterStreamer = createCharacterStreamer();
+  let finalState = null;
   try {
-    state = await requestJson("/api/chat", {
+    await requestNdjson("/api/chat/stream", {
       method: "POST",
       body: JSON.stringify({ session_id: sessionId, query: cleanQuery }),
+    }, (event) => {
+      if (event?.type === "text_delta") {
+        characterStreamer.push(event.delta);
+      } else if (event?.type === "final") {
+        finalState = event.payload;
+      } else if (event?.type === "error") {
+        throw new Error(event.message || "Luồng trả lời đã bị gián đoạn.");
+      }
     });
+    await characterStreamer.drain();
+    if (!finalState || typeof finalState !== "object") {
+      throw new Error("Máy chủ chưa gửi kết quả cuối cùng.");
+    }
+    state = finalState;
   } catch (error) {
+    characterStreamer.abort();
     state.messages = [
       ...(state.messages || []),
       { role: "assistant", content: error.message || "Đã xảy ra lỗi kết nối." },
     ];
   } finally {
+    streamingDraft = null;
     busy = false;
     render();
     queryInput.focus();

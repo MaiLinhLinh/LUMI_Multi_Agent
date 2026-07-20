@@ -98,6 +98,7 @@ class AgentState(TypedDict, total=False):
     music_search_service: Any
     music_session: dict[str, Any]
     music_player: dict[str, Any]
+    response_stream_callback: Any
     aggregator_client: Any
     visualization_orchestrator: Any
     input_route: InputRoute

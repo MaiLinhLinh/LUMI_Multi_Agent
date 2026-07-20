@@ -7,7 +7,7 @@ import re
 import sys
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 from rag_manager.config import Settings
 
@@ -56,8 +56,9 @@ class GeminiClient:
         user_message: str,
         *,
         temperature: float = 0.0,
+        on_text_chunk: Callable[[str], None] | None = None,
     ) -> str:
-        """Call Gemini and return the assistant text response."""
+        """Call Gemini and return text while optionally forwarding visible chunks."""
         prompt = f"{system_prompt}\n\n{user_message}"
         self._call_sequence += 1
         call_id = self._call_sequence
@@ -70,6 +71,7 @@ class GeminiClient:
                 prompt,
                 _generation_configs(self.model, temperature, self._types),
                 call_id=call_id,
+                on_text_chunk=on_text_chunk,
             )
         except Exception as exc:
             _debug_print(
@@ -171,6 +173,7 @@ class GeminiClient:
         configs: list[Any],
         *,
         call_id: int,
+        on_text_chunk: Callable[[str], None] | None = None,
     ) -> _StreamResult:
         """Stream Gemini with retry logic, then return one collected response."""
         last_error: Exception | None = None
@@ -178,6 +181,7 @@ class GeminiClient:
 
         for config_index, config in enumerate(configs):
             for attempt in range(MAX_TRANSIENT_RETRIES + 1):
+                forwarded_visible_text = False
                 try:
                     _debug_print(
                         f"[Gemini][call={call_id}] HTTP_STREAM_ATTEMPT "
@@ -207,6 +211,15 @@ class GeminiClient:
                                 first_visible_at = received_at
                             last_visible_at = received_at
                             text_parts.append(visible_text)
+                            if on_text_chunk is not None:
+                                forwarded_visible_text = True
+                                try:
+                                    on_text_chunk(visible_text)
+                                except Exception as exc:  # noqa: BLE001 - UI callback boundary
+                                    _debug_print(
+                                        f"[Gemini][call={call_id}] STREAM_CALLBACK_ERROR "
+                                        f"type={type(exc).__name__} detail={exc}"
+                                    )
                         if _native_usage_metadata(chunk):
                             usage_response = chunk
 
@@ -228,6 +241,13 @@ class GeminiClient:
                         f"[Gemini][call={call_id}] HTTP_ERROR "
                         f"attempt={attempt + 1} type={type(exc).__name__} detail={exc}"
                     )
+
+                    # Retrying after publishing visible text would duplicate the
+                    # beginning of the answer in the browser stream.
+                    if forwarded_visible_text:
+                        raise GeminiRequestError(
+                            "Gemini stream was interrupted after visible output."
+                        ) from exc
 
                     if _is_unsupported_thinking_config_error(exc) and config_index + 1 < len(configs):
                         break

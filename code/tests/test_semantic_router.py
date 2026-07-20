@@ -1,4 +1,8 @@
-from rag_manager.semantic_router import analyze_input, is_high_confidence_domain_query
+from rag_manager.semantic_router import (
+    analyze_input,
+    is_explicit_visualization_query,
+    is_high_confidence_domain_query,
+)
 from rag_manager.graph import input_router_node
 from rag_manager.visualization.orchestrator import (
     VisualizationOrchestrator,
@@ -186,3 +190,70 @@ def test_complete_domain_patterns_can_bypass_llm() -> None:
         "Play song Shape of You",
     )
     assert all(is_high_confidence_domain_query(query) for query in queries)
+
+
+def test_active_weather_followup_bypasses_semantic_visualization_router() -> None:
+    class UnexpectedClient:
+        def chat_json(self, system_prompt, user_message):
+            raise AssertionError("Semantic Router must not run for a Weather follow-up")
+
+    result = input_router_node(
+        {
+            "query": "cả tuần đi",
+            "history": [
+                {
+                    "role": "assistant",
+                    "content": "Ngày mai tại Đà Nẵng có mưa phùn.",
+                    "domain": "weather",
+                    "workflow_id": "weather_1",
+                },
+                {"role": "user", "content": "cả tuần đi"},
+            ],
+            "weather_session": {
+                "active": True,
+                "workflow_id": "weather_1",
+            },
+            "semantic_router_client": UnexpectedClient(),
+        }
+    )
+
+    assert result["input_route"] == "domain"
+    assert result["visualization_request"] == {
+        "mode": "auto",
+        "action": "auto_render",
+    }
+    assert result["semantic_result"] == {}
+
+
+def test_active_weather_does_not_hide_explicit_visualization_request() -> None:
+    assert is_explicit_visualization_query("đổi giao diện thời tiết") is True
+
+    class FakeClient:
+        def chat_json(self, system_prompt, user_message):
+            return {
+                "status": "ready",
+                "route": "visualize",
+                "domain_request": None,
+                "template": {
+                    "action": "design_template",
+                    "source": "current",
+                    "template_id": None,
+                    "selection_index": None,
+                    "requirements": {},
+                    "extracted_keywords": [],
+                },
+                "missing_information": [],
+                "clarifying_question": None,
+            }
+
+    result = input_router_node(
+        {
+            "query": "đổi giao diện thời tiết",
+            "history": [],
+            "weather_session": {"active": True},
+            "semantic_router_client": FakeClient(),
+        }
+    )
+
+    assert result["input_route"] == "visualize"
+    assert result["semantic_result"]["template"]["action"] == "design_template"

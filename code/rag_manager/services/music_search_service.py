@@ -60,6 +60,7 @@ LANGUAGE_ALIASES = {
     "chinese": "zh",
     "tieng trung": "zh",
 }
+_TITLE_ALIAS_SEPARATOR = re.compile(r"\s*[|｜]\s*")
 
 
 @dataclass(frozen=True)
@@ -345,6 +346,26 @@ def normalize_music_text(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", without_marks.casefold()).strip()
 
 
+def music_title_aliases(
+    title: str,
+    explicit_aliases: Sequence[Any] | None = None,
+) -> tuple[str, ...]:
+    """Return normalized full-title and bilingual-title aliases."""
+
+    raw_values = [title]
+    raw_values.extend(_TITLE_ALIAS_SEPARATOR.split(title))
+    if explicit_aliases:
+        raw_values.extend(str(value) for value in explicit_aliases)
+    aliases: list[str] = []
+    seen: set[str] = set()
+    for value in raw_values:
+        normalized = normalize_music_text(value)
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            aliases.append(normalized)
+    return tuple(aliases)
+
+
 def tokenize_music_text(value: str) -> list[str]:
     return normalize_music_text(value).split()
 
@@ -456,10 +477,17 @@ def _candidate_payload(
     exact_boost: float | None = None,
 ) -> dict[str, Any]:
     metadata = record.metadata
+    explicit_aliases = metadata.get("title_aliases", [])
     return {
         "record_id": record.id,
         "track_id": metadata.get("track_id"),
         "title": metadata.get("title"),
+        "title_aliases": list(
+            music_title_aliases(
+                str(metadata.get("title", "")),
+                explicit_aliases if isinstance(explicit_aliases, list) else None,
+            )
+        ),
         "artists": list(metadata.get("artist_names", [])),
         "video_id": metadata.get("video_id"),
         "content_type": metadata.get("content_type"),

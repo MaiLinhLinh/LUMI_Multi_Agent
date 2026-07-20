@@ -113,7 +113,18 @@ def _settings(*, openweather_api_key: str = "weather-key") -> Settings:
 
 class StubPipelineClient:
     def __init__(self, extraction: dict, answer: str = "weather answer") -> None:
-        self.extraction = extraction
+        self.extraction = dict(extraction)
+        if "date_range" not in self.extraction:
+            self.extraction["date_range"] = (
+                None
+                if self.extraction.get("request_type_candidate") == "current"
+                or not self.extraction.get("date_text")
+                else {
+                    "type": "single_day",
+                    "quantity": None,
+                    "end_date_text": None,
+                }
+            )
         self.answer = answer
         self.calls: list[tuple[str, str]] = []
         self.last_usage: dict = {}
@@ -137,7 +148,13 @@ class StubPipelineClient:
         }
         return response_schema.model_validate(self.extraction).model_dump()
 
-    def chat_text(self, system_prompt: str, user_message: str) -> str:
+    def chat_text(
+        self,
+        system_prompt: str,
+        user_message: str,
+        *,
+        on_text_chunk=None,
+    ) -> str:
         self.calls.append(("response", user_message))
         self.last_usage = {
             "model": "weather-model",
@@ -145,6 +162,10 @@ class StubPipelineClient:
             "completion_tokens": 10,
             "total_tokens": 40,
         }
+        if on_text_chunk is not None:
+            midpoint = max(1, len(self.answer) // 2)
+            on_text_chunk(self.answer[:midpoint])
+            on_text_chunk(self.answer[midpoint:])
         return self.answer
 
 
@@ -265,6 +286,37 @@ def test_weather_pipeline_missing_location_never_reads_redis() -> None:
     }
 
 
+def test_weather_llm2_forwards_text_chunks_to_web_callback() -> None:
+    client = StubPipelineClient(
+        {
+            "location_text": None,
+            "date_text": "ngày mai",
+            "time_of_day_text": None,
+            "normalized_time": None,
+            "request_type_candidate": "forecast",
+        },
+        answer="Bạn muốn xem thời tiết ở đâu?",
+    )
+    chunks: list[tuple[str, str]] = []
+
+    result = weather_agent.run_weather_llm_pipeline(
+        {
+            "query": "Ngày mai thời tiết thế nào?",
+            "history": [],
+            "response_stream_callback": lambda domain, text: chunks.append(
+                (domain, text)
+            ),
+        },
+        store=StubWeatherStore(),
+        settings=_settings(),
+        client=client,
+    )
+
+    assert result["weather_status"] == "needs_clarification"
+    assert {domain for domain, _text in chunks} == {"weather"}
+    assert "".join(text for _domain, text in chunks) == result["weather_answer"]
+
+
 def test_weather_pipeline_tells_llm2_the_exact_invalid_date_field(
     monkeypatch,
 ) -> None:
@@ -305,6 +357,7 @@ def test_weather_extraction_schema_has_exact_required_fields() -> None:
     expected_fields = {
         "location_text",
         "date_text",
+        "date_range",
         "time_of_day_text",
         "normalized_time",
         "request_type_candidate",
@@ -312,6 +365,17 @@ def test_weather_extraction_schema_has_exact_required_fields() -> None:
 
     assert set(schema["properties"]) == expected_fields
     assert set(schema["required"]) == expected_fields
+    date_range_schema = schema["$defs"]["WeatherDateRangeResponse"]
+    assert set(date_range_schema["properties"]) == {
+        "type",
+        "quantity",
+        "end_date_text",
+    }
+    assert set(date_range_schema["required"]) == {
+        "type",
+        "quantity",
+        "end_date_text",
+    }
 
 
 def test_weather_pipeline_unavailable_snapshot_is_not_treated_as_input_error(
@@ -454,8 +518,11 @@ def test_weather_store_exception_is_not_classified_from_message(monkeypatch) -> 
 
 
 def test_weather_pipeline_uses_python_forecast_request_unchanged(monkeypatch) -> None:
+    validator_inputs: dict = {}
+
     class FixedForecastValidator:
         def validate(self, *_args, **_kwargs) -> dict:
+            validator_inputs.update(_kwargs)
             return {
                 "status": "valid",
                 "request_type": "forecast",
@@ -492,6 +559,11 @@ def test_weather_pipeline_uses_python_forecast_request_unchanged(monkeypatch) ->
         {
             "location_text": "Hà Nội",
             "date_text": "hai ngày tới",
+            "date_range": {
+                "type": "next_days",
+                "quantity": 2,
+                "end_date_text": None,
+            },
             "time_of_day_text": None,
             "normalized_time": None,
             "request_type_candidate": "forecast",
@@ -506,6 +578,17 @@ def test_weather_pipeline_uses_python_forecast_request_unchanged(monkeypatch) ->
     )
 
     assert result["weather_status"] == "completed"
+    assert validator_inputs["date_range"] == {
+        "type": "next_days",
+        "quantity": 2,
+        "end_date_text": None,
+    }
+    assert result["weather_session"]["schema_version"] == "weather.session.v2"
+    assert result["weather_session"]["last_resolved_request"]["date_range"] == {
+        "type": "next_days",
+        "quantity": 2,
+        "end_date_text": None,
+    }
     assert store.forecast_calls == [("ha_noi", 2, "2026-07-16")]
     assert result["weather_data"]["data"]["forecast"]["days"] == [
         {"date": "2026-07-16"},
@@ -834,6 +917,11 @@ def test_weather_extraction_message_carries_last_resolved_request() -> None:
     previous = {
         "location_text": "Hà Nội",
         "date_text": "ngày mai",
+        "date_range": {
+            "type": "single_day",
+            "quantity": None,
+            "end_date_text": None,
+        },
         "time_of_day_text": None,
         "normalized_time": None,
         "request_type_candidate": "forecast",

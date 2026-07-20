@@ -124,6 +124,26 @@ def test_streaming_records_first_token_and_visible_latency_separately(monkeypatc
     assert client.last_usage["total_request_time"] == 1.0
 
 
+def test_chat_text_forwards_visible_chunks_without_waiting_for_full_result() -> None:
+    class Chunk:
+        def __init__(self, text: str) -> None:
+            self.text = text
+
+    client, _models = _client_with_outcomes(
+        [(Chunk("Xin "), Chunk("chào"))]
+    )
+    received: list[str] = []
+
+    result = client.chat_text(
+        "system",
+        "user",
+        on_text_chunk=received.append,
+    )
+
+    assert received == ["Xin ", "chào"]
+    assert result == "Xin chào"
+
+
 def test_structured_json_uses_system_instruction_and_response_schema() -> None:
     class StructuredResponse:
         text = (

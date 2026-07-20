@@ -10,6 +10,8 @@ from pydantic import BaseModel, Field
 MusicAction = Literal["play", "search", "next", "replay", "stop"]
 MusicSortField = Literal["release_date", "popularity"]
 MusicSortOrder = Literal["asc", "desc"]
+MusicCandidateDecision = Literal["selected", "needs_clarification"]
+MusicCandidateConfidence = Literal["high", "low"]
 
 
 class MusicExtractionResponse(BaseModel):
@@ -62,5 +64,34 @@ class MusicExtractionResponse(BaseModel):
         ge=1,
         description=(
             "One-based candidate index explicitly selected by the user, or null."
+        ),
+    )
+
+
+class MusicCandidateResolutionResponse(BaseModel):
+    """Constrain Music LLM2 to a backend-provided candidate list."""
+
+    decision: MusicCandidateDecision = Field(
+        description=(
+            "Select one candidate only when the request clearly identifies it; "
+            "otherwise request clarification."
+        ),
+    )
+    selection_index: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "One-based index from the provided candidate list when decision is "
+            "selected; otherwise null."
+        ),
+    )
+    confidence: MusicCandidateConfidence = Field(
+        description="High for an unambiguous selection; otherwise low.",
+    )
+    question: str | None = Field(
+        default=None,
+        description=(
+            "One concise Vietnamese clarification question when the decision is "
+            "needs_clarification; otherwise null."
         ),
     )

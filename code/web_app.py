@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import os
 import re
 import threading
 import time
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -13,7 +16,7 @@ from typing import Any
 from starlette.applications import Starlette
 from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
-from starlette.responses import FileResponse, JSONResponse
+from starlette.responses import FileResponse, JSONResponse, StreamingResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
@@ -108,7 +111,13 @@ class WebChatService:
     def clear(self, session_id: str) -> dict[str, Any]:
         return _session_payload(session_id, self.store.clear(session_id))
 
-    def chat(self, session_id: str, query: str) -> dict[str, Any]:
+    def chat(
+        self,
+        session_id: str,
+        query: str,
+        *,
+        response_stream_callback: Callable[[str, str], None] | None = None,
+    ) -> dict[str, Any]:
         self.ensure_ready()
         session = self.store.get(session_id)
         with session.lock:
@@ -124,6 +133,8 @@ class WebChatService:
                 "settings": self.settings,
                 **session.workflow_context,
             }
+            if response_stream_callback is not None:
+                state["response_stream_callback"] = response_stream_callback
 
             try:
                 result = self.workflow.invoke(state)
@@ -172,16 +183,20 @@ class WebChatService:
 
 
 def _visualization_path(result: dict[str, Any]) -> str:
+    # A carried visualization from an older Weather turn must not replace the
+    # currently playing Music panel during a clarification turn.
+    if result.get("weather_status") != "completed":
+        return ""
+
     output = result.get("visualization_output")
     if isinstance(output, dict) and output.get("ok") is True:
         output_path = output.get("html_path")
         if isinstance(output_path, str) and output_path.strip():
             return output_path.strip()
 
-    if result.get("weather_status") == "completed":
-        direct_path = result.get("visualization_html_path")
-        if isinstance(direct_path, str) and direct_path.strip():
-            return direct_path.strip()
+    direct_path = result.get("visualization_html_path")
+    if isinstance(direct_path, str) and direct_path.strip():
+        return direct_path.strip()
     return ""
 
 
@@ -393,12 +408,89 @@ async def chat(request: Request) -> JSONResponse:
     return JSONResponse(response)
 
 
+async def chat_stream(request: Request) -> JSONResponse | StreamingResponse:
+    """Stream Weather/Music LLM2 text chunks and finish with session state."""
+
+    try:
+        payload = await request.json()
+        session_id = _valid_session_id(payload.get("session_id"))
+        query = _valid_query(payload.get("query"))
+        service = _get_service()
+        service.ensure_ready()
+    except (ValueError, TypeError) as exc:
+        return JSONResponse({"ok": False, "message": str(exc)}, status_code=400)
+    except RuntimeError as exc:
+        return JSONResponse({"ok": False, "message": str(exc)}, status_code=503)
+
+    async def events() -> AsyncIterator[bytes]:
+        loop = asyncio.get_running_loop()
+        event_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        stream_open = threading.Event()
+        stream_open.set()
+
+        def publish_chunk(domain: str, text: str) -> None:
+            if not stream_open.is_set() or not isinstance(text, str) or not text:
+                return
+            event = {"type": "text_delta", "domain": domain, "delta": text}
+            try:
+                loop.call_soon_threadsafe(event_queue.put_nowait, event)
+            except RuntimeError:
+                # The browser disconnected after the model had already emitted.
+                stream_open.clear()
+
+        async def execute_workflow() -> None:
+            try:
+                result = await run_in_threadpool(
+                    service.chat,
+                    session_id,
+                    query,
+                    response_stream_callback=publish_chunk,
+                )
+                await event_queue.put({"type": "final", "payload": result})
+            except Exception as exc:  # noqa: BLE001 - streaming API boundary
+                print(
+                    f"\n[WEB][STREAM_ERROR] {type(exc).__name__}: {exc}",
+                    flush=True,
+                )
+                await event_queue.put(
+                    {
+                        "type": "error",
+                        "message": "Xin lỗi, luồng trả lời đã bị gián đoạn.",
+                    }
+                )
+
+        task = asyncio.create_task(execute_workflow())
+        try:
+            while True:
+                event = await event_queue.get()
+                yield (
+                    json.dumps(event, ensure_ascii=False, separators=(",", ":"))
+                    + "\n"
+                ).encode("utf-8")
+                if event.get("type") in {"final", "error"}:
+                    break
+        finally:
+            stream_open.clear()
+            if not task.done():
+                task.cancel()
+
+    return StreamingResponse(
+        events(),
+        media_type="application/x-ndjson; charset=utf-8",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 routes = [
     Route("/", homepage),
     Route("/api/health", health),
     Route("/api/session/clear", clear_session, methods=["POST"]),
     Route("/api/session/{session_id}", get_session),
     Route("/api/chat", chat, methods=["POST"]),
+    Route("/api/chat/stream", chat_stream, methods=["POST"]),
     Mount("/assets", app=StaticFiles(directory=WEB_DIR), name="assets"),
 ]
 

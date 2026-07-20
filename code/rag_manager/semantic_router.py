@@ -49,6 +49,19 @@ def is_high_confidence_domain_query(query: object) -> bool:
     return any(re.search(pattern, normalized) for pattern in domain_patterns)
 
 
+def is_explicit_visualization_query(query: object) -> bool:
+    """Return whether the current query explicitly changes/selects presentation.
+
+    Domain follow-ups must not become visualization commands merely because an
+    active domain template is present in the router context.
+    """
+
+    if not isinstance(query, str):
+        return False
+    normalized = _normalize_text(query)
+    return bool(normalized) and _contains_visualization_signal(normalized)
+
+
 def analyze_input(
     client: Any | None,
     *,

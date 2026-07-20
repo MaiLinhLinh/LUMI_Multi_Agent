@@ -165,6 +165,7 @@ def run_weather_llm_pipeline(
                     location_result,
                 ) = _pipeline_validate_request(
                     extraction,
+                    query=query,
                     settings=settings,
                 )
                 _log_pipeline_event(
@@ -280,6 +281,17 @@ def run_weather_llm_pipeline(
         try:
             if not hasattr(pipeline_client, "chat_text"):
                 raise TypeError("Weather pipeline client must provide chat_text().")
+            stream_callback = state.get("response_stream_callback")
+            stream_kwargs = (
+                {
+                    "on_text_chunk": lambda chunk: stream_callback(
+                        "weather",
+                        chunk,
+                    )
+                }
+                if callable(stream_callback)
+                else {}
+            )
             final_answer = pipeline_client.chat_text(
                 WEATHER_PIPELINE_RESPONSE_SYSTEM_PROMPT,
                 _pipeline_response_message(
@@ -291,6 +303,7 @@ def run_weather_llm_pipeline(
                     resolved_request=resolved_request,
                     weather_data=weather_data,
                 ),
+                **stream_kwargs,
             )
             usage["call_2"] = _pipeline_client_usage(pipeline_client)
             if not isinstance(final_answer, str) or not final_answer.strip():
@@ -441,6 +454,7 @@ def _resolved_weather_request(
         for field in (
             "location_text",
             "date_text",
+            "date_range",
             "time_of_day_text",
             "normalized_time",
             "request_type_candidate",
@@ -484,7 +498,7 @@ def _next_weather_session(
         last_canonical = canonical_request
 
     return {
-        "schema_version": "weather.session.v1",
+        "schema_version": "weather.session.v2",
         "workflow_id": workflow_id,
         "active": True,
         "last_status": status,
@@ -746,6 +760,7 @@ def _clarification_field(
         return {
             "location": "location_text",
             "date": "date_text",
+            "date_range": "date_range",
             "time": "time_of_day_text",
         }.get(missing_fields[0], missing_fields[0])
     if stage == "location":
@@ -762,13 +777,23 @@ def _pipeline_missing_extraction_fields(extraction: dict[str, Any]) -> list[str]
         missing.append("location")
 
     date_text = extraction.get("date_text")
+    date_range = extraction.get("date_range")
     time_of_day_text = extraction.get("time_of_day_text")
     request_type = extraction.get("request_type_candidate")
     has_date = isinstance(date_text, str) and bool(date_text.strip())
     has_time_of_day = isinstance(time_of_day_text, str) and bool(
         time_of_day_text.strip()
     )
-    if not has_date and (request_type != "current" or has_time_of_day):
+    has_date_range = isinstance(date_range, dict)
+    range_type = date_range.get("type") if has_date_range else None
+    range_needs_anchor = range_type in {"single_day", "explicit_range"}
+    if request_type == "forecast" and not has_date_range:
+        missing.append("date_range")
+    elif range_needs_anchor and not has_date:
+        missing.append("date")
+    elif not has_date and not has_date_range and (
+        request_type != "current" or has_time_of_day
+    ):
         missing.append("date")
     return missing
 
@@ -776,10 +801,13 @@ def _pipeline_missing_extraction_fields(extraction: dict[str, Any]) -> list[str]
 def _pipeline_validate_request(
     extraction: dict[str, Any],
     *,
+    query: str,
     settings: Settings,
 ) -> tuple[str, dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
     location_text = str(extraction.get("location_text", "")).strip()
     date_text = _optional_text(extraction.get("date_text"))
+    date_range = extraction.get("date_range")
+    date_range = dict(date_range) if isinstance(date_range, dict) else None
     time_of_day_text = _optional_text(extraction.get("time_of_day_text"))
     normalized_time = _optional_text(extraction.get("normalized_time"))
     try:
@@ -830,6 +858,8 @@ def _pipeline_validate_request(
     try:
         time_result = WeatherTimeValidator().validate(
             date_text,
+            date_range=date_range,
+            source_query=query,
             time_of_day_text=time_of_day_text,
             normalized_time=normalized_time,
             request_type_candidate=extraction.get("request_type_candidate"),
@@ -884,6 +914,9 @@ def _pipeline_validate_request(
             return "error", {"status": "error", "code": error["code"]}, {}, error, location_result
         request.update({"start_date": start_date, "days": days})
         for field in (
+            "end_date",
+            "date_range_type",
+            "date_range_quantity",
             "time_of_day_text",
             "normalized_time",
             "requested_time_of_day",

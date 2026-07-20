@@ -214,6 +214,22 @@ def test_redis_store_publishes_and_reads_active_snapshot() -> None:
     assert store.stats()["hits"] == 2
 
 
+def test_redis_store_returns_eight_forecast_days() -> None:
+    client = FakeRedis()
+    dates = [f"2026-07-{day:02d}" for day in range(16, 24)]
+    store = _save_valid_snapshot(client, dates=dates)
+
+    result = store.get_forecast(
+        "ha_noi",
+        start_date="2026-07-16",
+        days=8,
+    )
+
+    assert result["ok"] is True
+    assert result["data"]["requested_days"] == 8
+    assert [day["date"] for day in result["data"]["days"]] == dates
+
+
 def test_redis_store_does_not_fallback_when_active_snapshot_is_missing() -> None:
     store = RedisWeatherStore(FakeRedis())
 

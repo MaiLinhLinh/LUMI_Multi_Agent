@@ -5,7 +5,10 @@ from __future__ import annotations
 import re
 from typing import Any, Mapping, Sequence
 
-from rag_manager.services.music_search_service import normalize_music_text
+from rag_manager.services.music_search_service import (
+    music_title_aliases,
+    normalize_music_text,
+)
 
 
 MUSIC_EXTRACTION_FIELDS = {
@@ -38,6 +41,12 @@ _UNTRUSTED_RETRIEVAL_PATTERNS = (
     re.compile(r"\$(?:contains|regex|and|or)\b", re.IGNORECASE),
     re.compile(r"\bvideo_id\b", re.IGNORECASE),
 )
+_MUSIC_REQUEST_PREFIX = re.compile(
+    r"^(?:(?:cho toi|toi muon|minh muon|vui long|hay)\s+)?"
+    r"(?:(?:bat|mo|phat|nghe|xem|tim|kiem)\s+)?"
+    r"(?:(?:bai hat|bai|nhac)\s+)",
+)
+_MUSIC_ACTION_PREFIX = re.compile(r"^(?:bat|mo|phat|nghe|xem|tim|kiem)\s+")
 
 
 class MusicResultValidator:
@@ -149,11 +158,10 @@ class MusicResultValidator:
             exact = [
                 candidate
                 for candidate in candidates
-                if normalize_music_text(_text(candidate.get("title")))
-                == requested_title
+                if requested_title in _candidate_title_aliases(candidate)
             ]
             if len(exact) == 1:
-                return _completed(exact[0], "unique_exact_title")
+                return _completed(exact[0], "unique_exact_title_alias")
             if len(candidates) == 1:
                 return _completed(candidates[0], "single_filtered_title")
             return _issue(
@@ -162,6 +170,16 @@ class MusicResultValidator:
                 field="title",
                 candidate_count=len(candidates),
             )
+
+        requested_alias = _requested_search_alias(extraction.get("search_query"))
+        if requested_alias:
+            alias_matches = [
+                candidate
+                for candidate in candidates
+                if requested_alias in _candidate_title_aliases(candidate)
+            ]
+            if len(alias_matches) == 1:
+                return _completed(alias_matches[0], "unique_exact_search_alias")
 
         if len(candidates) == 1:
             return _completed(candidates[0], "single_search_result")
@@ -206,3 +224,21 @@ def _issue(
 
 def _text(value: Any) -> str:
     return value.strip() if isinstance(value, str) else ""
+
+
+def _candidate_title_aliases(candidate: Mapping[str, Any]) -> set[str]:
+    explicit = candidate.get("title_aliases")
+    aliases = explicit if isinstance(explicit, Sequence) and not isinstance(
+        explicit, (str, bytes)
+    ) else None
+    return set(music_title_aliases(_text(candidate.get("title")), aliases))
+
+
+def _requested_search_alias(value: Any) -> str:
+    normalized = normalize_music_text(_text(value))
+    if not normalized:
+        return ""
+    stripped = _MUSIC_REQUEST_PREFIX.sub("", normalized, count=1).strip()
+    if stripped == normalized:
+        stripped = _MUSIC_ACTION_PREFIX.sub("", normalized, count=1).strip()
+    return stripped

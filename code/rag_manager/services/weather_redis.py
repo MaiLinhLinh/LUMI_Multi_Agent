@@ -126,7 +126,7 @@ class RedisWeatherStore:
             requested_days = int(days)
         except (TypeError, ValueError):
             requested_days = 0
-        bounded_days = max(1, min(requested_days, 5))
+        bounded_days = max(1, min(requested_days, 8))
         forecast = dict(data)
         stored_days = forecast.get("days")
         if not isinstance(stored_days, list):

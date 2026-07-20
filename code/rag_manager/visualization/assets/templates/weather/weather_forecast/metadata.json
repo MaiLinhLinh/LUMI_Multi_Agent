@@ -2,8 +2,8 @@
   "id": "weather_forecast",
   "kind": "complete_template",
   "domain": "weather",
-  "name": "Weather Forecast",
-  "description": "Forecast-focused layout for forecast-only weather data.",
+  "name": "Multi-day Weather Forecast",
+  "description": "Compact multi-day forecast with first-day summary, daily temperature chart and day cards.",
   "template_file": "template.html",
   "schema_versions": ["weather.forecast.v1", "weather.combined.v1"],
   "required_fields": [
@@ -27,7 +27,7 @@
     "forecast.days[].intervals[].condition.description",
     "forecast.days[].intervals[].rain_probability"
   ],
-  "tags": ["weather", "forecast", "minimal"],
+  "tags": ["weather", "forecast", "multi-day", "temperature-chart"],
   "fillable": true,
   "style_targets": [
     {

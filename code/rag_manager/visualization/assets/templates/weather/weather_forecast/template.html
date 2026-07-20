@@ -3,147 +3,231 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Dự báo thời tiết {{ data.location.name }}</title>
+  <title>Dự báo nhiều ngày tại {{ data.location.name }}</title>
   <style>
-    :root { color-scheme: light; font-family: Inter, Arial, sans-serif; }
-    * { box-sizing: border-box; }
-    body { margin: 0; padding: 18px; background: #edf5f8; color: #003b72; }
-    .page { max-width: 1100px; margin: auto; }
-    .page-header { padding: 28px 40px 18px; }
-    h1 { margin: 0; color: #073b70; font-size: clamp(30px, 4vw, 46px); letter-spacing: -1px; }
-    .country { margin: 6px 0 0; color: #55758b; font-size: 20px; }
-    .daily-card { margin: 0 0 28px; padding: 28px 38px 24px; background: #fff; border-radius: 7px; box-shadow: 0 5px 18px #255a6b18; }
-    h2 { margin: 0 0 22px; color: #0b0b0b; font-size: 25px; }
-    .daily-main { display: grid; grid-template-columns: 110px minmax(220px, 1fr) minmax(190px, 1fr) minmax(280px, 1.2fr); gap: 18px; align-items: center; padding-bottom: 24px; border-bottom: 1px solid #e7ecee; }
-    .daily-icon { width: 100px; height: 100px; }
-    .daily-icon svg { width: 100%; height: 100%; }
-    .daily-temperature { color: #003d78; font-size: 76px; font-weight: 700; line-height: 1; white-space: nowrap; }
-    .daily-temperature span { font-size: 45px; vertical-align: top; }
-    .daily-summary { display: grid; gap: 10px; color: #426681; font-size: 18px; }
-    .daily-summary strong { color: #003b72; font-size: 20px; }
-    .daily-side { display: grid; gap: 14px; color: #255570; font-size: 18px; }
-    .daily-metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; padding-top: 22px; text-align: center; }
-    .daily-metrics div { display: grid; gap: 7px; justify-items: center; }
-    .daily-metrics span { color: #064f45; font-size: 24px; height: 26px; }
-    .daily-metrics strong { color: #003b72; font-size: 17px; }
-    .daily-metrics b { color: #064f89; font-size: 17px; font-weight: 400; }
-    .hourly-list { display: grid; gap: 8px; margin-top: 22px; }
-    .forecast-row { display: grid; grid-template-columns: 125px 1fr 90px; gap: 16px; align-items: center; padding: 11px 14px; border: 1px solid #d8e6ec; border-radius: 10px; background: #fbfdfe; color: #365d75; }
-    .forecast-time, .forecast-temp { color: #0c0c0c; font-weight: 700; }
-    .forecast-temp { text-align: right; }
-    .source-note { padding: 0 40px; color: #78909c; font-size: 13px; }
-    .empty-note { margin: 20px 40px; color: #55758b; }
-    @media (max-width: 800px) {
-      .page-header { padding: 22px 12px 14px; }
-      .daily-card { padding: 22px 18px; }
-      .daily-main { grid-template-columns: 78px minmax(190px, 1fr); }
-      .daily-icon { width: 72px; height: 72px; }
-      .daily-temperature { font-size: 58px; }
-      .daily-summary { grid-column: 2; }
-      .daily-side { grid-column: 1 / -1; grid-template-columns: repeat(2, 1fr); font-size: 15px; }
+    :root {
+      color-scheme: light;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: #172033;
+      background: #f4f7fb;
     }
-    @media (max-width: 520px) {
-      body { padding: 8px; }
-      .daily-main { grid-template-columns: 70px 1fr; }
-      .daily-summary { grid-column: 2; }
-      .daily-side { grid-column: 1 / -1; grid-template-columns: 1fr; }
-      .daily-metrics { grid-template-columns: repeat(2, 1fr); }
-      .forecast-row { grid-template-columns: 1fr; gap: 5px; }
-      .forecast-temp { text-align: left; }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; }
+    body { margin: 0; background: #f4f7fb; }
+    .forecast-page {
+      width: min(1160px, calc(100% - 18px));
+      height: 100%;
+      min-height: 0;
+      display: grid;
+      grid-template-rows: auto auto auto minmax(150px, 1fr) auto auto;
+      gap: 7px;
+      margin: 0 auto;
+      padding: 9px 0 7px;
+      overflow: hidden;
+    }
+    .location-header { display: flex; align-items: center; gap: 9px; min-width: 0; }
+    .location-pin { width: 20px; height: 20px; flex: 0 0 auto; color: #0878ff; }
+    .location-copy { min-width: 0; }
+    h1 { margin: 0; color: #101828; font-size: clamp(22px, 2.4vw, 30px); line-height: 1.05; }
+    .location-meta { margin: 3px 0 0; color: #667085; font-size: 11px; }
+    .summary-card, .chart-card {
+      border: 1px solid #e4e9f1;
+      border-radius: 14px;
+      background: #fff;
+      box-shadow: 0 7px 24px rgba(16, 24, 40, 0.07);
+    }
+    .summary-card {
+      min-height: 132px;
+      display: grid;
+      grid-template-columns: minmax(430px, 1.35fr) minmax(210px, 0.65fr);
+      align-items: center;
+      gap: 22px;
+      padding: 14px 24px;
+    }
+    .weather-main {
+      display: grid;
+      grid-template-columns: 72px auto minmax(160px, 1fr);
+      align-items: center;
+      gap: 15px;
+      min-width: 0;
+    }
+    .hero-icon { width: 70px; height: 70px; }
+    .hero-icon svg, .day-icon svg { width: 100%; height: 100%; }
+    .temperature-line { display: flex; align-items: baseline; gap: 5px; white-space: nowrap; }
+    .temperature { color: #101828; font-size: clamp(48px, 5.3vw, 66px); font-weight: 780; line-height: 0.9; letter-spacing: -3px; }
+    .temperature-unit { color: #344054; font-size: 21px; font-weight: 650; }
+    .condition-copy { min-width: 0; }
+    .condition { margin: 0; color: #101828; font-size: 18px; font-weight: 730; }
+    .condition-date { margin: 5px 0 0; color: #667085; font-size: 12px; }
+    .summary-metrics { display: grid; gap: 9px; color: #344054; font-size: 12px; }
+    .summary-metric { display: grid; grid-template-columns: 19px 1fr; align-items: center; gap: 7px; }
+    .summary-metric svg { width: 17px; height: 17px; color: #1677ff; }
+    .summary-metric strong { color: #101828; }
+    .tabs { display: flex; align-items: end; min-height: 26px; padding: 0 12px; border-bottom: 1px solid #e4e7ec; }
+    .tab { padding: 0 3px 5px; border-bottom: 3px solid #ffbf1f; color: #101828; font-size: 12px; font-weight: 700; }
+    .chart-card {
+      min-height: 0;
+      display: grid;
+      grid-template-rows: auto minmax(100px, 1fr);
+      padding: 10px 15px 7px;
+      overflow: hidden;
+    }
+    .chart-header { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+    .chart-title { margin: 0; color: #344054; font-size: 12px; font-weight: 720; }
+    .chart-range { color: #667085; font-size: 10px; }
+    .temperature-chart { min-height: 0; position: relative; padding: 6px 10px 3px 34px; }
+    .temperature-chart svg { display: block; width: 100%; height: 100%; overflow: visible; }
+    .chart-scale { position: absolute; inset: 13px auto 11px 0; display: flex; flex-direction: column; justify-content: space-between; color: #98a2b3; font-size: 9px; }
+    .daily-strip {
+      display: grid;
+      grid-template-columns: repeat(var(--day-count), minmax(78px, 1fr));
+      gap: 5px;
+      min-height: 106px;
+      overflow: hidden;
+    }
+    .day-card {
+      min-width: 0;
+      display: grid;
+      grid-template-rows: auto 38px auto auto;
+      justify-items: center;
+      align-content: center;
+      gap: 2px;
+      padding: 7px 4px 6px;
+      border: 1px solid #e7ebf1;
+      border-radius: 11px;
+      background: #fff;
+      text-align: center;
+    }
+    .day-card.active { border-color: #ffd057; background: #fff9e8; box-shadow: inset 0 3px 0 #ffbf1f; }
+    .day-label { max-width: 100%; color: #344054; font-size: 10px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .day-icon { width: 37px; height: 37px; }
+    .day-temperature { color: #101828; font-size: 12px; font-weight: 760; white-space: nowrap; }
+    .day-temperature .low { color: #667085; font-weight: 550; }
+    .day-rain { min-height: 11px; color: #1677ff; font-size: 9px; }
+    .source-note { margin: 0 3px; color: #98a2b3; font-size: 9px; }
+    .empty-note { margin: auto; color: #667085; text-align: center; }
+    @media (max-width: 760px) {
+      .forecast-page { width: min(100% - 12px, 1160px); }
+      .summary-card { grid-template-columns: 1fr; gap: 9px; padding: 13px 16px; }
+      .weather-main { grid-template-columns: 58px auto 1fr; gap: 10px; }
+      .hero-icon { width: 56px; height: 56px; }
+      .temperature { font-size: 50px; }
+      .summary-metrics { grid-template-columns: repeat(3, 1fr); gap: 7px; }
+      .summary-metric { grid-template-columns: 1fr; justify-items: center; text-align: center; }
+      .daily-strip { overflow-x: auto; grid-auto-flow: column; grid-auto-columns: 90px; grid-template-columns: none; scrollbar-width: thin; }
     }
   </style>
 </head>
 <body>
-  {% macro measure(value, suffix='') -%}
-    {%- if value is defined and value is not none and value != '' -%}
-      {{- value -}}{{- suffix -}}
-    {%- else -%}
-      &mdash;
-    {%- endif -%}
+  {% macro value(number, suffix='') -%}
+    {%- if number is number -%}{{ number }}{{ suffix }}{%- else -%}&mdash;{%- endif -%}
   {%- endmacro %}
 
-  {% macro probability(value) -%}
-    {%- if value is number -%}
-      {{- (value * 100) | round | int -}}%
-    {%- else -%}
-      &mdash;
-    {%- endif -%}
+  {% macro probability(number) -%}
+    {%- if number is number -%}
+      {%- if number <= 1 -%}{{ (number * 100) | round | int }}%{%- else -%}{{ number | round | int }}%{%- endif -%}
+    {%- else -%}&mdash;{%- endif -%}
   {%- endmacro %}
 
-  {% macro condition_icon(condition) -%}
+  {% macro weather_icon(condition) -%}
     {% set normalized = condition | default('', true) | lower %}
     {% if normalized in ['clear', 'sun'] %}
-      <svg viewBox="0 0 64 64" role="img" aria-label="Trời quang"><circle cx="32" cy="32" r="13" fill="#f6b93b"/><g stroke="#f6b93b" stroke-width="4" stroke-linecap="round"><path d="M32 5v8"/><path d="M32 51v8"/><path d="M5 32h8"/><path d="M51 32h8"/><path d="M13 13l6 6"/><path d="M45 45l6 6"/><path d="M51 13l-6 6"/><path d="M19 45l-6 6"/></g></svg>
+      <svg viewBox="0 0 64 64" role="img" aria-label="Trời quang"><circle cx="32" cy="32" r="13" fill="#ffbd2e"/><g stroke="#ffbd2e" stroke-width="4" stroke-linecap="round"><path d="M32 5v8M32 51v8M5 32h8M51 32h8M13 13l6 6M45 45l6 6M51 13l-6 6M19 45l-6 6"/></g></svg>
     {% elif normalized in ['rain', 'drizzle'] %}
-      <svg viewBox="0 0 64 64" role="img" aria-label="Mưa"><path d="M20 38h27a11 11 0 0 0 1-22 17 17 0 0 0-32 6 8 8 0 0 0 4 16z" fill="#f8fbfd" stroke="#6d8794" stroke-width="4" stroke-linejoin="round"/><g stroke="#2d9cdb" stroke-width="4" stroke-linecap="round"><path d="M22 46l-4 8"/><path d="M34 46l-4 8"/><path d="M46 46l-4 8"/></g></svg>
+      <svg viewBox="0 0 64 64" role="img" aria-label="Mưa"><path d="M18 39h29a11 11 0 0 0 1-22 17 17 0 0 0-32 6 8 8 0 0 0 2 16z" fill="#60758b"/><g stroke="#178cff" stroke-width="4" stroke-linecap="round"><path d="M22 45l-4 8M34 45l-4 8M46 45l-4 8"/></g></svg>
     {% elif normalized == 'thunderstorm' %}
-      <svg viewBox="0 0 64 64" role="img" aria-label="Dông"><path d="M20 38h27a11 11 0 0 0 1-22 17 17 0 0 0-32 6 8 8 0 0 0 4 16z" fill="#f8fbfd" stroke="#6d8794" stroke-width="4" stroke-linejoin="round"/><path d="M34 39l-8 13h8l-4 9 11-15h-8l4-7z" fill="#f6b93b"/></svg>
-    {% elif normalized == 'snow' %}
-      <svg viewBox="0 0 64 64" role="img" aria-label="Tuyết"><path d="M20 38h27a11 11 0 0 0 1-22 17 17 0 0 0-32 6 8 8 0 0 0 4 16z" fill="#f8fbfd" stroke="#6d8794" stroke-width="4" stroke-linejoin="round"/><g stroke="#7fc7e8" stroke-width="3" stroke-linecap="round"><path d="M24 48v10"/><path d="M19 53h10"/><path d="M40 48v10"/><path d="M35 53h10"/></g></svg>
+      <svg viewBox="0 0 64 64" role="img" aria-label="Dông"><path d="M18 39h29a11 11 0 0 0 1-22 17 17 0 0 0-32 6 8 8 0 0 0 2 16z" fill="#60758b"/><path d="M34 38l-9 14h8l-4 9 12-16h-8l4-7z" fill="#ffbd2e"/></svg>
     {% elif normalized in ['mist', 'fog', 'haze'] %}
-      <svg viewBox="0 0 64 64" role="img" aria-label="Sương mù"><path d="M20 36h27a10 10 0 0 0 1-20 17 17 0 0 0-32 6 8 8 0 0 0 4 14z" fill="#f8fbfd" stroke="#6d8794" stroke-width="4" stroke-linejoin="round"/><g stroke="#8a9aa3" stroke-width="4" stroke-linecap="round"><path d="M14 46h36"/><path d="M20 55h30"/></g></svg>
+      <svg viewBox="0 0 64 64" role="img" aria-label="Sương mù"><path d="M18 36h29a10 10 0 0 0 1-20 17 17 0 0 0-32 6 8 8 0 0 0 2 14z" fill="#cbd5e1"/><g stroke="#94a3b8" stroke-width="4" stroke-linecap="round"><path d="M14 46h36M20 55h30"/></g></svg>
     {% else %}
-      <svg viewBox="0 0 64 64" role="img" aria-label="Nhiều mây"><path d="M20 48h27a12 12 0 0 0 1-24 18 18 0 0 0-34 6 9 9 0 0 0 6 18z" fill="#f8fbfd" stroke="#6d8794" stroke-width="4" stroke-linejoin="round"/></svg>
+      <svg viewBox="0 0 64 64" role="img" aria-label="Nhiều mây"><path d="M18 47h30a12 12 0 0 0 1-24 18 18 0 0 0-34 6 9 9 0 0 0 3 18z" fill="#e4e7ec" stroke="#7a8999" stroke-width="3" stroke-linejoin="round"/></svg>
     {% endif %}
   {%- endmacro %}
 
-  <main class="page">
-    <header class="page-header">
-      <h1>Dự báo thời tiết {{ data.location.name }}</h1>
-      <p class="country">{{ data.location.country }}</p>
+  {% set days = data.forecast.days | default([], true) %}
+  {% set first_day = days[0] if days else {} %}
+  {% set first_intervals = first_day.intervals | default([], true) %}
+  {% set first_condition = first_day.condition if first_day.condition else (first_intervals[0].condition if first_intervals else {}) %}
+  {% set max_temperatures = days | map(attribute='temperature.max_celsius') | list %}
+  {% set chart_min = max_temperatures | min if max_temperatures else 0 %}
+  {% set chart_max = max_temperatures | max if max_temperatures else 0 %}
+  {% set chart_spread = chart_max - chart_min if chart_max is number and chart_min is number else 0 %}
+  {% set point_denominator = (days | length) - 1 if (days | length) > 1 else 1 %}
+
+  <main class="forecast-page">
+    <header class="location-header">
+      <svg class="location-pin" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s7-5.2 7-12A7 7 0 1 0 5 9c0 6.8 7 12 7 12z" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="9" r="2.5" fill="currentColor"/></svg>
+      <div class="location-copy">
+        <h1>{{ data.location.name }}</h1>
+        <p class="location-meta">Dự báo {{ days | length }} ngày{% if data.location.country %} · {{ data.location.country }}{% endif %}</p>
+      </div>
     </header>
 
-    <section class="forecast-list" data-slot="metrics">
-      {% for day in data.forecast.days | default([], true) %}
-        {% set intervals = day.intervals | default([], true) %}
-        {% set day_condition = day.condition if day.condition else (intervals[0].condition if intervals else {}) %}
-
-        <article class="daily-card">
-          <h2>{{ day.date | default('Dự báo trong ngày', true) }}</h2>
-          <div class="daily-main">
-            <div class="daily-icon">{{ condition_icon(day_condition.main) }}</div>
-            <div class="daily-temperature">{{ measure(day.temperature.max_celsius, '°') }}</div>
-            <div class="daily-summary">
-              <strong>{{ day_condition.description | default('Dự báo thời tiết', true) | capitalize }}</strong>
-              <span>Cảm giác như {{ measure(day.temperature_feels_like_celsius, '°') }}</span>
-            </div>
-            <div class="daily-side">
-              <div>🌡 Ngày/Đêm: {{ measure(day.temperature.max_celsius, '°') }}/{{ measure(day.temperature.min_celsius, '°') }}</div>
-              <div>💧 Lượng mưa: {{ measure(day.total_rain_mm, ' mm') }}</div>
-              <div>☔ Xác suất mưa: {{ probability(day.max_rain_probability) }}</div>
-            </div>
+    {% if first_day %}
+      <section class="summary-card" data-slot="hero">
+        <div class="weather-main">
+          <div class="hero-icon">{{ weather_icon(first_condition.main) }}</div>
+          <div class="temperature-line">
+            <span class="temperature">{{ value(first_day.temperature.max_celsius) }}</span>
+            <span class="temperature-unit">&deg;C</span>
           </div>
-
-          <div class="daily-metrics">
-            <div><span>🌡</span><strong>Thấp/Cao</strong><b>{{ measure(day.temperature.min_celsius, '°') }}/{{ measure(day.temperature.max_celsius, '°') }}</b></div>
-            <div><span>💧</span><strong>Độ ẩm</strong><b>{{ measure(day.humidity_percent, '%') }}</b></div>
-            <div><span>≋</span><strong>Gió</strong><b>{{ measure(day.wind_speed_mps, ' m/s') }}</b></div>
-            <div><span>⚒</span><strong>Áp suất</strong><b>{{ measure(day.pressure_hpa, ' hPa') }}</b></div>
+          <div class="condition-copy">
+            <p class="condition">{{ first_condition.description | default('Dự báo thời tiết', true) | capitalize }}</p>
+            <p class="condition-date">Ngày bắt đầu: {{ first_day.date }}</p>
           </div>
+        </div>
 
-          <div class="hourly-list">
-            {% for interval in intervals %}
-              <div class="forecast-row">
-                <div class="forecast-time">{{ interval.time | default(interval.timestamp, true) }}</div>
-                <div class="forecast-condition">
-                  {{ interval.condition.description | default(interval.condition.main, true) }}
-                  {% if interval.rain_probability is number %} · Rain {{ (interval.rain_probability * 100) | round | int }}%{% endif %}
-                </div>
-                <div class="forecast-temp">{{ measure(interval.temperature_celsius, '°C') }}</div>
-              </div>
-            {% else %}
-              <p class="empty-note">Không có dữ liệu theo giờ.</p>
+        <div class="summary-metrics">
+          <div class="summary-metric"><span aria-hidden="true">☔</span><span>Khả năng có mưa: <strong>{{ probability(first_day.max_rain_probability) }}</strong></span></div>
+          <div class="summary-metric"><span aria-hidden="true">💧</span><span>Độ ẩm: <strong>{{ value(first_day.humidity_percent, '%') }}</strong></span></div>
+          <div class="summary-metric"><span aria-hidden="true">≋</span><span>Gió: <strong>{{ value(first_day.wind_speed_mps, ' m/s') }}</strong></span></div>
+        </div>
+      </section>
+
+      <nav class="tabs" aria-label="Chỉ số dự báo"><span class="tab">Nhiệt độ</span></nav>
+
+      <section class="chart-card" data-slot="chart">
+        <div class="chart-header">
+          <p class="chart-title">Biến động nhiệt độ cao nhất theo ngày</p>
+          <span class="chart-range">{{ value(chart_min, '°') }} – {{ value(chart_max, '°') }}</span>
+        </div>
+        <div class="temperature-chart" aria-label="Biểu đồ đường nhiệt độ theo ngày">
+          <div class="chart-scale"><span>{{ value(chart_max, '°') }}</span><span>{{ value(chart_min, '°') }}</span></div>
+          <svg viewBox="0 0 800 150" preserveAspectRatio="none" role="img">
+            <defs><linearGradient id="forecast-area" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#ffc72c" stop-opacity="0.34"/><stop offset="100%" stop-color="#ffc72c" stop-opacity="0.06"/></linearGradient></defs>
+            <line x1="35" y1="24" x2="765" y2="24" stroke="#e8edf4" stroke-width="1" stroke-dasharray="5 7"/>
+            <line x1="35" y1="76" x2="765" y2="76" stroke="#edf1f6" stroke-width="1" stroke-dasharray="5 7"/>
+            <line x1="35" y1="128" x2="765" y2="128" stroke="#e8edf4" stroke-width="1" stroke-dasharray="5 7"/>
+            <polygon fill="url(#forecast-area)" points="35,134 {% for day in days %}{% set point_x = 35 + (loop.index0 * 730 / point_denominator) %}{% set point_temp = day.temperature.max_celsius %}{% set point_y = 123 - (((point_temp - chart_min) / chart_spread) * 91) if chart_spread > 0 else 76 %}{{ point_x }},{{ point_y }} {% endfor %}765,134"/>
+            <polyline fill="none" stroke="#ffbd19" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" points="{% for day in days %}{% set point_x = 35 + (loop.index0 * 730 / point_denominator) %}{% set point_temp = day.temperature.max_celsius %}{% set point_y = 123 - (((point_temp - chart_min) / chart_spread) * 91) if chart_spread > 0 else 76 %}{{ point_x }},{{ point_y }} {% endfor %}"/>
+            {% for day in days %}
+              {% set point_x = 35 + (loop.index0 * 730 / point_denominator) %}
+              {% set point_temp = day.temperature.max_celsius %}
+              {% set point_y = 123 - (((point_temp - chart_min) / chart_spread) * 91) if chart_spread > 0 else 76 %}
+              <circle cx="{{ point_x }}" cy="{{ point_y }}" r="4" fill="#fff" stroke="#ffb900" stroke-width="3"/>
+              <text x="{{ point_x }}" y="{{ point_y - 10 }}" text-anchor="middle" fill="#667085" font-size="12" font-weight="700">{{ value(point_temp, '°') }}</text>
             {% endfor %}
-          </div>
-        </article>
-      {% else %}
-        <p class="empty-note">Không có dữ liệu dự báo.</p>
-      {% endfor %}
-    </section>
+          </svg>
+        </div>
+      </section>
 
-    <p class="source-note" data-slot="footer">
-      Nguồn: {{ data.source.provider }}{% if data.forecast.source_granularity %} · {{ data.forecast.source_granularity }}{% endif %}
-    </p>
+      <section class="daily-strip" style="--day-count: {{ days | length }}" data-slot="metrics">
+        {% for day in days %}
+          {% set intervals = day.intervals | default([], true) %}
+          {% set condition = day.condition if day.condition else (intervals[0].condition if intervals else {}) %}
+          <article class="day-card{% if loop.first %} active{% endif %}">
+            <span class="day-label">{% if loop.first %}Ngày đầu · {% endif %}{{ day.date }}</span>
+            <span class="day-icon">{{ weather_icon(condition.main) }}</span>
+            <span class="day-temperature">{{ value(day.temperature.max_celsius, '°') }} <span class="low">{{ value(day.temperature.min_celsius, '°') }}</span></span>
+            <span class="day-rain">{{ probability(day.max_rain_probability) }} mưa</span>
+          </article>
+        {% endfor %}
+      </section>
+
+      <p class="source-note" data-slot="footer">Nguồn: {{ data.source.provider }}{% if data.forecast.source_granularity %} · {{ data.forecast.source_granularity }}{% endif %}</p>
+    {% else %}
+      <p class="empty-note">Không có dữ liệu dự báo nhiều ngày.</p>
+    {% endif %}
   </main>
 </body>
 </html>

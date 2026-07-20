@@ -12,7 +12,10 @@ from rag_manager.services.http_client import ServiceResponse, get_json
 
 OPEN_METEO_FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 OPEN_METEO_SOURCE = "open-meteo"
-DEFAULT_FORECAST_DAYS = 6
+# Keep today plus eight future calendar days. A request may still return at
+# most eight days, but this extra source day lets an eight-day range start
+# tomorrow without losing its final date.
+DEFAULT_FORECAST_DAYS = 9
 
 _CURRENT_FIELDS = (
     "temperature_2m",

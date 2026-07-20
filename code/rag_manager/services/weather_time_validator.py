@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 
 WEATHER_TIMEZONE = "Asia/Ho_Chi_Minh"
 EXPECTED_TIMEZONE_OFFSET_SECONDS = 7 * 60 * 60
-MAX_FORECAST_DAYS = 5
+MAX_FORECAST_DAYS = 8
 
 _VIETNAMESE_WEEKDAYS = (
     "thứ Hai",
@@ -45,12 +45,12 @@ _ISO_PATTERN = re.compile(
 _NUMBER_TOKEN = r"(?:\d+|khong|mot|hai|ba|bon|tu|nam|lam|sau|bay|tam|chin|muoi)"
 _RELATIVE_AFTER_PATTERN = re.compile(
     rf"(?<!thu )\b(?P<number>{_NUMBER_TOKEN}(?:\s+{_NUMBER_TOKEN}){{0,2}})\s+"
-    r"(?:ngay|hom|bua)\s+"
+    r"(?P<unit>ngay|hom|bua|tuan)\s+"
     r"(?P<relation>sap\s+toi|tiep\s+theo|ke\s+tiep|toi|nua|sau)\b"
 )
 _RELATIVE_BEFORE_PATTERN = re.compile(
     rf"\bsau\s+(?P<number>{_NUMBER_TOKEN}(?:\s+{_NUMBER_TOKEN}){{0,2}})\s+"
-    r"(?:ngay|hom|bua)\b"
+    r"(?P<unit>ngay|hom|bua|tuan)\b"
 )
 _VIETNAMESE_NUMBER_UNITS = {
     "khong": 0,
@@ -113,6 +113,8 @@ class WeatherTimeValidator:
         self,
         date_text: str | None,
         *,
+        date_range: dict[str, Any] | None = None,
+        source_query: str | None = None,
         time_of_day_text: str | None = None,
         normalized_time: str | None = None,
         request_type_candidate: str | None = None,
@@ -134,6 +136,9 @@ class WeatherTimeValidator:
         reference = self._reference_datetime(reference_datetime)
         reference_date = reference.date()
         normalized = _normalize_text(raw_text)
+        normalized_source = _normalize_text(
+            source_query.strip() if isinstance(source_query, str) else ""
+        )
         candidate = _normalized_candidate(request_type_candidate)
 
         time_of_day, time_issue = _validate_time_of_day(
@@ -143,156 +148,203 @@ class WeatherTimeValidator:
         if time_issue is not None:
             return _time_issue(time_issue["code"], time_issue["details"])
 
-        if not raw_text:
+        range_spec, range_issue = _normalized_date_range(date_range)
+        if range_issue is not None:
+            return range_issue
+
+        if range_spec is None and not raw_text:
             if candidate == "current" and time_of_day is None:
                 return self._valid_current(reference)
             return _time_issue(
-                "missing_date",
+                "missing_date" if time_of_day is not None else "missing_date_range",
                 {
                     "requested_text": raw_text,
                     "time_of_day_text": raw_time_of_day or None,
                 },
             )
 
-        if _contains_current_expression(normalized) and time_of_day is None:
+        if (
+            range_spec is None
+            and _contains_current_expression(normalized)
+            and time_of_day is None
+        ):
             return self._valid_current(reference)
 
-        relative_request = _extract_relative_request(normalized)
-        if relative_request is not None:
-            relation, quantity = relative_request
-            if relation == "range":
-                start_date = reference_date + timedelta(days=1)
-                requested_days = quantity
-            else:
-                start_date = reference_date + timedelta(days=quantity)
-                requested_days = 1
-            return self._valid_forecast_or_range_issue(
-                start_date=start_date,
-                days=requested_days,
-                reference=reference,
-                time_of_day=time_of_day,
-            )
-
-        date_tokens, invalid_date_text = _extract_date_tokens(
-            raw_text,
-            reference_year=reference_date.year,
-        )
-        if invalid_date_text is not None:
+        if range_spec is None:
             return _time_issue(
-                "invalid_date",
-                {"requested_text": invalid_date_text},
+                "missing_date_range",
+                {
+                    "requested_text": raw_text,
+                    "request_type_candidate": candidate,
+                },
+            )
+        if _contains_current_expression(normalized) and time_of_day is None:
+            return _time_issue(
+                "current_date_range_conflict",
+                {
+                    "requested_text": raw_text,
+                    "date_range_type": range_spec["type"],
+                },
             )
 
-        weekday = _extract_weekday(normalized)
-        if len(date_tokens) >= 2:
-            start_date = date_tokens[0][0]
-            end_date = date_tokens[1][0]
-            if not date_tokens[1][2] and end_date < start_date:
+        range_type = range_spec["type"]
+        quantity = range_spec["quantity"]
+        end_date_text = range_spec["end_date_text"]
+
+        if range_type == "explicit_range":
+            start_date, start_issue = _resolve_anchor_date(
+                raw_text,
+                reference_date=reference_date,
+            )
+            if start_issue is not None:
+                return start_issue
+            end_date, end_issue = _resolve_anchor_date(
+                end_date_text or "",
+                reference_date=reference_date,
+            )
+            if end_issue is not None:
+                return _range_end_issue(end_issue, end_date_text)
+            assert start_date is not None and end_date is not None
+            if end_date < start_date and not _contains_explicit_year(end_date_text or ""):
                 try:
                     end_date = end_date.replace(year=end_date.year + 1)
                 except ValueError:
                     return _time_issue(
                         "invalid_date",
-                        {"requested_text": date_tokens[1][1]},
+                        {"field": "date_range.end_date_text", "requested_text": end_date_text},
                     )
-            if end_date < start_date:
+            source_range = _explicit_range_evidence(
+                source_query or "",
+                reference_date=reference_date,
+            )
+            if source_range is not None and source_range != (start_date, end_date):
                 return _time_issue(
-                    "invalid_date_range",
+                    "date_range_text_conflict",
                     {
-                        "start_date": start_date.isoformat(),
-                        "end_date": end_date.isoformat(),
+                        "date_range": {
+                            "start_date": start_date.isoformat(),
+                            "end_date": end_date.isoformat(),
+                        },
+                        "range_supported_by_query": {
+                            "start_date": source_range[0].isoformat(),
+                            "end_date": source_range[1].isoformat(),
+                        },
                     },
                 )
-            weekday_issue = _weekday_date_issue(weekday, start_date)
-            if weekday_issue:
-                return weekday_issue
             requested_days = (end_date - start_date).days + 1
+            return self._valid_forecast_or_range_issue(
+                start_date=start_date,
+                end_date=end_date,
+                days=requested_days,
+                reference=reference,
+                time_of_day=time_of_day,
+                range_type=range_type,
+            )
+
+        if range_type == "full_week":
+            range_evidence_text = normalized_source or normalized
+            relative_request = _extract_relative_request(range_evidence_text)
+            if relative_request is not None and relative_request[0] == "range":
+                if "tuan" not in range_evidence_text:
+                    return _time_issue(
+                        "date_range_type_conflict",
+                        {
+                            "requested_text": source_query or raw_text,
+                            "date_range_type": range_type,
+                            "type_supported_by_text": "next_days",
+                        },
+                    )
+                if relative_request[1] != int(quantity) * 7:
+                    return _time_issue(
+                        "date_range_quantity_conflict",
+                        {
+                            "requested_text": raw_text,
+                            "quantity": quantity,
+                            "quantity_supported_by_text": relative_request[1] // 7,
+                        },
+                    )
+                start_date = reference_date
+            elif raw_text and _is_next_week_expression(normalized):
+                start_of_week = reference_date - timedelta(days=reference_date.weekday())
+                start_date = start_of_week + timedelta(days=7)
+            elif not raw_text or _is_this_week_expression(normalized):
+                start_date = reference_date
+            else:
+                start_date, start_issue = _resolve_anchor_date(
+                    raw_text,
+                    reference_date=reference_date,
+                )
+                if start_issue is not None:
+                    return start_issue
+                assert start_date is not None
+            requested_days = int(quantity) * 7 + 1
             return self._valid_forecast_or_range_issue(
                 start_date=start_date,
                 days=requested_days,
                 reference=reference,
-                end_date=end_date,
                 time_of_day=time_of_day,
+                range_type=range_type,
+                range_quantity=quantity,
             )
 
-        if date_tokens:
-            requested_date = date_tokens[0][0]
-            weekday_issue = _weekday_date_issue(weekday, requested_date)
-            if weekday_issue:
-                return weekday_issue
-            return self._valid_forecast_or_range_issue(
-                start_date=requested_date,
-                days=1,
-                reference=reference,
-                time_of_day=time_of_day,
-            )
-
-        if _contains_today_expression(normalized) or (
-            _contains_current_expression(normalized) and time_of_day is not None
-        ):
-            weekday_issue = _weekday_date_issue(weekday, reference_date)
-            if weekday_issue:
-                return weekday_issue
-            return self._valid_forecast_or_range_issue(
-                start_date=reference_date,
-                days=1,
-                reference=reference,
-                time_of_day=time_of_day,
-            )
-        if _contains_day_after_tomorrow_expression(normalized):
-            requested_date = reference_date + timedelta(days=2)
-            weekday_issue = _weekday_date_issue(weekday, requested_date)
-            if weekday_issue:
-                return weekday_issue
-            return self._valid_forecast_or_range_issue(
-                start_date=requested_date,
-                days=1,
-                reference=reference,
-                time_of_day=time_of_day,
-            )
-        if _contains_tomorrow_expression(normalized):
-            requested_date = reference_date + timedelta(days=1)
-            weekday_issue = _weekday_date_issue(weekday, requested_date)
-            if weekday_issue:
-                return weekday_issue
-            return self._valid_forecast_or_range_issue(
-                start_date=requested_date,
-                days=1,
-                reference=reference,
-                time_of_day=time_of_day,
-            )
-
-        if weekday is not None:
-            weekday_index, weekday_text = weekday
-            requested_date = _qualified_weekday_date(
-                normalized,
-                reference_date=reference_date,
-                weekday_index=weekday_index,
-            )
-            if requested_date is None:
-                return _time_issue(
-                    "ambiguous_time",
-                    {
-                        "requested_text": raw_text,
-                        "provided_weekday": weekday_text,
-                        "required_qualifier": "tuần này hoặc tuần tới",
-                    },
+        if range_type == "next_days":
+            relative_request = _extract_relative_request(normalized_source)
+            if relative_request is None:
+                relative_request = _extract_relative_request(normalized)
+            if relative_request is not None and relative_request[0] == "range":
+                evidence_text = normalized_source or normalized
+                if "tuan" in evidence_text:
+                    return _time_issue(
+                        "date_range_type_conflict",
+                        {
+                            "requested_text": source_query or raw_text,
+                            "date_range_type": range_type,
+                            "type_supported_by_text": "full_week",
+                        },
+                    )
+                if relative_request[1] != quantity:
+                    return _time_issue(
+                        "date_range_quantity_conflict",
+                        {
+                            "requested_text": raw_text,
+                            "quantity": quantity,
+                            "quantity_supported_by_text": relative_request[1],
+                        },
+                    )
+                start_date = reference_date
+            elif not raw_text:
+                start_date = reference_date
+            else:
+                start_date, start_issue = _resolve_anchor_date(
+                    raw_text,
+                    reference_date=reference_date,
                 )
+                if start_issue is not None:
+                    return start_issue
+                assert start_date is not None
+            requested_days = int(quantity) + 1
             return self._valid_forecast_or_range_issue(
-                start_date=requested_date,
-                days=1,
+                start_date=start_date,
+                days=requested_days,
                 reference=reference,
                 time_of_day=time_of_day,
+                range_type=range_type,
+                range_quantity=quantity,
             )
 
-        return _time_issue(
-            "unrecognized_date",
-            {
-                "requested_text": raw_text,
-                "request_type_candidate": _normalized_candidate(
-                    request_type_candidate
-                ),
-            },
+        start_date, start_issue = _resolve_anchor_date(
+            raw_text,
+            reference_date=reference_date,
+        )
+        if start_issue is not None:
+            return start_issue
+        assert start_date is not None
+        return self._valid_forecast_or_range_issue(
+            start_date=start_date,
+            days=1,
+            reference=reference,
+            time_of_day=time_of_day,
+            range_type="single_day",
         )
 
     def _reference_datetime(self, value: datetime | None) -> datetime:
@@ -318,6 +370,8 @@ class WeatherTimeValidator:
         reference: datetime,
         end_date: date | None = None,
         time_of_day: dict[str, Any] | None = None,
+        range_type: str = "single_day",
+        range_quantity: int | None = None,
     ) -> dict[str, Any]:
         reference_date = reference.date()
         calculated_end = end_date or start_date + timedelta(days=max(days - 1, 0))
@@ -364,13 +418,231 @@ class WeatherTimeValidator:
             "status": "valid",
             "request_type": "forecast",
             "start_date": start_date.isoformat(),
+            "end_date": calculated_end.isoformat(),
             "days": days,
+            "date_range_type": range_type,
             "reference_datetime": reference.isoformat(),
             "timezone": self.timezone_name,
         }
+        if range_quantity is not None:
+            result["date_range_quantity"] = range_quantity
         if time_of_day is not None:
             result.update(time_of_day)
         return result
+
+
+def _normalized_date_range(
+    value: dict[str, Any] | None,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    if value is None:
+        return None, None
+    if not isinstance(value, dict):
+        return None, _time_issue(
+            "invalid_date_range_structure",
+            {"field": "date_range", "requested_value": value},
+        )
+
+    range_type = value.get("type")
+    quantity = value.get("quantity")
+    end_date_text = value.get("end_date_text")
+    if range_type not in {
+        "single_day",
+        "next_days",
+        "full_week",
+        "explicit_range",
+    }:
+        return None, _time_issue(
+            "invalid_date_range_type",
+            {"field": "date_range.type", "requested_value": range_type},
+        )
+    if isinstance(quantity, bool) or (
+        quantity is not None and not isinstance(quantity, int)
+    ):
+        return None, _time_issue(
+            "invalid_date_range_quantity",
+            {"field": "date_range.quantity", "requested_value": quantity},
+        )
+    if end_date_text is not None and not isinstance(end_date_text, str):
+        return None, _time_issue(
+            "invalid_date_range_end",
+            {"field": "date_range.end_date_text", "requested_value": end_date_text},
+        )
+    normalized_end = end_date_text.strip() if isinstance(end_date_text, str) else ""
+    normalized_end = normalized_end or None
+
+    if range_type in {"single_day", "explicit_range"} and quantity is not None:
+        return None, _time_issue(
+            "unexpected_date_range_quantity",
+            {
+                "field": "date_range.quantity",
+                "date_range_type": range_type,
+                "requested_value": quantity,
+            },
+        )
+    if range_type in {"next_days", "full_week"} and (
+        quantity is None or quantity < 1
+    ):
+        return None, _time_issue(
+            "invalid_date_range_quantity",
+            {
+                "field": "date_range.quantity",
+                "date_range_type": range_type,
+                "requested_value": quantity,
+            },
+        )
+    if range_type == "explicit_range" and normalized_end is None:
+        return None, _time_issue(
+            "missing_range_end_date",
+            {"field": "date_range.end_date_text"},
+        )
+    if range_type != "explicit_range" and normalized_end is not None:
+        return None, _time_issue(
+            "unexpected_range_end_date",
+            {
+                "field": "date_range.end_date_text",
+                "date_range_type": range_type,
+                "requested_text": normalized_end,
+            },
+        )
+
+    return {
+        "type": range_type,
+        "quantity": quantity,
+        "end_date_text": normalized_end,
+    }, None
+
+
+def _resolve_anchor_date(
+    raw_text: str,
+    *,
+    reference_date: date,
+) -> tuple[date | None, dict[str, Any] | None]:
+    raw_text = raw_text.strip()
+    if not raw_text:
+        return None, _time_issue("missing_date", {"requested_text": raw_text})
+
+    normalized = _normalize_text(raw_text)
+    relative_request = _extract_relative_request(normalized)
+    if relative_request is not None:
+        relation, quantity = relative_request
+        if relation == "date":
+            return reference_date + timedelta(days=quantity), None
+        return None, _time_issue(
+            "date_range_type_conflict",
+            {
+                "requested_text": raw_text,
+                "expected_type": "next_days",
+            },
+        )
+
+    date_tokens, invalid_date_text = _extract_date_tokens(
+        raw_text,
+        reference_year=reference_date.year,
+    )
+    if invalid_date_text is not None:
+        return None, _time_issue(
+            "invalid_date",
+            {"requested_text": invalid_date_text},
+        )
+    if len(date_tokens) > 1:
+        return None, _time_issue(
+            "multiple_dates_in_anchor",
+            {"requested_text": raw_text},
+        )
+
+    weekday = _extract_weekday(normalized)
+    if date_tokens:
+        requested_date = date_tokens[0][0]
+        weekday_issue = _weekday_date_issue(weekday, requested_date)
+        return (
+            (None, weekday_issue)
+            if weekday_issue is not None
+            else (requested_date, None)
+        )
+
+    if _contains_today_expression(normalized) or _contains_current_expression(normalized):
+        requested_date = reference_date
+    elif _contains_day_after_tomorrow_expression(normalized):
+        requested_date = reference_date + timedelta(days=2)
+    elif _contains_tomorrow_expression(normalized):
+        requested_date = reference_date + timedelta(days=1)
+    elif weekday is not None:
+        weekday_index, weekday_text = weekday
+        requested_date = _qualified_weekday_date(
+            normalized,
+            reference_date=reference_date,
+            weekday_index=weekday_index,
+        )
+        if requested_date is None:
+            return None, _time_issue(
+                "ambiguous_time",
+                {
+                    "requested_text": raw_text,
+                    "provided_weekday": weekday_text,
+                    "required_qualifier": "tuần này hoặc tuần tới",
+                },
+            )
+    else:
+        return None, _time_issue(
+            "unrecognized_date",
+            {"requested_text": raw_text},
+        )
+
+    weekday_issue = _weekday_date_issue(weekday, requested_date)
+    return (
+        (None, weekday_issue)
+        if weekday_issue is not None
+        else (requested_date, None)
+    )
+
+
+def _range_end_issue(
+    issue: dict[str, Any],
+    requested_text: str | None,
+) -> dict[str, Any]:
+    details = issue.get("details")
+    details = dict(details) if isinstance(details, dict) else {}
+    details["field"] = "date_range.end_date_text"
+    if requested_text and "requested_text" not in details:
+        details["requested_text"] = requested_text
+    return {
+        **issue,
+        "details": details,
+    }
+
+
+def _contains_explicit_year(value: str) -> bool:
+    date_tokens, invalid_text = _extract_date_tokens(value, reference_year=2000)
+    return invalid_text is None and bool(date_tokens) and date_tokens[0][2]
+
+
+def _explicit_range_evidence(
+    value: str,
+    *,
+    reference_date: date,
+) -> tuple[date, date] | None:
+    tokens, invalid_text = _extract_date_tokens(
+        value,
+        reference_year=reference_date.year,
+    )
+    if invalid_text is not None or len(tokens) < 2:
+        return None
+    start_date = tokens[0][0]
+    end_date = tokens[1][0]
+    if end_date < start_date and not tokens[1][2]:
+        try:
+            end_date = end_date.replace(year=end_date.year + 1)
+        except ValueError:
+            return None
+    return start_date, end_date
+
+
+def _is_this_week_expression(value: str) -> bool:
+    return "tuan nay" in value
+
+
+def _is_next_week_expression(value: str) -> bool:
+    return "tuan toi" in value or "tuan sau" in value
 
 
 def _normalized_candidate(value: str | None) -> str | None:
@@ -525,6 +797,8 @@ def _extract_relative_request(value: str) -> tuple[str, int] | None:
         quantity = _parse_vietnamese_number(after_match.group("number"))
         if quantity is None:
             return None
+        if after_match.group("unit") == "tuan":
+            quantity *= 7
         relation = after_match.group("relation")
         request_kind = (
             "range"
@@ -537,6 +811,8 @@ def _extract_relative_request(value: str) -> tuple[str, int] | None:
     if before_match:
         quantity = _parse_vietnamese_number(before_match.group("number"))
         if quantity is not None:
+            if before_match.group("unit") == "tuan":
+                quantity *= 7
             return "date", quantity
     return None
 
@@ -701,7 +977,26 @@ def _time_issue(code: str, details: dict[str, Any]) -> dict[str, Any]:
         "normalized_time_without_explicit_clock",
         "unexpected_normalized_time",
     }
-    invalid_field = "time_of_day_text" if code in time_of_day_codes else "date_text"
+    date_range_codes = {
+        "current_date_range_conflict",
+        "date_range_quantity_conflict",
+        "date_range_text_conflict",
+        "date_range_type_conflict",
+        "invalid_date_range_quantity",
+        "invalid_date_range_structure",
+        "invalid_date_range_type",
+        "missing_date_range",
+        "missing_range_end_date",
+        "unexpected_date_range_quantity",
+        "unexpected_range_end_date",
+    }
+    invalid_field = (
+        "time_of_day_text"
+        if code in time_of_day_codes
+        else "date_range"
+        if code in date_range_codes
+        else "date_text"
+    )
     return {
         "status": "needs_clarification",
         "stage": "time",

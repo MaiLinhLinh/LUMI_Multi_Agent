@@ -17,6 +17,21 @@ class FakeWorkflow:
         return self.results.pop(0)
 
 
+class StreamingFakeWorkflow:
+    def invoke(self, state: dict) -> dict:
+        callback = state["response_stream_callback"]
+        callback("weather", "Hà Nội ")
+        callback("weather", "30°C")
+        return {
+            "weather_status": "completed",
+            "weather_answer": "Hà Nội 30°C",
+            "final_response": "Hà Nội 30°C",
+            "selected_agents": ["weather"],
+            "timings": {},
+            "llm_usage": {},
+        }
+
+
 def _service(*results: dict) -> tuple[web_app.WebChatService, FakeWorkflow]:
     workflow = FakeWorkflow(list(results))
     service = web_app.WebChatService(
@@ -177,6 +192,46 @@ def test_music_panel_is_preserved_after_social_turn() -> None:
     assert social["active_panel"] == first["active_panel"]
     assert social["active_panel_revision"] == first["active_panel_revision"]
     assert social["messages"][-1]["content"] == "Rất vui được giúp bạn!"
+
+
+def test_music_clarification_keeps_player_despite_stale_weather_output(
+    tmp_path: Path,
+) -> None:
+    stale_weather_path = tmp_path / "stale-weather.html"
+    stale_weather_path.write_text("<html>Old weather</html>", encoding="utf-8")
+    player = _music_player()
+    service, _ = _service(
+        {
+            "music_status": "completed",
+            "music_answer": "Đây là bài hát bạn yêu cầu.",
+            "final_response": "Đây là bài hát bạn yêu cầu.",
+            "music_player": player,
+            "selected_agents": ["music"],
+            "timings": {},
+            "llm_usage": {},
+        },
+        {
+            "music_status": "needs_clarification",
+            "music_answer": "Bạn muốn nghe bài nào tiếp theo?",
+            "final_response": "Bạn muốn nghe bài nào tiếp theo?",
+            "selected_agents": ["music"],
+            "visualization_output": {
+                "ok": True,
+                "html_path": str(stale_weather_path),
+            },
+            "timings": {},
+            "llm_usage": {},
+        },
+    )
+
+    first = service.chat("music-clarification-panel", "Bật nhạc")
+    clarification = service.chat(
+        "music-clarification-panel",
+        "Chuyển bài tiếp theo",
+    )
+
+    assert clarification["active_panel"] == first["active_panel"] == player
+    assert clarification["active_panel_revision"] == 1
 
 
 def test_music_replaces_weather_in_the_same_left_panel(tmp_path: Path) -> None:
@@ -409,3 +464,31 @@ async def test_web_routes_serve_interface_and_clear_session(monkeypatch) -> None
     assert "weatherFrame.srcdoc = panel.html;" in script.text
     assert chat.json()["messages"][-1]["content"] == "Xin chào!"
     assert cleared.json()["messages"] == []
+
+
+@pytest.mark.asyncio
+async def test_web_chat_stream_emits_deltas_before_final_session(monkeypatch) -> None:
+    service = web_app.WebChatService(
+        settings=SimpleNamespace(has_gemini_key=True),
+        workflow=StreamingFakeWorkflow(),
+    )
+    monkeypatch.setattr(web_app, "_service", service)
+
+    transport = httpx.ASGITransport(app=web_app.app)
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post(
+            "/api/chat/stream",
+            json={"session_id": "stream-session", "query": "Thời tiết Hà Nội"},
+        )
+
+    events = [web_app.json.loads(line) for line in response.text.splitlines()]
+    assert [event["type"] for event in events] == [
+        "text_delta",
+        "text_delta",
+        "final",
+    ]
+    assert "".join(event["delta"] for event in events[:-1]) == "Hà Nội 30°C"
+    assert events[-1]["payload"]["messages"][-1]["content"] == "Hà Nội 30°C"
