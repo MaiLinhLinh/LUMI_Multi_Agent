@@ -7,7 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
-AgentTopic = Literal["weather", "news", "wiki"]
+AgentTopic = Literal["weather", "news", "wiki", "music"]
 ExecutionMode = Literal["single", "parallel", "sequential"]
 
 

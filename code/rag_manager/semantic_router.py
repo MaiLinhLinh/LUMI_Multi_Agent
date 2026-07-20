@@ -42,6 +42,9 @@ def is_high_confidence_domain_query(query: object) -> bool:
         r"\bweather\s+(?:in|today|tomorrow|forecast)\b.+",
         r"\b(?:latest news|news about|who is)\b.+",
         r"\b(?:weather|news|forecast|wikipedia)\b.+",
+        r"^(?:bat|mo|phat|nghe|xem)\s+(?:nhac|bai|mv)\b.+",
+        r"^(?:cho toi|cho minh)\s+(?:nghe|xem|bat|mo)\s+(?:nhac|bai|mv)\b.+",
+        r"^(?:play|listen to|open|watch)\s+(?:music|song|track|mv)\b.+",
     )
     return any(re.search(pattern, normalized) for pattern in domain_patterns)
 

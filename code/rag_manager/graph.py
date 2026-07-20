@@ -10,6 +10,7 @@ from langgraph.graph import END, StateGraph
 
 from rag_manager.agents.aggregator import run_aggregator_agent
 from rag_manager.agents.manager import classify_intent
+from rag_manager.agents.music import run_music_agent
 from rag_manager.agents.news import run_news_agent
 from rag_manager.agents.weather import run_weather_llm_pipeline
 from rag_manager.agents.wiki import run_wiki_agent
@@ -33,6 +34,7 @@ def build_workflow():
     graph.add_node("weather", weather_node)
     graph.add_node("news", news_node)
     graph.add_node("wiki", wiki_node)
+    graph.add_node("music", music_node)
     graph.add_node("execute_parallel", execute_parallel_node)
     graph.add_node("plan_sequence", plan_sequence_node)
     graph.add_node("aggregate", aggregate_node)
@@ -53,6 +55,7 @@ def build_workflow():
             "weather": "weather",
             "news": "news",
             "wiki": "wiki",
+            "music": "music",
             "parallel": "execute_parallel",
             "sequential": "plan_sequence",
         },
@@ -64,6 +67,7 @@ def build_workflow():
     )
     graph.add_edge("news", "aggregate")
     graph.add_edge("wiki", "aggregate")
+    graph.add_edge("music", "aggregate")
     graph.add_conditional_edges(
         "execute_parallel",
         route_after_weather_execution,
@@ -246,13 +250,13 @@ def route_after_weather_execution(state: GraphState) -> str:
 def _single_agent_route(state: GraphState) -> str:
     intent = state.get("intent", {})
     primary_intent = intent.get("primary_intent", "") if isinstance(intent, dict) else ""
-    if primary_intent in {"weather", "news", "wiki"}:
+    if primary_intent in {"weather", "news", "wiki", "music"}:
         return primary_intent
 
     selected_agents = state.get("selected_agents", [])
     if selected_agents:
         first_agent = selected_agents[0]
-        return first_agent if first_agent in {"weather", "news", "wiki"} else "wiki"
+        return first_agent if first_agent in {"weather", "news", "wiki", "music"} else "wiki"
 
     return "wiki"
 
@@ -299,6 +303,20 @@ def wiki_node(state: GraphState) -> GraphState:
     )
 
 
+def music_node(state: GraphState) -> GraphState:
+    return _merge_state_updates(
+        [
+            _state_metadata(state),
+            run_music_agent(
+                state,
+                settings=_get_settings(state),
+                client=state.get("music_client"),
+                search_service=state.get("music_search_service"),
+            ),
+        ]
+    )
+
+
 def execute_parallel_node(state: GraphState) -> GraphState:
     return asyncio.run(_execute_parallel_async(state))
 
@@ -313,6 +331,8 @@ async def _execute_parallel_async(state: GraphState) -> GraphState:
         tasks.append(("news", asyncio.to_thread(news_node, state)))
     if "wiki" in selected_agents:
         tasks.append(("wiki", asyncio.to_thread(wiki_node, state)))
+    if "music" in selected_agents:
+        tasks.append(("music", asyncio.to_thread(music_node, state)))
 
     if not tasks:
         return _state_metadata(state)
@@ -628,6 +648,7 @@ def _state_metadata(state: GraphState) -> GraphState:
         "llm_usage",
         "last_domain_result",
         "available_templates",
+        "weather_session",
     ):
         value = state.get(key)
         if isinstance(value, dict):
@@ -693,7 +714,7 @@ def _sequence_topics(state: GraphState) -> list[str]:
                     ordered_topics.append(topic)
 
     if not ordered_topics:
-        fallback_order = ["weather", "wiki", "news"]
+        fallback_order = ["weather", "music", "wiki", "news"]
         ordered_topics = [topic for topic in fallback_order if topic in selected_agents]
 
     for topic in selected_agents:
@@ -706,7 +727,7 @@ def _sequence_topics(state: GraphState) -> list[str]:
 def _selected_topics(state: GraphState) -> list[str]:
     topics: list[str] = []
     for topic in state.get("selected_agents", []):
-        if topic in {"weather", "news", "wiki"} and topic not in topics:
+        if topic in {"weather", "news", "wiki", "music"} and topic not in topics:
             topics.append(topic)
     return topics
 
@@ -718,6 +739,8 @@ def _run_topic_node(topic: str, state: GraphState) -> GraphState:
         return news_node(state)
     if topic == "wiki":
         return wiki_node(state)
+    if topic == "music":
+        return music_node(state)
     return {}
 
 

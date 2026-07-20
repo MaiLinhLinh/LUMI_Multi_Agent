@@ -88,7 +88,7 @@ def get_single_agent_answer(state: AgentState) -> str:
         intent = state.get("intent", {})
         topic = intent.get("primary_intent", "") if isinstance(intent, dict) else ""
 
-    if topic not in {"weather", "news", "wiki"}:
+    if topic not in {"weather", "news", "wiki", "music"}:
         return ""
 
     answer = state.get(f"{topic}_answer", "")
@@ -126,7 +126,7 @@ def build_no_output_response(state: AgentState) -> str:
 
 def _collect_agent_outputs(state: AgentState) -> dict[str, dict[str, Any]]:
     outputs: dict[str, dict[str, Any]] = {}
-    for topic in ("weather", "news", "wiki"):
+    for topic in ("weather", "news", "wiki", "music"):
         answer = state.get(f"{topic}_answer", "")
         data = state.get(f"{topic}_data", {})
         if answer or data:

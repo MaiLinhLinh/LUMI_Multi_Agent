@@ -3,6 +3,9 @@
 
 # Bỏ qua file .env nằm trong thư mục code
 /code/.env
+/code/data/chroma_music/
+/code/data/music_catalog.generated.json
+/code/data/music_catalog_review.json
 /outputs
 /benchmark
 /benchmark_analysis.md

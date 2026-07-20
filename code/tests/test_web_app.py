@@ -32,6 +32,7 @@ def test_weather_dashboard_is_preserved_after_social_turn(tmp_path: Path) -> Non
     service, workflow = _service(
         {
             "weather_status": "completed",
+            "final_response": "Hà Nội hôm nay có mây, nhiệt độ 30°C.",
             "selected_agents": ["weather"],
             "visualization_html_path": str(html_path),
             "timings": {},
@@ -57,7 +58,16 @@ def test_weather_dashboard_is_preserved_after_social_turn(tmp_path: Path) -> Non
         "Xin chào! Tôi vẫn ở đây để hỗ trợ bạn."
     )
     assert workflow.states[1]["history"] == [
-        {"role": "user", "content": "Thời tiết Hà Nội hôm nay?"},
+        {
+            "role": "user",
+            "content": "Thời tiết Hà Nội hôm nay?",
+            "domain": "weather",
+        },
+        {
+            "role": "assistant",
+            "content": "Hà Nội hôm nay có mây, nhiệt độ 30°C.",
+            "domain": "weather",
+        },
         {"role": "user", "content": "Cảm ơn bạn"},
     ]
 
@@ -97,6 +107,184 @@ def test_clarification_uses_text_reply_and_keeps_dashboard(tmp_path: Path) -> No
     assert payload["messages"][-1]["content"] == "Bạn muốn xem thời tiết vào ngày nào?"
 
 
+def _music_player(video_id: str = "FN7ALfpGxiI") -> dict:
+    return {
+        "schema_version": "music.youtube-player.v1",
+        "status": "completed",
+        "ui_type": "youtube_player",
+        "player_action": "play",
+        "music": {
+            "source_id": f"youtube_{video_id}",
+            "track_id": "track_noi_nay_co_anh",
+            "title": "Nơi Này Có Anh",
+            "artist": "Sơn Tùng M-TP",
+            "artists": ["Sơn Tùng M-TP"],
+            "video_id": video_id,
+            "content_type": "official_mv",
+            "version": "official MV",
+        },
+    }
+
+
+def test_music_result_uses_shared_left_panel_and_keeps_bot_answer() -> None:
+    player = _music_player()
+    service, _ = _service(
+        {
+            "music_status": "completed",
+            "music_answer": "Đây là bài “Nơi Này Có Anh” của Sơn Tùng M-TP.",
+            "final_response": "Đây là bài “Nơi Này Có Anh” của Sơn Tùng M-TP.",
+            "music_player": player,
+            "selected_agents": ["music"],
+            "timings": {},
+            "llm_usage": {},
+        }
+    )
+
+    payload = service.chat("music-panel", "Bật bài Nơi Này Có Anh")
+
+    assert payload["has_active_panel"] is True
+    assert payload["active_panel"] == player
+    assert payload["active_panel_revision"] == 1
+    assert payload["visualization_html"] == ""
+    assert payload["messages"][-1]["content"] == (
+        "Đây là bài “Nơi Này Có Anh” của Sơn Tùng M-TP."
+    )
+
+
+def test_music_panel_is_preserved_after_social_turn() -> None:
+    player = _music_player()
+    service, _ = _service(
+        {
+            "music_status": "completed",
+            "music_answer": "Đây là bài hát bạn yêu cầu.",
+            "final_response": "Đây là bài hát bạn yêu cầu.",
+            "music_player": player,
+            "selected_agents": ["music"],
+            "timings": {},
+            "llm_usage": {},
+        },
+        {
+            "final_response": "Rất vui được giúp bạn!",
+            "selected_agents": ["wiki"],
+            "timings": {},
+            "llm_usage": {},
+        },
+    )
+
+    first = service.chat("music-social", "Bật nhạc")
+    social = service.chat("music-social", "Cảm ơn bạn")
+
+    assert social["active_panel"] == first["active_panel"]
+    assert social["active_panel_revision"] == first["active_panel_revision"]
+    assert social["messages"][-1]["content"] == "Rất vui được giúp bạn!"
+
+
+def test_music_replaces_weather_in_the_same_left_panel(tmp_path: Path) -> None:
+    html_path = tmp_path / "weather.html"
+    html_path.write_text("<html>Weather</html>", encoding="utf-8")
+    player = _music_player()
+    service, _ = _service(
+        {
+            "weather_status": "completed",
+            "visualization_html_path": str(html_path),
+            "selected_agents": ["weather"],
+            "timings": {},
+            "llm_usage": {},
+        },
+        {
+            "music_status": "completed",
+            "music_answer": "Đây là bài hát bạn yêu cầu.",
+            "final_response": "Đây là bài hát bạn yêu cầu.",
+            "music_player": player,
+            "selected_agents": ["music"],
+            "timings": {},
+            "llm_usage": {},
+        },
+    )
+
+    weather = service.chat("shared-panel", "Thời tiết Hà Nội")
+    music = service.chat("shared-panel", "Bật nhạc")
+
+    assert weather["active_panel"]["ui_type"] == "weather"
+    assert music["active_panel"]["ui_type"] == "youtube_player"
+    assert music["active_panel_revision"] == 2
+    assert music["visualization_html"] == ""
+
+
+def test_weather_replaces_music_in_the_same_left_panel(tmp_path: Path) -> None:
+    html_path = tmp_path / "weather.html"
+    html_path.write_text("<html>Hà Nội 30°C</html>", encoding="utf-8")
+    player = _music_player()
+    service, _ = _service(
+        {
+            "music_status": "completed",
+            "music_answer": "Đây là bài hát bạn yêu cầu.",
+            "final_response": "Đây là bài hát bạn yêu cầu.",
+            "music_player": player,
+            "selected_agents": ["music"],
+            "timings": {},
+            "llm_usage": {},
+        },
+        {
+            "weather_status": "completed",
+            "visualization_html_path": str(html_path),
+            "selected_agents": ["weather"],
+            "timings": {},
+            "llm_usage": {},
+        },
+    )
+
+    service.chat("reverse-shared-panel", "Bật nhạc")
+    weather = service.chat("reverse-shared-panel", "Thời tiết Hà Nội")
+
+    assert weather["active_panel"]["ui_type"] == "weather"
+    assert "Hà Nội 30°C" in weather["active_panel"]["html"]
+    assert weather["active_panel_revision"] == 2
+
+
+def test_clear_session_removes_shared_panel_and_player_state() -> None:
+    player = _music_player()
+    service, _ = _service(
+        {
+            "music_status": "completed",
+            "music_answer": "Đây là bài hát bạn yêu cầu.",
+            "final_response": "Đây là bài hát bạn yêu cầu.",
+            "music_player": player,
+            "music_session": {"current_source_id": "youtube_FN7ALfpGxiI"},
+            "selected_agents": ["music"],
+            "timings": {},
+            "llm_usage": {},
+        }
+    )
+
+    service.chat("clear-music-panel", "Bật nhạc")
+    cleared = service.clear("clear-music-panel")
+
+    assert cleared["messages"] == []
+    assert cleared["has_active_panel"] is False
+    assert cleared["active_panel"] == {}
+    assert cleared["active_panel_revision"] == 0
+
+
+def test_web_rejects_malformed_music_player_update() -> None:
+    player = _music_player(video_id="invalid")
+    service, _ = _service(
+        {
+            "music_status": "completed",
+            "final_response": "Không thể phát.",
+            "music_player": player,
+            "selected_agents": ["music"],
+            "timings": {},
+            "llm_usage": {},
+        }
+    )
+
+    payload = service.chat("invalid-player", "Bật nhạc")
+
+    assert payload["has_active_panel"] is False
+    assert payload["active_panel"] == {}
+
+
 def test_terminal_metrics_include_topics_timings_and_usage(capsys) -> None:
     web_app._print_terminal_metrics(
         {
@@ -127,6 +315,52 @@ def test_terminal_metrics_include_topics_timings_and_usage(capsys) -> None:
     assert "time_to_first_token: 0.915768s" in output
 
 
+def test_web_session_carries_music_state_to_follow_up_turn() -> None:
+    music_session = {
+        "schema_version": "music.session.v1",
+        "last_candidate_ids": ["youtube_1", "youtube_2"],
+        "last_candidates": [
+            {"record_id": "youtube_1", "video_id": "abcdefghijk"},
+            {"record_id": "youtube_2", "video_id": "lmnopqrstuv"},
+        ],
+    }
+    music_player = {
+        "schema_version": "music.youtube-player.v1",
+        "status": "completed",
+        "ui_type": "youtube_player",
+        "player_action": "play",
+        "music": {"video_id": "abcdefghijk"},
+    }
+    service, workflow = _service(
+        {
+            "music_status": "needs_clarification",
+            "music_answer": "Bạn muốn chọn bài nào?",
+            "final_response": "Bạn muốn chọn bài nào?",
+            "music_session": music_session,
+            "music_player": music_player,
+            "selected_agents": ["music"],
+            "timings": {},
+            "llm_usage": {},
+        },
+        {
+            "music_status": "completed",
+            "music_answer": "Đây là bài thứ hai.",
+            "final_response": "Đây là bài thứ hai.",
+            "music_session": music_session,
+            "music_player": music_player,
+            "selected_agents": ["music"],
+            "timings": {},
+            "llm_usage": {},
+        },
+    )
+
+    service.chat("music-session", "Bật nhạc Sơn Tùng")
+    service.chat("music-session", "Bài thứ hai")
+
+    assert workflow.states[1]["music_session"] == music_session
+    assert workflow.states[1]["music_player"] == music_player
+
+
 @pytest.mark.asyncio
 async def test_web_routes_serve_interface_and_clear_session(monkeypatch) -> None:
     service, _ = _service({"final_response": "Xin chào!"})
@@ -139,6 +373,7 @@ async def test_web_routes_serve_interface_and_clear_session(monkeypatch) -> None
     ) as client:
         homepage = await client.get("/")
         stylesheet = await client.get("/assets/app.css")
+        script = await client.get("/assets/app.js")
         chat = await client.post(
             "/api/chat",
             json={"session_id": "browser-session", "query": "Xin chào"},
@@ -151,5 +386,14 @@ async def test_web_routes_serve_interface_and_clear_session(monkeypatch) -> None
     assert homepage.status_code == 200
     assert "Trợ lí ảo chatbot" in homepage.text
     assert stylesheet.status_code == 200
+    assert script.status_code == 200
+    assert 'id="contentPanel"' in homepage.text
+    assert 'id="weatherView"' in homepage.text
+    assert 'id="musicView"' in homepage.text
+    assert 'id="musicFrame"' in homepage.text
+    assert "https://www.youtube-nocookie.com" in script.text
+    assert "https://www.youtube.com/embed" not in script.text
+    assert ".src = youtubeEmbedUrl" in script.text
+    assert ".innerHTML" not in script.text
     assert chat.json()["messages"][-1]["content"] == "Xin chào!"
     assert cleared.json()["messages"] == []

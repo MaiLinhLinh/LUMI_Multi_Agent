@@ -13,6 +13,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 
 html, body { min-height: 100%; }
 
@@ -227,7 +228,7 @@ button { -webkit-tap-highlight-color: transparent; }
 
 .live-badge i { width: 7px; height: 7px; border-radius: 50%; background: #22c55e; box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.12); }
 
-.dashboard-frame-wrap {
+.content-stage {
   flex: 1;
   min-height: 0;
   overflow: hidden;
@@ -236,7 +237,100 @@ button { -webkit-tap-highlight-color: transparent; }
   background: white;
 }
 
-#dashboardFrame { width: 100%; height: 100%; min-height: 660px; border: 0; display: block; background: white; }
+.weather-view { width: 100%; height: 100%; }
+#weatherFrame { width: 100%; height: 100%; min-height: 660px; border: 0; display: block; background: white; }
+
+.music-view {
+  width: 100%;
+  height: 100%;
+  min-height: 660px;
+  display: grid;
+  place-items: center;
+  padding: clamp(18px, 3vw, 46px);
+  background:
+    radial-gradient(circle at 12% 12%, rgba(14, 165, 233, 0.18), transparent 34%),
+    radial-gradient(circle at 88% 88%, rgba(250, 204, 21, 0.12), transparent 30%),
+    #0b1220;
+}
+
+.music-player-card {
+  width: min(980px, 100%);
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 24px;
+  background: #111827;
+  color: white;
+  box-shadow: 0 30px 70px rgba(0, 0, 0, 0.34);
+}
+
+.music-video-shell {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background: #020617;
+}
+
+#musicFrame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+  background: #020617;
+}
+
+.music-stopped {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px;
+  text-align: center;
+  background: linear-gradient(145deg, #0f172a, #111827);
+}
+
+.music-stopped > span {
+  width: 62px;
+  height: 62px;
+  display: grid;
+  place-items: center;
+  border-radius: 20px;
+  background: linear-gradient(145deg, #38bdf8, #0284c7);
+  font-size: 2rem;
+  box-shadow: 0 14px 30px rgba(14, 165, 233, 0.25);
+}
+
+.music-stopped strong { font-size: 1.08rem; }
+.music-stopped small { color: #94a3b8; }
+
+.music-meta {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  padding: 18px 20px 20px;
+}
+
+.music-art {
+  flex: 0 0 50px;
+  width: 50px;
+  height: 50px;
+  display: grid;
+  place-items: center;
+  border-radius: 16px;
+  background: rgba(56, 189, 248, 0.14);
+  color: #7dd3fc;
+  font-size: 1.4rem;
+}
+
+.music-meta > div:last-child { min-width: 0; }
+.music-version { color: #7dd3fc; font-size: 0.7rem; font-weight: 750; letter-spacing: 0.08em; text-transform: uppercase; }
+.music-meta h3 { margin: 4px 0 2px; overflow: hidden; font-size: clamp(1.05rem, 2vw, 1.4rem); text-overflow: ellipsis; white-space: nowrap; }
+.music-meta p { margin: 0; overflow: hidden; color: #94a3b8; text-overflow: ellipsis; white-space: nowrap; }
 
 .chat-heading {
   padding: 17px 18px 13px;
@@ -402,7 +496,9 @@ button { -webkit-tap-highlight-color: transparent; }
   .surface { border-radius: 19px; }
   .no-dashboard .chat-panel { padding: 11px; }
   .has-dashboard .dashboard-panel { min-height: 540px; padding: 11px; }
-  #dashboardFrame { min-height: 520px; }
+  #weatherFrame, .music-view { min-height: 520px; }
+  .music-view { padding: 10px; }
+  .music-player-card { border-radius: 17px; }
   .has-dashboard .chat-panel { height: 580px; }
   .live-badge { display: none; }
   .messages { padding: 14px 12px; }

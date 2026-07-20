@@ -150,6 +150,7 @@ def _workflow_node_label(node_name: str) -> str:
         "weather": "Weather agent xử lý dữ liệu thời tiết.",
         "news": "News agent xử lý dữ liệu tin tức.",
         "wiki": "Wiki agent xử lý dữ liệu Wikipedia.",
+        "music": "Music agent xử lý yêu cầu tìm và phát nhạc.",
         "execute_parallel": "Chạy các agent song song.",
         "plan_sequence": "Chạy các agent tuần tự theo phụ thuộc.",
         "aggregate": "Aggregator tổng hợp câu trả lời cuối.",
@@ -165,7 +166,7 @@ def _next_nodes_after_update(node_name: str, result: dict) -> list[str]:
         return [_route_after_manager(result)]
     if node_name == "weather" and _completed_single_weather(result):
         return ["visualize"]
-    if node_name in {"weather", "news", "wiki", "execute_parallel", "plan_sequence"}:
+    if node_name in {"weather", "news", "wiki", "music", "execute_parallel", "plan_sequence"}:
         return ["aggregate"]
     if node_name == "aggregate":
         return ["visualize"]
@@ -191,13 +192,13 @@ def _route_after_manager(result: dict) -> str:
     selected_agents = result.get("selected_agents", [])
     if isinstance(selected_agents, list) and selected_agents:
         first_agent = selected_agents[0]
-        if first_agent in {"weather", "news", "wiki"}:
+        if first_agent in {"weather", "news", "wiki", "music"}:
             return str(first_agent)
 
     intent = result.get("intent", {})
     if isinstance(intent, dict):
         primary_intent = intent.get("primary_intent")
-        if primary_intent in {"weather", "news", "wiki"}:
+        if primary_intent in {"weather", "news", "wiki", "music"}:
             return str(primary_intent)
 
     return "wiki"
@@ -217,12 +218,12 @@ def _print_workflow_step_details(node_name: str, update: object) -> None:
     if node_name == "input_router":
         print(f"  - Route: {update.get('input_route', 'domain')}")
 
-    for key in ("weather_answer", "news_answer", "wiki_answer", "final_response"):
+    for key in ("weather_answer", "news_answer", "wiki_answer", "music_answer", "final_response"):
         value = update.get(key)
         if isinstance(value, str) and value.strip():
             print(f"  - {key}: {_short_text(value)}")
 
-    for key in ("weather_data", "news_data", "wiki_data"):
+    for key in ("weather_data", "news_data", "wiki_data", "music_data"):
         value = update.get(key)
         if isinstance(value, dict):
             print(f"  - {key}: {_summarize_data(value)}")
@@ -393,13 +394,25 @@ def _session_context_from_result(result: dict) -> dict:
         "pending_template_state",
         "template_requirements",
         "template_clarification_round",
+        "weather_session",
+        "music_session",
+        "music_player",
     ):
         value = result.get(key)
-        if key in {"pending_template_state", "template_requirements", "template_clarification_round"}:
+        if key in {"pending_template_state", "template_requirements", "template_clarification_round", "weather_session", "music_session", "music_player"}:
             if key in result:
-                session_context[key] = value
+                session_context[key] = dict(value) if isinstance(value, dict) else value
         elif value not in (None, "", [], {}):
             session_context[key] = value
+    weather_session = session_context.get("weather_session")
+    selected_agents = result.get("selected_agents")
+    if (
+        isinstance(weather_session, dict)
+        and isinstance(selected_agents, list)
+        and selected_agents
+        and "weather" not in selected_agents
+    ):
+        weather_session["active"] = False
     return session_context
 
 
@@ -446,6 +459,7 @@ def main() -> None:
             break
         if query.lower() == "clear":
             history.clear()
+            session_context.clear()
             print("Đã xóa lịch sử hội thoại.\n")
             continue
         if query.lower() in {"help", "?"}:

@@ -1,7 +1,17 @@
 const workspace = document.querySelector("#workspace");
 const welcome = document.querySelector("#welcome");
-const dashboardPanel = document.querySelector("#dashboardPanel");
-const dashboardFrame = document.querySelector("#dashboardFrame");
+const contentPanel = document.querySelector("#contentPanel");
+const contentEyebrow = document.querySelector("#contentEyebrow");
+const contentTitle = document.querySelector("#contentTitle");
+const contentBadge = document.querySelector("#contentBadge span");
+const weatherView = document.querySelector("#weatherView");
+const weatherFrame = document.querySelector("#weatherFrame");
+const musicView = document.querySelector("#musicView");
+const musicFrame = document.querySelector("#musicFrame");
+const musicStopped = document.querySelector("#musicStopped");
+const musicTitle = document.querySelector("#musicTitle");
+const musicArtist = document.querySelector("#musicArtist");
+const musicVersion = document.querySelector("#musicVersion");
 const messagesElement = document.querySelector("#messages");
 const suggestions = document.querySelector("#suggestions");
 const chatForm = document.querySelector("#chatForm");
@@ -12,9 +22,17 @@ const connectionStatus = document.querySelector("#connectionStatus");
 const messageTemplate = document.querySelector("#messageTemplate");
 
 const SESSION_KEY = "lumi_web_session_id";
+const YOUTUBE_NOCOOKIE_ORIGIN = "https://www.youtube-nocookie.com";
+const YOUTUBE_VIDEO_ID_PATTERN = /^[A-Za-z0-9_-]{11}$/;
 const sessionId = getOrCreateSessionId();
-let state = { messages: [], visualization_html: "", has_visualization: false };
+let state = {
+  messages: [],
+  active_panel: {},
+  active_panel_revision: 0,
+  has_active_panel: false,
+};
 let busy = false;
+let renderedPanelRevision = null;
 
 function getOrCreateSessionId() {
   const existing = window.localStorage.getItem(SESSION_KEY);
@@ -35,16 +53,24 @@ async function requestJson(url, options = {}) {
 }
 
 function render() {
-  const hasDashboard = Boolean(state.has_visualization && state.visualization_html);
+  const panel = getActivePanel();
+  const hasDashboard = isValidPanel(panel);
   const hasMessages = Boolean(state.messages?.length);
   workspace.classList.toggle("has-dashboard", hasDashboard);
   workspace.classList.toggle("no-dashboard", !hasDashboard);
   workspace.classList.toggle("has-messages", hasMessages);
-  dashboardPanel.hidden = !hasDashboard;
+  contentPanel.hidden = !hasDashboard;
   welcome.hidden = hasDashboard || hasMessages;
 
-  if (hasDashboard && dashboardFrame.srcdoc !== state.visualization_html) {
-    dashboardFrame.srcdoc = state.visualization_html;
+  const revision = Number.isInteger(state.active_panel_revision)
+    ? state.active_panel_revision
+    : 0;
+  if (hasDashboard && revision !== renderedPanelRevision) {
+    renderActivePanel(panel);
+    renderedPanelRevision = revision;
+  } else if (!hasDashboard && renderedPanelRevision !== null) {
+    clearActivePanel();
+    renderedPanelRevision = null;
   }
 
   messagesElement.replaceChildren();
@@ -61,6 +87,86 @@ function render() {
   window.requestAnimationFrame(() => {
     messagesElement.scrollTop = messagesElement.scrollHeight;
   });
+}
+
+function getActivePanel() {
+  if (state.active_panel && typeof state.active_panel === "object") {
+    return state.active_panel;
+  }
+  if (state.visualization_html) {
+    return { ui_type: "weather", html: state.visualization_html };
+  }
+  return {};
+}
+
+function isValidPanel(panel) {
+  if (!panel || typeof panel !== "object") return false;
+  if (panel.ui_type === "weather") return typeof panel.html === "string" && Boolean(panel.html);
+  if (panel.ui_type !== "youtube_player") return false;
+  const music = panel.music;
+  return Boolean(
+    music
+    && typeof music === "object"
+    && typeof music.video_id === "string"
+    && YOUTUBE_VIDEO_ID_PATTERN.test(music.video_id)
+    && ["play", "replay", "stop"].includes(panel.player_action)
+  );
+}
+
+function renderActivePanel(panel) {
+  if (panel.ui_type === "weather") {
+    renderWeatherPanel(panel);
+    return;
+  }
+  renderMusicPanel(panel);
+}
+
+function renderWeatherPanel(panel) {
+  musicFrame.removeAttribute("src");
+  musicView.hidden = true;
+  weatherView.hidden = false;
+  contentEyebrow.textContent = "Kết quả trực quan";
+  contentTitle.textContent = "Thông tin thời tiết";
+  contentBadge.textContent = "Dữ liệu từ Redis";
+  if (weatherFrame.srcdoc !== panel.html) weatherFrame.srcdoc = panel.html;
+}
+
+function renderMusicPanel(panel) {
+  const music = panel.music;
+  weatherFrame.srcdoc = "";
+  weatherView.hidden = true;
+  musicView.hidden = false;
+  contentEyebrow.textContent = panel.player_action === "stop" ? "Đã dừng" : "Đang phát";
+  contentTitle.textContent = "Trình phát âm nhạc";
+  contentBadge.textContent = "YouTube";
+  musicTitle.textContent = typeof music.title === "string" ? music.title : "Bài hát";
+  musicArtist.textContent = typeof music.artist === "string" ? music.artist : "";
+  musicVersion.textContent = typeof music.version === "string" && music.version
+    ? music.version
+    : "YouTube";
+
+  if (panel.player_action === "stop") {
+    musicFrame.removeAttribute("src");
+    musicFrame.hidden = true;
+    musicStopped.hidden = false;
+    return;
+  }
+
+  musicStopped.hidden = true;
+  musicFrame.hidden = false;
+  musicFrame.src = youtubeEmbedUrl(music.video_id);
+}
+
+function youtubeEmbedUrl(videoId) {
+  if (!YOUTUBE_VIDEO_ID_PATTERN.test(videoId)) return "";
+  return `${YOUTUBE_NOCOOKIE_ORIGIN}/embed/${encodeURIComponent(videoId)}?autoplay=1&rel=0`;
+}
+
+function clearActivePanel() {
+  weatherFrame.srcdoc = "";
+  musicFrame.removeAttribute("src");
+  weatherView.hidden = true;
+  musicView.hidden = true;
 }
 
 function createMessage(role, content) {
@@ -147,7 +253,12 @@ clearButton.addEventListener("click", async () => {
       body: JSON.stringify({ session_id: sessionId }),
     });
   } catch (error) {
-    state = { messages: [{ role: "assistant", content: error.message }], visualization_html: "", has_visualization: false };
+    state = {
+      messages: [{ role: "assistant", content: error.message }],
+      active_panel: {},
+      active_panel_revision: 0,
+      has_active_panel: false,
+    };
   } finally {
     busy = false;
     render();

@@ -1,0 +1,33 @@
+{
+  "catalog_version": "music.catalog.v1",
+  "tracks": [
+    {
+      "title": "Tên bài hát mẫu",
+      "artists": ["Tên nghệ sĩ"],
+      "genres": ["V-Pop"],
+      "moods": ["thư giãn"],
+      "language": "vi",
+      "tags": ["nhạc Việt"],
+      "release_date": "2026-07-20",
+      "release_date_precision": "day",
+      "popularity_score": 0,
+      "track_active": true,
+      "sources": [
+        {
+          "platform": "youtube",
+          "video_id": "AbCdEfGhI12",
+          "content_type": "official_mv",
+          "version": "official MV",
+          "channel_id": "UC_EXAMPLE_CHANNEL",
+          "channel_name": "Tên kênh chính thức",
+          "is_official": true,
+          "embeddable": true,
+          "published_at": "2026-07-20T03:00:00Z",
+          "thumbnail_url": "https://i.ytimg.com/vi/AbCdEfGhI12/hqdefault.jpg",
+          "duration_seconds": 240,
+          "source_active": true
+        }
+      ]
+    }
+  ]
+}

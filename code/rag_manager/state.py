@@ -7,8 +7,15 @@ from typing import Any, Literal, TypedDict
 
 ExecutionMode = Literal["single", "parallel", "sequential"]
 InputRoute = Literal["domain", "visualize"]
-AgentTopic = Literal["weather", "news", "wiki"]
+AgentTopic = Literal["weather", "news", "wiki", "music"]
 WeatherStatus = Literal[
+    "needs_clarification",
+    "unavailable",
+    "error",
+    "completed",
+]
+MusicStatus = Literal[
+    "not_configured",
     "needs_clarification",
     "unavailable",
     "error",
@@ -49,6 +56,7 @@ class TimingStats(TypedDict, total=False):
     weather: float
     news: float
     wiki: float
+    music: float
     aggregate: float
     total: float
 
@@ -60,6 +68,7 @@ class LlmUsageStats(TypedDict, total=False):
     weather: dict[str, Any]
     news: dict[str, Any]
     wiki: dict[str, Any]
+    music: dict[str, Any]
     aggregate: dict[str, Any]
 
 
@@ -74,16 +83,21 @@ class AgentState(TypedDict, total=False):
     """State passed between LangGraph nodes."""
 
     query: str
-    history: list[dict[str, str]]
+    history: list[dict[str, Any]]
     settings: Any
     manager_client: Any
     semantic_router_client: Any
     weather_store: Any
     weather_client: Any
+    weather_session: dict[str, Any]
     news_cache: Any
     news_client: Any
     wiki_cache: Any
     wiki_client: Any
+    music_client: Any
+    music_search_service: Any
+    music_session: dict[str, Any]
+    music_player: dict[str, Any]
     aggregator_client: Any
     visualization_orchestrator: Any
     input_route: InputRoute
@@ -99,6 +113,10 @@ class AgentState(TypedDict, total=False):
     news_answer: str
     wiki_data: dict[str, Any]
     wiki_answer: str
+    music_data: dict[str, Any]
+    music_answer: str
+    music_status: MusicStatus
+    music_error: dict[str, Any]
     final_response: str
     visualization_request: dict[str, Any]
     visualization_context: dict[str, Any]

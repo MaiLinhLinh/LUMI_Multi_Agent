@@ -111,6 +111,50 @@ def test_graph_single_mode_runs_only_primary_agent(monkeypatch) -> None:
     assert result["timings"]["aggregate"] >= 0
 
 
+def test_graph_routes_single_music_request_to_music_agent(monkeypatch) -> None:
+    def fake_classify_intent(client, query: str, history=None) -> dict:
+        assert query == "Bật nhạc Sơn Tùng"
+        return {
+            "topics": ["music"],
+            "execution_mode": "single",
+            "primary_intent": "music",
+            "dependencies": [],
+            "news_query": "",
+            "wiki_topic": "",
+        }
+
+    monkeypatch.setattr(graph, "classify_intent", fake_classify_intent)
+    monkeypatch.setattr(
+        graph,
+        "run_music_agent",
+        lambda state, **_kwargs: {
+            "music_status": "completed",
+            "music_answer": "Đây là bài “Lạc Trôi” của Sơn Tùng M-TP.",
+            "music_data": {
+                "decision": {
+                    "selected_candidate": {"video_id": "Llw9Q6akRo4"}
+                }
+            },
+            "timings": {"music": 0.01},
+        },
+    )
+
+    workflow = graph.build_workflow()
+    result = workflow.invoke(
+        {
+            "query": "Bật nhạc Sơn Tùng",
+            "history": [],
+            "settings": _settings(),
+            "manager_client": object(),
+        }
+    )
+
+    assert result["selected_agents"] == ["music"]
+    assert result["music_status"] == "completed"
+    assert result["final_response"] == result["music_answer"]
+    assert result["music_answer"].startswith("Đây là bài")
+
+
 def test_weather_agent_handles_clarification_after_manager_routes(monkeypatch) -> None:
     calls: list[str] = []
 

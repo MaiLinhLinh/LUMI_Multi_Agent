@@ -6,6 +6,7 @@ import json
 from datetime import date, datetime, timedelta
 from time import perf_counter
 from typing import Any
+from uuid import uuid4
 
 from rag_manager.agents.weather_structured_schema import WeatherExtractionResponse
 from rag_manager.config import Settings, load_settings
@@ -43,6 +44,11 @@ _WEATHER_DATA_UNAVAILABLE_ANSWER = (
     "Hiện chưa có dữ liệu thời tiết phù hợp với địa điểm hoặc thời gian "
     "bạn yêu cầu. Bạn vui lòng thử lại sau."
 )
+_WEATHER_RESPONSE_FALLBACK = (
+    "Dữ liệu thời tiết đã được cập nhật, nhưng hiện tôi chưa thể diễn giải "
+    "thành câu trả lời. Bạn có thể xem đầy đủ thông tin ở bảng kết quả."
+)
+_WEATHER_HISTORY_LIMIT = 6
 
 
 def run_weather_llm_pipeline(
@@ -55,9 +61,9 @@ def run_weather_llm_pipeline(
     """Run the conditional weather pipeline without LangChain tool calling.
 
     Python owns extraction/schema classification, location/time validation,
-    Redis access, and the final status. LLM2 is called only when Python marks
-    the request as needing clarification; completed requests are rendered by
-    the deterministic visualization pipeline.
+    Redis access, and the final status. LLM2 asks for clarification when input
+    is incomplete and turns verified Redis data into a user-facing response
+    when the request completes.
     """
 
     started_at = perf_counter()
@@ -67,6 +73,21 @@ def run_weather_llm_pipeline(
     query = query if isinstance(query, str) else ""
     history = state.get("history", [])
     history = history if isinstance(history, list) else []
+    previous_weather_session = _normalized_weather_session(
+        state.get("weather_session")
+    )
+    relevant_history = _weather_conversation_messages(
+        query,
+        history,
+        weather_session=previous_weather_session,
+    )
+    last_resolved_request = (
+        previous_weather_session.get("last_resolved_request", {})
+        if previous_weather_session.get("active") is True
+        else {}
+    )
+    if not isinstance(last_resolved_request, dict):
+        last_resolved_request = {}
 
     usage: dict[str, Any] = {"call_1": {}}
     extraction: dict[str, Any] = {}
@@ -106,7 +127,11 @@ def run_weather_llm_pipeline(
                 )
             extraction = pipeline_client.chat_structured_json(
                 WEATHER_PIPELINE_EXTRACTION_SYSTEM_PROMPT,
-                _pipeline_extraction_message(query, history),
+                _pipeline_extraction_message(
+                    query,
+                    relevant_history,
+                    last_resolved_request,
+                ),
                 response_schema=WeatherExtractionResponse,
             )
             usage["call_1"] = _pipeline_client_usage(pipeline_client)
@@ -242,8 +267,16 @@ def run_weather_llm_pipeline(
         )
 
     normalized_status = status if status in _WEATHER_PIPELINE_STATUSES else "error"
+    resolved_request = _resolved_weather_request(extraction)
     final_answer = ""
-    if normalized_status == "needs_clarification" and pipeline_client is not None:
+    response_mode = (
+        "clarification"
+        if normalized_status == "needs_clarification"
+        else "weather_response"
+        if normalized_status == "completed"
+        else ""
+    )
+    if response_mode and pipeline_client is not None:
         try:
             if not hasattr(pipeline_client, "chat_text"):
                 raise TypeError("Weather pipeline client must provide chat_text().")
@@ -251,14 +284,12 @@ def run_weather_llm_pipeline(
                 WEATHER_PIPELINE_RESPONSE_SYSTEM_PROMPT,
                 _pipeline_response_message(
                     query=query,
-                    history=history,
+                    relevant_history=relevant_history,
                     extraction=extraction,
-                    status=normalized_status,
+                    response_mode=response_mode,
                     validation_result=validation_result,
-                    canonical_request=canonical_request,
-                    redis_result=redis_result,
-                    redis_error=redis_error,
-                    processing_error=weather_error,
+                    resolved_request=resolved_request,
+                    weather_data=weather_data,
                 ),
             )
             usage["call_2"] = _pipeline_client_usage(pipeline_client)
@@ -267,9 +298,13 @@ def run_weather_llm_pipeline(
             final_answer = strip_thought_tags(final_answer)
             if not final_answer:
                 raise ValueError("LLM2 returned an empty response after sanitization.")
-        except Exception as exc:  # noqa: BLE001 - LLM2 has no fallback response
-            status = "error"
-            final_answer = _WEATHER_PIPELINE_ERROR_ANSWER
+        except Exception as exc:  # noqa: BLE001 - external LLM boundary
+            if normalized_status == "completed":
+                status = "completed"
+                final_answer = _WEATHER_RESPONSE_FALLBACK
+            else:
+                status = "error"
+                final_answer = _WEATHER_PIPELINE_ERROR_ANSWER
             weather_error = _pipeline_error(
                 stage="llm2_response",
                 code=(
@@ -288,12 +323,16 @@ def run_weather_llm_pipeline(
                 stage="llm2_response",
                 code=weather_error["code"],
                 pre_llm2_status=normalized_status,
-                final_status="error",
+                final_status=status,
                 message=weather_error["message"],
             )
-    elif normalized_status == "needs_clarification":
-        status = "error"
-        final_answer = _WEATHER_PIPELINE_ERROR_ANSWER
+    elif response_mode:
+        if normalized_status == "completed":
+            status = "completed"
+            final_answer = _WEATHER_RESPONSE_FALLBACK
+        else:
+            status = "error"
+            final_answer = _WEATHER_PIPELINE_ERROR_ANSWER
         weather_error = _pipeline_error(
             stage="llm2_response",
             code="llm2_api_error",
@@ -308,7 +347,7 @@ def run_weather_llm_pipeline(
             stage="llm2_response",
             code="llm2_api_error",
             pre_llm2_status=normalized_status,
-            final_status="error",
+            final_status=status,
         )
     elif normalized_status == "unavailable":
         final_answer = _WEATHER_DATA_UNAVAILABLE_ANSWER
@@ -322,6 +361,14 @@ def run_weather_llm_pipeline(
         "cache_stats": {"weather": _pipeline_store_stats(store)},
         "timings": {"weather": _elapsed_since(started_at)},
         "llm_usage": {"weather": usage},
+        "weather_session": _next_weather_session(
+            previous_weather_session,
+            status=status,
+            extraction=extraction,
+            resolved_request=resolved_request,
+            canonical_request=canonical_request,
+            query=query,
+        ),
     }
     if status == "completed" and isinstance(weather_data, dict):
         update["weather_data"] = weather_data
@@ -330,11 +377,16 @@ def run_weather_llm_pipeline(
     return update
 
 
-def _pipeline_extraction_message(query: str, history: list[Any]) -> str:
+def _pipeline_extraction_message(
+    query: str,
+    relevant_history: list[dict[str, str]],
+    last_resolved_request: dict[str, Any],
+) -> str:
     return json.dumps(
         {
             "query": query,
-            "relevant_history": _weather_conversation_messages(query, history),
+            "relevant_history": relevant_history,
+            "last_resolved_request": last_resolved_request,
         },
         ensure_ascii=False,
         sort_keys=True,
@@ -344,50 +396,363 @@ def _pipeline_extraction_message(query: str, history: list[Any]) -> str:
 def _pipeline_response_message(
     *,
     query: str,
-    history: list[Any],
+    relevant_history: list[dict[str, str]],
     extraction: dict[str, Any],
-    status: str,
+    response_mode: str,
     validation_result: dict[str, Any],
-    canonical_request: dict[str, Any],
-    redis_result: dict[str, Any] | None,
-    redis_error: dict[str, Any] | None,
-    processing_error: dict[str, Any],
+    resolved_request: dict[str, Any],
+    weather_data: dict[str, Any] | None,
 ) -> str:
-    return json.dumps(
-        {
+    if response_mode == "clarification":
+        payload = {
             "query": query,
-            "relevant_history": _weather_conversation_messages(query, history),
+            "relevant_history": relevant_history,
+            "response_mode": response_mode,
             "extraction": extraction,
-            "status": status,
-            "clarification_target": _pipeline_clarification_target(
-                validation_result
+            "clarification_context": _pipeline_clarification_context(
+                validation_result,
             ),
-            "validation_result": validation_result,
-            "canonical_request": canonical_request,
-            "redis_result": redis_result,
-            "redis_error": redis_error,
-            "processing_error": processing_error,
-        },
+        }
+    elif response_mode == "weather_response":
+        payload = {
+            "query": query,
+            "relevant_history": relevant_history,
+            "response_mode": response_mode,
+            "resolved_request": resolved_request,
+            "weather_facts": _weather_facts_for_llm(weather_data),
+        }
+    else:
+        raise ValueError(f"Unsupported weather response mode: {response_mode!r}")
+
+    return json.dumps(
+        payload,
         ensure_ascii=False,
         sort_keys=True,
     )
 
 
-def _pipeline_clarification_target(
-    validation_result: dict[str, Any],
-) -> dict[str, str] | None:
-    if validation_result.get("status") != "needs_clarification":
+def _resolved_weather_request(
+    extraction: dict[str, Any],
+) -> dict[str, Any]:
+    """Return the complete LLM1-resolved slots accepted for this turn."""
+
+    return {
+        field: extraction.get(field)
+        for field in (
+            "location_text",
+            "date_text",
+            "time_of_day_text",
+            "normalized_time",
+            "request_type_candidate",
+        )
+    }
+
+
+def _normalized_weather_session(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    session = dict(value)
+    session["active"] = session.get("active") is True
+    last_resolved = session.get("last_resolved_request")
+    session["last_resolved_request"] = (
+        dict(last_resolved) if isinstance(last_resolved, dict) else {}
+    )
+    return session
+
+
+def _next_weather_session(
+    previous: dict[str, Any],
+    *,
+    status: str,
+    extraction: dict[str, Any],
+    resolved_request: dict[str, Any],
+    canonical_request: dict[str, Any],
+    query: str,
+) -> dict[str, Any]:
+    workflow_id = previous.get("workflow_id")
+    if (
+        previous.get("active") is not True
+        or not isinstance(workflow_id, str)
+        or not workflow_id.strip()
+    ):
+        workflow_id = f"weather_{uuid4().hex}"
+
+    last_resolved = previous.get("last_resolved_request", {})
+    last_canonical = previous.get("last_canonical_request", {})
+    if status == "completed":
+        last_resolved = resolved_request
+        last_canonical = canonical_request
+
+    return {
+        "schema_version": "weather.session.v1",
+        "workflow_id": workflow_id,
+        "active": True,
+        "last_status": status,
+        "last_query": query,
+        "last_resolved_request": (
+            dict(last_resolved) if isinstance(last_resolved, dict) else {}
+        ),
+        "last_canonical_request": (
+            dict(last_canonical) if isinstance(last_canonical, dict) else {}
+        ),
+        "pending_extraction": (
+            dict(extraction) if status == "needs_clarification" else {}
+        ),
+    }
+
+
+def _weather_facts_for_llm(
+    weather_data: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Flatten rendered Weather data into the minimum factual LLM2 payload."""
+
+    if not isinstance(weather_data, dict):
         return None
+    raw_data = weather_data.get("data")
+    raw_data = raw_data if isinstance(raw_data, dict) else {}
+    location = raw_data.get("location")
+    location = location if isinstance(location, dict) else {}
+    place = _optional_text(location.get("name")) or _optional_text(
+        weather_data.get("location")
+    )
+    forecast = raw_data.get("forecast")
+    if isinstance(forecast, dict):
+        selection = forecast.get("hourly_selection")
+        if isinstance(selection, dict):
+            return _hourly_weather_facts(place, forecast, selection)
+        return _daily_weather_facts(place, forecast)
+
+    current = raw_data.get("current")
+    if isinstance(current, dict):
+        return _current_weather_facts(place, current)
+    return None
+
+
+def _current_weather_facts(
+    place: str | None,
+    current: dict[str, Any],
+) -> dict[str, Any]:
+    temperature = _dict_value(current.get("temperature"))
+    wind = _dict_value(current.get("wind"))
+    return _without_empty_values(
+        {
+            "kind": "current",
+            "place": place,
+            "observed_at": current.get("observed_at_local"),
+            "condition": _condition_description(current.get("condition")),
+            "temp_c": temperature.get("current_celsius"),
+            "feels_c": temperature.get("feels_like_celsius"),
+            "humidity_pct": current.get("humidity_percent"),
+            "pressure_hpa": current.get("pressure_hpa"),
+            "wind_ms": wind.get("speed_mps"),
+            "wind_deg": wind.get("degrees", wind.get("direction_degrees")),
+            "cloud_pct": current.get("cloudiness_percent"),
+        }
+    )
+
+
+def _hourly_weather_facts(
+    place: str | None,
+    forecast: dict[str, Any],
+    selection: dict[str, Any],
+) -> dict[str, Any]:
+    raw_days = forecast.get("days")
+    days = raw_days if isinstance(raw_days, list) else []
+    day = next((item for item in days if isinstance(item, dict)), {})
+    raw_intervals = day.get("intervals")
+    intervals = raw_intervals if isinstance(raw_intervals, list) else []
+    interval = next((item for item in intervals if isinstance(item, dict)), {})
+    return _without_empty_values(
+        {
+            "kind": "hourly_forecast",
+            "place": place,
+            "date": day.get("date"),
+            "requested_time": selection.get("requested_time_of_day"),
+            "matched_interval_start": selection.get(
+                "matched_interval_start_time"
+            ),
+            "matched_interval_end": _matched_interval_end(selection),
+            "resolution_min": selection.get("resolution_minutes"),
+            "forecast_at": interval.get("forecast_at_local"),
+            "condition": _condition_description(interval.get("condition")),
+            "temp_c": interval.get("temperature_celsius"),
+            "feels_c": interval.get("feels_like_celsius"),
+            "humidity_pct": interval.get("humidity_percent"),
+            "rain_pct": _probability_percent(interval.get("rain_probability")),
+            "rain_mm": interval.get("rain_1h_mm"),
+            "pressure_hpa": interval.get("pressure_hpa"),
+            "wind_ms": interval.get("wind_speed_mps"),
+            "wind_deg": interval.get("wind_degrees"),
+            "cloud_pct": interval.get("cloudiness_percent"),
+        }
+    )
+
+
+def _daily_weather_facts(
+    place: str | None,
+    forecast: dict[str, Any],
+) -> dict[str, Any]:
+    raw_days = forecast.get("days")
+    raw_days = raw_days if isinstance(raw_days, list) else []
+    days: list[dict[str, Any]] = []
+    for raw_day in raw_days:
+        if not isinstance(raw_day, dict):
+            continue
+        temperature = _dict_value(raw_day.get("temperature"))
+        days.append(
+            _without_empty_values(
+                {
+                    "date": raw_day.get("date"),
+                    "condition": _condition_description(
+                        raw_day.get("condition")
+                    ),
+                    "conditions": raw_day.get("common_conditions"),
+                    "min_c": temperature.get("min_celsius"),
+                    "max_c": temperature.get("max_celsius"),
+                    "max_feels_c": raw_day.get(
+                        "temperature_feels_like_celsius"
+                    ),
+                    "rain_max_pct": _probability_percent(
+                        raw_day.get("max_rain_probability")
+                    ),
+                    "rain_total_mm": raw_day.get("total_rain_mm"),
+                    "humidity_avg_pct": raw_day.get("humidity_percent"),
+                    "pressure_avg_hpa": raw_day.get("pressure_hpa"),
+                    "wind_avg_ms": raw_day.get("wind_speed_mps"),
+                    "partial_day": raw_day.get("is_partial_day"),
+                }
+            )
+        )
+    return _without_empty_values(
+        {
+            "kind": "daily_forecast",
+            "place": place,
+            "days": days,
+        }
+    )
+
+
+def _matched_interval_end(selection: dict[str, Any]) -> str | None:
+    interval_start = _optional_text(selection.get("matched_interval_start_time"))
+    resolution = selection.get("resolution_minutes")
+    if interval_start is None:
+        return None
+    if not isinstance(resolution, int) or isinstance(resolution, bool):
+        return None
+    try:
+        parsed = datetime.strptime(interval_start, "%H:%M")
+    except ValueError:
+        return None
+    return (parsed + timedelta(minutes=resolution)).strftime("%H:%M")
+
+
+def _condition_description(value: Any) -> str | None:
+    condition = _dict_value(value)
+    return _optional_text(condition.get("description")) or _optional_text(
+        condition.get("main")
+    )
+
+
+def _probability_percent(value: Any) -> int | float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    percentage = value * 100 if 0 <= value <= 1 else value
+    rounded = round(percentage, 1)
+    return int(rounded) if rounded == int(rounded) else rounded
+
+
+def _dict_value(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _without_empty_values(value: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: item
+        for key, item in value.items()
+        if item is not None and item != "" and item != [] and item != {}
+    }
+
+
+def _pipeline_clarification_context(
+    validation_result: dict[str, Any],
+) -> dict[str, Any]:
+    if validation_result.get("status") != "needs_clarification":
+        return {}
     details = validation_result.get("details")
     details = details if isinstance(details, dict) else {}
-    field = details.get("field")
-    code = validation_result.get("code")
-    if not isinstance(field, str) or not field.strip():
-        return None
-    return {
-        "field": field.strip(),
-        "reason_code": str(code or "needs_clarification"),
+    missing_fields = _clarification_missing_fields(details.get("missing_fields"))
+    field = _clarification_field(
+        details.get("field"),
+        stage=validation_result.get("stage"),
+        missing_fields=missing_fields,
+    )
+    context: dict[str, Any] = {
+        "field": field,
+        "reason_code": str(
+            validation_result.get("code") or "needs_clarification"
+        ),
     }
+    requested_text = details.get("requested_text")
+    if isinstance(requested_text, str) and requested_text.strip():
+        context["requested_text"] = requested_text.strip()
+    if missing_fields:
+        context["missing_fields"] = missing_fields
+    candidates = details.get("candidates")
+    if isinstance(candidates, list) and candidates:
+        context["candidates"] = [
+            dict(candidate)
+            for candidate in candidates
+            if isinstance(candidate, dict)
+        ]
+
+    conflict_keys = (
+        "normalized_time",
+        "time_supported_by_text",
+        "provided_date",
+        "provided_weekday",
+        "actual_weekday",
+        "matching_weekday_date",
+        "required_format",
+    )
+    conflict_details = {
+        key: details[key]
+        for key in conflict_keys
+        if key in details and details[key] is not None
+    }
+    if conflict_details:
+        context["conflict_details"] = conflict_details
+    return context
+
+
+def _clarification_missing_fields(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [
+        field.strip()
+        for field in value
+        if isinstance(field, str) and field.strip()
+    ]
+
+
+def _clarification_field(
+    value: Any,
+    *,
+    stage: Any,
+    missing_fields: list[str],
+) -> str | None:
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    if missing_fields:
+        return {
+            "location": "location_text",
+            "date": "date_text",
+            "time": "time_of_day_text",
+        }.get(missing_fields[0], missing_fields[0])
+    if stage == "location":
+        return "location_text"
+    if stage == "time":
+        return "date_text"
+    return None
 
 
 def _pipeline_missing_extraction_fields(extraction: dict[str, Any]) -> list[str]:
@@ -1188,9 +1553,17 @@ def _collect_available_fields(value: Any, prefix: str, fields: list[str]) -> Non
 
 def _weather_conversation_messages(
     query: str,
-    history: list[dict[str, str]],
+    history: list[dict[str, Any]],
+    *,
+    weather_session: dict[str, Any] | None = None,
 ) -> list[dict[str, str]]:
-    messages: list[dict[str, str]] = []
+    session = weather_session if isinstance(weather_session, dict) else {}
+    active = session.get("active") is True
+    workflow_id = session.get("workflow_id")
+    workflow_id = workflow_id if isinstance(workflow_id, str) else ""
+    has_session_boundary = bool(workflow_id) or "active" in session
+
+    valid_history: list[dict[str, Any]] = []
     for message in history:
         if not isinstance(message, dict):
             continue
@@ -1199,14 +1572,43 @@ def _weather_conversation_messages(
         if role not in {"user", "assistant"} or not isinstance(content, str):
             continue
         if content.strip():
-            messages.append({"role": role, "content": content})
-    if not (
-        messages
-        and messages[-1]["role"] == "user"
-        and messages[-1]["content"] == query
+            valid_history.append(message)
+
+    # The current query can already be present in app history. It is supplied
+    # separately to both LLM stages, so exclude it from relevant_history.
+    if (
+        valid_history
+        and valid_history[-1].get("role") == "user"
+        and valid_history[-1].get("content") == query
     ):
-        messages.append({"role": "user", "content": query})
-    return messages
+        valid_history = valid_history[:-1]
+
+    selected: list[dict[str, str]] = []
+    tagged_history = any(
+        isinstance(message.get("domain"), str) for message in valid_history
+    )
+    if active and tagged_history:
+        for message in reversed(valid_history):
+            domain = message.get("domain")
+            message_workflow_id = message.get("workflow_id")
+            if domain != "weather":
+                break
+            if workflow_id and message_workflow_id not in {None, "", workflow_id}:
+                break
+            selected.append(
+                {"role": str(message["role"]), "content": str(message["content"])}
+            )
+            if len(selected) >= _WEATHER_HISTORY_LIMIT:
+                break
+        selected.reverse()
+    elif not tagged_history and (active or not has_session_boundary):
+        # Compatibility for terminal/tests that predate domain metadata.
+        selected = [
+            {"role": str(message["role"]), "content": str(message["content"])}
+            for message in valid_history[-_WEATHER_HISTORY_LIMIT:]
+        ]
+
+    return selected[-_WEATHER_HISTORY_LIMIT:]
 
 
 def _elapsed_since(started_at: float) -> float:

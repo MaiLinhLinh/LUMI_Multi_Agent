@@ -5,6 +5,7 @@ import pytest
 from rag_manager.agents.manager import classify_intent
 from rag_manager.agents.manager_structured_schema import ManagerPlanResponse
 from rag_manager.llm.gemini_client import GeminiRequestError
+from rag_manager.llm.prompts import MANAGER_SYSTEM_PROMPT
 
 
 class FakeGeminiClient:
@@ -83,6 +84,28 @@ def test_manager_sends_current_query_with_empty_relevant_history() -> None:
         "query": "Albert Einstein là ai?",
         "relevant_history": [],
     }
+
+
+def test_manager_routes_music_without_inventing_music_metadata() -> None:
+    client = FakeGeminiClient(
+        {
+            "topics": ["music"],
+            "execution_mode": "single",
+            "primary_intent": "music",
+            "dependencies": [],
+            "news_query": "",
+            "wiki_topic": "",
+        }
+    )
+
+    plan = classify_intent(client, "Bật nhạc Sơn Tùng")
+
+    assert plan["topics"] == ["music"]
+    assert plan["primary_intent"] == "music"
+    assert plan["news_query"] == ""
+    assert plan["wiki_topic"] == ""
+    assert "YouTube URL" in MANAGER_SYSTEM_PROMPT
+    assert "artist biographies" in MANAGER_SYSTEM_PROMPT
 
 
 def test_manager_sends_relevant_history_for_short_weather_follow_up() -> None:

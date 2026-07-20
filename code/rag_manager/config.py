@@ -65,6 +65,15 @@ class Settings:
     weather_snapshot_max_age_seconds: int = 14400
     weather_refresh_interval_seconds: int = 10800
     weather_locations_file: str = ""
+    music_chroma_path: str = "data/chroma_music"
+    music_chroma_collection: str = "music_tracks_v1"
+    music_catalog_file: str = ""
+    ollama_base_url: str = "http://localhost:11434"
+    music_embedding_model: str = "bge-m3"
+    music_embedding_dimensions: int = 1024
+    music_embedding_batch_size: int = 16
+    music_embedding_timeout_seconds: int = 120
+    youtube_api_key: str = ""
 
     @property
     def has_gemini_key(self) -> bool:
@@ -100,4 +109,31 @@ def load_settings() -> Settings:
             "WEATHER_REFRESH_INTERVAL_SECONDS", 10800
         ),
         weather_locations_file=os.getenv("WEATHER_LOCATIONS_FILE", "").strip(),
+        music_chroma_path=os.getenv(
+            "MUSIC_CHROMA_PATH", "data/chroma_music"
+        ).strip()
+        or "data/chroma_music",
+        music_chroma_collection=os.getenv(
+            "MUSIC_CHROMA_COLLECTION", "music_tracks_v1"
+        ).strip()
+        or "music_tracks_v1",
+        music_catalog_file=os.getenv("MUSIC_CATALOG_FILE", "").strip(),
+        ollama_base_url=os.getenv(
+            "OLLAMA_BASE_URL", "http://localhost:11434"
+        ).strip()
+        or "http://localhost:11434",
+        music_embedding_model=os.getenv(
+            "MUSIC_EMBEDDING_MODEL", "bge-m3"
+        ).strip()
+        or "bge-m3",
+        music_embedding_dimensions=_get_int_env(
+            "MUSIC_EMBEDDING_DIMENSIONS", 1024
+        ),
+        music_embedding_batch_size=_get_int_env(
+            "MUSIC_EMBEDDING_BATCH_SIZE", 16
+        ),
+        music_embedding_timeout_seconds=_get_int_env(
+            "MUSIC_EMBEDDING_TIMEOUT_SECONDS", 120
+        ),
+        youtube_api_key=os.getenv("YOUTUBE_API_KEY", "").strip(),
     )

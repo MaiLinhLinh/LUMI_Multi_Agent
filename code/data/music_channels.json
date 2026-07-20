@@ -1,0 +1,16 @@
+{
+  "channels_version": "music.youtube-channels.v1",
+  "channels": [
+    {
+      "artist": "Sơn Tùng M-TP",
+      "channel_id": "UClyA28-01x4z60eWQ2kiNbA",
+      "confirmed_official": true,
+      "active": true,
+      "language": "vi",
+      "genres": [],
+      "moods": [],
+      "tags": ["nhạc Việt"],
+      "min_duration_seconds": 90
+    }
+  ]
+}

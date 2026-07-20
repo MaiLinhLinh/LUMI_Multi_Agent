@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -29,6 +30,19 @@ from rag_manager.config import load_settings
 BASE_DIR = Path(__file__).resolve().parent
 WEB_DIR = BASE_DIR / "web"
 MAX_QUERY_CHARS = 8_000
+YOUTUBE_VIDEO_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{11}$")
+PUBLIC_MUSIC_FIELDS = {
+    "source_id",
+    "track_id",
+    "title",
+    "artist",
+    "artists",
+    "video_id",
+    "content_type",
+    "version",
+    "duration_seconds",
+    "release_date",
+}
 
 
 @dataclass
@@ -38,6 +52,8 @@ class ChatSession:
     messages: list[dict[str, Any]] = field(default_factory=list)
     workflow_context: dict[str, Any] = field(default_factory=dict)
     active_visualization_html: str = ""
+    active_panel: dict[str, Any] = field(default_factory=dict)
+    active_panel_revision: int = 0
     updated_at: float = field(default_factory=time.monotonic)
     lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
 
@@ -116,18 +132,26 @@ class WebChatService:
 
                 _print_terminal_metrics(result)
                 session.workflow_context.update(_session_context_from_result(result))
-                new_html_path = _visualization_path(result)
-                if new_html_path:
-                    session.active_visualization_html = _read_rendered_template(
-                        new_html_path
+                message_metadata = _conversation_metadata(result)
+                user_message.update(message_metadata)
+                panel_update = _active_panel_update(result)
+                if panel_update:
+                    session.active_panel = panel_update
+                    session.active_panel_revision += 1
+                    session.active_visualization_html = (
+                        str(panel_update.get("html", ""))
+                        if panel_update.get("ui_type") == "weather"
+                        else ""
                     )
 
                 assistant_message = {
                     "role": "assistant",
-                    "content": _assistant_content(result, has_new_html=bool(new_html_path)),
-                    # The deterministic dashboard notice is UI-only. Excluding it keeps
-                    # Weather LLM1 focused on the user's actual wording in later turns.
-                    "include_in_history": not bool(new_html_path),
+                    "content": _assistant_content(
+                        result,
+                        panel_type=str(panel_update.get("ui_type", "")),
+                    ),
+                    "include_in_history": True,
+                    **message_metadata,
                 }
                 session.messages.append(assistant_message)
                 session.updated_at = time.monotonic()
@@ -161,6 +185,52 @@ def _visualization_path(result: dict[str, Any]) -> str:
     return ""
 
 
+def _active_panel_update(result: dict[str, Any]) -> dict[str, Any]:
+    """Return only a panel produced by the current domain turn."""
+
+    weather_panel: dict[str, Any] = {}
+    html_path = _visualization_path(result)
+    if html_path:
+        weather_panel = {
+            "ui_type": "weather",
+            "html": _read_rendered_template(html_path),
+        }
+
+    music_panel: dict[str, Any] = {}
+    if result.get("music_status") == "completed":
+        raw_player = result.get("music_player")
+        if (
+            isinstance(raw_player, dict)
+            and raw_player.get("schema_version") == "music.youtube-player.v1"
+            and raw_player.get("ui_type") == "youtube_player"
+            and raw_player.get("player_action") in {"play", "replay", "stop"}
+            and isinstance(raw_player.get("music"), dict)
+        ):
+            raw_music = raw_player["music"]
+            video_id = raw_music.get("video_id")
+            if (
+                isinstance(video_id, str)
+                and YOUTUBE_VIDEO_ID_PATTERN.fullmatch(video_id)
+            ):
+                music_panel = {
+                    "schema_version": "music.youtube-player.v1",
+                    "status": "completed",
+                    "ui_type": "youtube_player",
+                    "player_action": raw_player["player_action"],
+                    "music": {
+                        key: value
+                        for key, value in raw_music.items()
+                        if key in PUBLIC_MUSIC_FIELDS
+                    },
+                }
+
+    if weather_panel and music_panel:
+        intent = result.get("intent", {})
+        primary = intent.get("primary_intent") if isinstance(intent, dict) else None
+        return music_panel if primary == "music" else weather_panel
+    return music_panel or weather_panel
+
+
 def _read_rendered_template(html_path: str) -> str:
     path = Path(html_path).expanduser()
     if not path.is_file():
@@ -168,14 +238,30 @@ def _read_rendered_template(html_path: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def _assistant_content(result: dict[str, Any], *, has_new_html: bool) -> str:
-    if has_new_html:
-        return "Đã cập nhật kết quả thời tiết ở bảng bên trái."
+def _assistant_content(result: dict[str, Any], *, panel_type: str) -> str:
     return _response_from_result(result)
 
 
-def _workflow_history(messages: list[dict[str, Any]]) -> list[dict[str, str]]:
-    history: list[dict[str, str]] = []
+def _conversation_metadata(result: dict[str, Any]) -> dict[str, str]:
+    selected = result.get("selected_agents")
+    selected = selected if isinstance(selected, list) else []
+    if len(selected) == 1 and selected[0] in {"weather", "news", "wiki", "music"}:
+        domain = str(selected[0])
+    else:
+        domain = "other"
+
+    metadata = {"domain": domain}
+    if domain == "weather":
+        weather_session = result.get("weather_session")
+        if isinstance(weather_session, dict):
+            workflow_id = weather_session.get("workflow_id")
+            if isinstance(workflow_id, str) and workflow_id.strip():
+                metadata["workflow_id"] = workflow_id.strip()
+    return metadata
+
+
+def _workflow_history(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    history: list[dict[str, Any]] = []
     for message in messages:
         role = message.get("role")
         content = message.get("content")
@@ -185,7 +271,12 @@ def _workflow_history(messages: list[dict[str, Any]]) -> list[dict[str, str]]:
             and isinstance(content, str)
             and content.strip()
         ):
-            history.append({"role": role, "content": content})
+            item: dict[str, Any] = {"role": role, "content": content}
+            for key in ("domain", "workflow_id"):
+                value = message.get(key)
+                if isinstance(value, str) and value.strip():
+                    item[key] = value.strip()
+            history.append(item)
     return history
 
 
@@ -204,11 +295,20 @@ def _session_payload(session_id: str, session: ChatSession) -> dict[str, Any]:
         }
         for message in session.messages
     ]
+    active_panel = dict(session.active_panel)
+    has_active_panel = active_panel.get("ui_type") in {
+        "weather",
+        "youtube_player",
+    }
     return {
         "ok": True,
         "session_id": session_id,
         "messages": public_messages,
-        "has_visualization": bool(session.active_visualization_html),
+        "has_active_panel": has_active_panel,
+        "active_panel": active_panel,
+        "active_panel_revision": session.active_panel_revision,
+        # Compatibility fields for existing Weather-only clients.
+        "has_visualization": has_active_panel,
         "visualization_html": session.active_visualization_html,
     }
 

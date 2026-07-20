@@ -1,0 +1,29 @@
+{
+  "client": {
+    "type": "PersistentClient",
+    "path": "data/chroma_music"
+  },
+  "collection": {
+    "name": "music_tracks_v1",
+    "configuration": {
+      "hnsw": {
+        "space": "cosine"
+      }
+    }
+  },
+  "dense_retrieval": {
+    "embedding_model": "bge-m3",
+    "embedding_dimensions": 1024,
+    "top_k": 50
+  },
+  "lexical_retrieval": {
+    "engine": "python_bm25",
+    "text_source": "documents",
+    "top_k": 50
+  },
+  "fusion": {
+    "method": "rrf",
+    "rrf_k": 60,
+    "output_top_k": 5
+  }
+}

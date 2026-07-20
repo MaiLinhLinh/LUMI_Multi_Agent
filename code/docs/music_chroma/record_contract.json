@@ -1,0 +1,97 @@
+{
+  "contract_version": "music.chroma-source.v1",
+  "record_model": "one_primary_playable_youtube_source_per_track",
+  "id": {
+    "type": "string",
+    "description": "Stable ID of the one selected primary YouTube source."
+  },
+  "document": {
+    "type": "string",
+    "description": "Normalized retrieval text used by dense embedding and BM25."
+  },
+  "embedding": {
+    "type": "array<double>",
+    "dimensions": 1024,
+    "description": "BGE-M3 dense embedding returned by Ollama."
+  },
+  "metadata": {
+    "flat_only": true,
+    "required": [
+      "schema_version",
+      "track_id",
+      "canonical_key",
+      "title",
+      "normalized_title",
+      "artist_names",
+      "artist_keys",
+      "language",
+      "release_date",
+      "release_date_epoch",
+      "release_date_precision",
+      "release_date_origin",
+      "popularity_score",
+      "platform",
+      "video_id",
+      "content_type",
+      "version",
+      "channel_id",
+      "channel_name",
+      "is_official",
+      "embeddable",
+      "published_at",
+      "published_at_epoch",
+      "thumbnail_url",
+      "duration_seconds",
+      "view_count",
+      "like_count",
+      "track_active",
+      "review_required",
+      "source_active",
+      "embedding_model",
+      "embedding_version",
+      "created_at",
+      "updated_at"
+    ],
+    "array_string_fields": [
+      "artist_names",
+      "artist_keys",
+      "genres",
+      "moods",
+      "tags"
+    ],
+    "optional_fields": [
+      "genres",
+      "moods",
+      "tags",
+      "youtube_status"
+    ],
+    "boolean_fields": [
+      "is_official",
+      "embeddable",
+      "track_active",
+      "source_active",
+      "review_required"
+    ],
+    "numeric_fields": [
+      "release_date_epoch",
+      "popularity_score",
+      "published_at_epoch",
+      "duration_seconds",
+      "embedding_version",
+      "view_count",
+      "like_count"
+    ],
+    "content_type_values": [
+      "official_mv",
+      "official_audio",
+      "lyric_video",
+      "live",
+      "remix",
+      "acoustic",
+      "karaoke",
+      "performance",
+      "teaser",
+      "other"
+    ]
+  }
+}

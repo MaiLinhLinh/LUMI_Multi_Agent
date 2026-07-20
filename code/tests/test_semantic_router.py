@@ -180,5 +180,9 @@ def test_complete_domain_patterns_can_bypass_llm() -> None:
         "weather forecast for Hanoi",
         "latest news about technology",
         "who is Albert Einstein",
+        "Bật nhạc Sơn Tùng",
+        "Cho tôi nghe nhạc thư giãn",
+        "Mở bài Chúng ta của tương lai",
+        "Play song Shape of You",
     )
     assert all(is_high_confidence_domain_query(query) for query in queries)

@@ -194,15 +194,33 @@ def test_weather_pipeline_completes_current_request(monkeypatch) -> None:
     )
 
     assert result["weather_status"] == "completed"
-    assert result["weather_answer"] == ""
-    assert result["final_response"] == ""
+    assert result["weather_answer"] == client.answer
+    assert result["final_response"] == client.answer
     assert result["weather_data"]["data_type"] == "current"
     assert store.current_calls == ["ha_noi"]
     assert resolver.calls == ["Hà Nội"]
-    assert [call[0] for call in client.calls] == ["extraction"]
+    assert [call[0] for call in client.calls] == ["extraction", "response"]
     assert client.extraction_response_schema is WeatherExtractionResponse
     assert result["llm_usage"]["weather"]["call_1"]["prompt_tokens"] == 20
-    assert "call_2" not in result["llm_usage"]["weather"]
+    assert result["llm_usage"]["weather"]["call_2"]["prompt_tokens"] == 30
+    response_context = json.loads(client.calls[1][1])
+    assert set(response_context) == {
+        "query",
+        "relevant_history",
+        "response_mode",
+        "resolved_request",
+        "weather_facts",
+    }
+    assert response_context["response_mode"] == "weather_response"
+    assert response_context["weather_facts"] == {
+        "kind": "current",
+        "place": "Hà Nội",
+        "condition": "có mây",
+        "temp_c": 30,
+    }
+    assert result["weather_session"]["last_resolved_request"][
+        "location_text"
+    ] == client.extraction["location_text"]
 
 
 def test_weather_pipeline_missing_location_never_reads_redis() -> None:
@@ -232,6 +250,19 @@ def test_weather_pipeline_missing_location_never_reads_redis() -> None:
     assert [call[0] for call in client.calls] == ["extraction", "response"]
     assert result["llm_usage"]["weather"]["call_2"]["prompt_tokens"] == 30
     assert "weather_data" not in result
+    response_context = json.loads(client.calls[1][1])
+    assert set(response_context) == {
+        "query",
+        "relevant_history",
+        "response_mode",
+        "extraction",
+        "clarification_context",
+    }
+    assert response_context["clarification_context"] == {
+        "field": "location_text",
+        "reason_code": "missing_weather_requirements",
+        "missing_fields": ["location"],
+    }
 
 
 def test_weather_pipeline_tells_llm2_the_exact_invalid_date_field(
@@ -262,11 +293,10 @@ def test_weather_pipeline_tells_llm2_the_exact_invalid_date_field(
 
     response_context = json.loads(client.calls[1][1])
     assert result["weather_status"] == "needs_clarification"
-    assert response_context["validation_result"]["code"] == "unrecognized_date"
-    assert response_context["validation_result"]["details"]["field"] == "date_text"
-    assert response_context["clarification_target"] == {
+    assert response_context["clarification_context"] == {
         "field": "date_text",
         "reason_code": "unrecognized_date",
+        "requested_text": "sáng mai",
     }
 
 
@@ -557,7 +587,7 @@ def test_weather_pipeline_selects_only_the_requested_hour(monkeypatch) -> None:
     )
 
     assert result["weather_status"] == "completed"
-    assert [call[0] for call in client.calls] == ["extraction"]
+    assert [call[0] for call in client.calls] == ["extraction", "response"]
     selected = result["weather_data"]["data"]["forecast"]
     assert selected["hourly_selection"]["requested_time_of_day"] == "09:30"
     assert selected["hourly_selection"]["matched_interval_start_time"] == "09:00"
@@ -581,6 +611,19 @@ def test_weather_pipeline_selects_only_the_requested_hour(monkeypatch) -> None:
         "matched_interval_end_time": "10:00",
         "interval_notice": "Dữ liệu theo khung giờ 09:00–10:00.",
         "source_granularity": "1-hour forecast intervals",
+    }
+    response_context = json.loads(client.calls[1][1])
+    assert "weather_data" not in response_context
+    assert response_context["weather_facts"] == {
+        "kind": "hourly_forecast",
+        "place": "Hà Nội",
+        "date": "2026-07-16",
+        "requested_time": "09:30",
+        "matched_interval_start": "09:00",
+        "matched_interval_end": "10:00",
+        "resolution_min": 60,
+        "forecast_at": "2026-07-16T09:00:00+07:00",
+        "temp_c": 29,
     }
 
 
@@ -745,3 +788,140 @@ def test_weather_visualization_data_ignores_blank_string_fields() -> None:
     assert "location.country" not in envelope["available_fields"]
     assert "current.condition.description" not in envelope["available_fields"]
     assert "current.temperature.current_celsius" in envelope["available_fields"]
+
+
+def test_weather_history_uses_only_active_weather_workflow() -> None:
+    history = [
+        {"role": "user", "content": "Thời tiết Huế hôm nay", "domain": "weather", "workflow_id": "old"},
+        {"role": "assistant", "content": "Huế có mưa", "domain": "weather", "workflow_id": "old"},
+        {"role": "user", "content": "Bật nhạc", "domain": "music"},
+        {"role": "assistant", "content": "Đang phát nhạc", "domain": "music"},
+        {"role": "user", "content": "Thời tiết Hà Nội ngày mai", "domain": "weather", "workflow_id": "current"},
+        {"role": "assistant", "content": "Bạn muốn xem lúc nào?", "domain": "weather", "workflow_id": "current"},
+        {"role": "user", "content": "9 giờ"},
+    ]
+
+    relevant = weather_agent._weather_conversation_messages(
+        "9 giờ",
+        history,
+        weather_session={"active": True, "workflow_id": "current"},
+    )
+
+    assert relevant == [
+        {"role": "user", "content": "Thời tiết Hà Nội ngày mai"},
+        {"role": "assistant", "content": "Bạn muốn xem lúc nào?"},
+    ]
+
+
+def test_inactive_weather_session_does_not_reuse_old_history() -> None:
+    relevant = weather_agent._weather_conversation_messages(
+        "Thời tiết thì sao?",
+        [
+            {
+                "role": "user",
+                "content": "Thời tiết Hà Nội ngày mai",
+                "domain": "weather",
+                "workflow_id": "weather-old",
+            }
+        ],
+        weather_session={"active": False, "workflow_id": "weather-old"},
+    )
+
+    assert relevant == []
+
+
+def test_weather_extraction_message_carries_last_resolved_request() -> None:
+    previous = {
+        "location_text": "Hà Nội",
+        "date_text": "ngày mai",
+        "time_of_day_text": None,
+        "normalized_time": None,
+        "request_type_candidate": "forecast",
+    }
+
+    payload = json.loads(
+        weather_agent._pipeline_extraction_message(
+            "9 giờ",
+            [],
+            previous,
+        )
+    )
+
+    assert payload["last_resolved_request"] == previous
+    assert payload["query"] == "9 giờ"
+
+
+def test_weather_llm_payload_uses_compact_daily_facts() -> None:
+    facts = weather_agent._weather_facts_for_llm(
+        {
+            "data_type": "forecast",
+            "data": {
+                "location": {"name": "Hà Nội"},
+                "current": None,
+                "presentation": None,
+                "forecast": {
+                    "requested_days": 1,
+                    "hourly_selection": None,
+                    "days": [
+                        {
+                            "date": "2026-07-21",
+                            "max_rain_probability": 0.6,
+                            "intervals": [{"time": "09:00"}, {"time": "10:00"}],
+                        }
+                    ],
+                },
+            },
+        }
+    )
+
+    assert facts == {
+        "kind": "daily_forecast",
+        "place": "Hà Nội",
+        "days": [{"date": "2026-07-21", "rain_max_pct": 60}],
+    }
+
+
+def test_completed_weather_keeps_data_when_llm2_fails(monkeypatch) -> None:
+    class FailingResponseClient(StubPipelineClient):
+        def chat_text(self, system_prompt: str, user_message: str) -> str:
+            self.calls.append(("response", user_message))
+            raise RuntimeError("LLM2 unavailable")
+
+    monkeypatch.setattr(
+        weather_agent,
+        "get_weather_location_resolver",
+        lambda _path=None: StubLocationResolver(),
+    )
+    client = FailingResponseClient(
+        {
+            "location_text": "Hà Nội",
+            "date_text": None,
+            "time_of_day_text": None,
+            "normalized_time": None,
+            "request_type_candidate": "current",
+        }
+    )
+    store = StubWeatherStore(
+        current={
+            "ok": True,
+            "data": {
+                "location": "Hà Nội",
+                "country": "VN",
+                "timezone_offset_seconds": 25200,
+                "temperature": {"current_celsius": 30},
+                "condition": {"description": "có mây"},
+            },
+        }
+    )
+
+    result = weather_agent.run_weather_llm_pipeline(
+        {"query": "Thời tiết Hà Nội hiện tại", "history": []},
+        store=store,
+        settings=_settings(),
+        client=client,
+    )
+
+    assert result["weather_status"] == "completed"
+    assert result["weather_data"]["data_type"] == "current"
+    assert result["weather_error"]["code"] == "llm2_api_error"
+    assert result["weather_answer"] == weather_agent._WEATHER_RESPONSE_FALLBACK

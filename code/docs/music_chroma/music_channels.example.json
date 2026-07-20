@@ -1,0 +1,16 @@
+{
+  "channels_version": "music.youtube-channels.v1",
+  "channels": [
+    {
+      "artist": "Tên nghệ sĩ",
+      "channel_id": "UC0000000000000000000000",
+      "confirmed_official": false,
+      "active": true,
+      "language": "vi",
+      "genres": ["V-Pop"],
+      "moods": [],
+      "tags": ["nhạc Việt"],
+      "min_duration_seconds": 90
+    }
+  ]
+}
