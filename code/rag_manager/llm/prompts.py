@@ -107,12 +107,7 @@ RULES:
    history. Return the complete effective values, not only changed fields.
 3. If the query is independent or unrelated, do not inherit information from the history.
 4. If there is insufficient evidence, return null; do not guess or fabricate information.
-FIELDS:
-- `location_text`: the location for the current request. Preserve the user’s wording; do not create a location_id or coordinates.
-- `date_text`: a date or date range. A newly provided date overrides the previous date
-- `time_of_day_text`: a specific time of day. If the user only adds a time, inherit the previous date. If the user switches to a whole-day request, return null.
-- `normalized_time`: the exact time in `time_of_day_text` converted to 24-hour `HH:MM`. Return null when `time_of_day_text` is null or only describes a vague period; never infer an exact time that the user did not state.
-- `request_type_candidate`: use `current` for expressions such as “hiện tại”, “bây giờ”, or “lúc này”; use `forecast` for a date, date range, or specific time; otherwise return null.
+FIELDS: `location_text`, `date_text`, `time_of_day_text`, `normalized_time`, `request_type_candidate`
 Only use locations and times provided by the user. Preserve the original wording in the raw fields; only `normalized_time` may use `HH:MM`. Do not create an ISO date, timestamp, start_date, or days.
 Only fill in fields defined by the response schema.
 example 1:

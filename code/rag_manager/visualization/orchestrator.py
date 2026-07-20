@@ -206,7 +206,10 @@ class VisualizationOrchestrator:
             )
 
         try:
-            template_id = request.template_id or _first_template_id(available_templates)
+            template_id = request.template_id or _auto_template_id(
+                envelope,
+                available_templates,
+            )
             if not template_id:
                 return VisualizationResult(
                     ok=False,
@@ -384,6 +387,43 @@ def _first_template_id(templates: list[dict[str, Any]]) -> str | None:
         return None
     template_id = templates[0].get("id")
     return template_id if isinstance(template_id, str) else None
+
+
+def _auto_template_id(
+    envelope: dict[str, Any],
+    templates: list[dict[str, Any]],
+) -> str | None:
+    """Select value-aware curated templates for deterministic auto-rendering."""
+
+    compatible_ids = {
+        template.get("id")
+        for template in templates
+        if isinstance(template, dict) and isinstance(template.get("id"), str)
+    }
+    if _is_single_day_forecast(envelope) and "weather_single_day" in compatible_ids:
+        return "weather_single_day"
+
+    # This template is value-scoped. Metadata alone cannot distinguish one
+    # forecast day from several days because both expose the same field paths.
+    general_templates = [
+        template
+        for template in templates
+        if template.get("id") != "weather_single_day"
+    ]
+    return _first_template_id(general_templates)
+
+
+def _is_single_day_forecast(envelope: dict[str, Any]) -> bool:
+    if envelope.get("domain") != "weather" or envelope.get("data_type") != "forecast":
+        return False
+    data = envelope.get("data")
+    if not isinstance(data, dict):
+        return False
+    forecast = data.get("forecast")
+    if not isinstance(forecast, dict) or isinstance(forecast.get("hourly_selection"), dict):
+        return False
+    days = forecast.get("days")
+    return isinstance(days, list) and len(days) == 1 and isinstance(days[0], dict)
 
 
 def _resolve_action_template_id(

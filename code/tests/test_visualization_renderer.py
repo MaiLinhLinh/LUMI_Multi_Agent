@@ -1,4 +1,5 @@
 import json
+import re
 
 from rag_manager.visualization.paths import resolve_asset_path
 from rag_manager.visualization.registry import lookup_template
@@ -16,6 +17,10 @@ def _weather_template_html() -> str:
 
 def _forecast_template_html() -> str:
     return lookup_template("weather_forecast").template_path.read_text(encoding="utf-8")
+
+
+def _single_day_template_html() -> str:
+    return lookup_template("weather_single_day").template_path.read_text(encoding="utf-8")
 
 
 def test_render_template_renders_current_weather_without_none_or_undefined() -> None:
@@ -100,6 +105,48 @@ def test_forecast_template_renders_one_card_per_day_and_nested_intervals() -> No
     assert "15:00" in html
     assert "<unsafe>" not in html
     assert "&lt;unsafe&gt;" in html
+
+
+def test_single_day_template_renders_summary_and_hourly_strip() -> None:
+    envelope = _load_sample("weather.forecast.v1")
+    day = envelope["data"]["forecast"]["days"][0]
+    day.update(
+        {
+            "condition": {"main": "Rain", "description": "mưa rào"},
+            "humidity_percent": 67,
+            "pressure_hpa": 1004.88,
+            "wind_speed_mps": 3.1,
+        }
+    )
+    day["intervals"][0]["time"] = "2026-07-11 09:00:00"
+
+    html = render_template(
+        _single_day_template_html(),
+        answer="Ngày mai có mưa rào.",
+        data=envelope["data"] | {"source": envelope["source"]},
+    )
+
+    assert "Ha Noi" in html
+    assert "Mưa rào" in html
+    assert "Ngày/Đêm" in html
+    assert "Xác suất mưa" in html
+    assert "Thấp/Cao" in html
+    assert "Áp suất" in html
+    assert "60%" in html
+    assert "09:00" in html
+    assert "12:00" in html
+    assert "2026-07-11 09:00:00" not in html
+    assert 'class="tab">Lượng mưa' not in html
+    assert 'class="tab">Gió' not in html
+    assert "Ngày mai có mưa rào." not in html
+
+    chart = re.search(r'<polyline[^>]+points="([^"]+)"', html)
+    assert chart is not None
+    y_coordinates = {
+        round(float(point.split(",")[1]), 3)
+        for point in chart.group(1).split()
+    }
+    assert len(y_coordinates) > 1
 
 
 def test_save_visualization_output_writes_html(tmp_path) -> None:

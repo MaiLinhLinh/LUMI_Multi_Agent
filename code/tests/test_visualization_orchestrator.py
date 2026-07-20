@@ -58,7 +58,7 @@ def test_orchestrator_auto_recommends_compatible_template(tmp_path) -> None:
     assert result.html_path is not None
 
 
-def test_orchestrator_uses_forecast_template_for_forecast_only_data(tmp_path) -> None:
+def test_orchestrator_uses_single_day_template_for_one_day_forecast(tmp_path) -> None:
     envelope = _load_sample("weather.forecast.v1")
     result = VisualizationOrchestrator().run(
         VisualizationRequest(
@@ -69,10 +69,30 @@ def test_orchestrator_uses_forecast_template_for_forecast_only_data(tmp_path) ->
     )
 
     assert result.ok is True
-    assert result.template_id == "weather_forecast"
+    assert result.template_id == "weather_single_day"
     assert "31" not in result.html
     assert "12:00" in result.html
-    assert "°C" in result.html
+    assert "Dự báo trong ngày" in result.html
+
+
+def test_orchestrator_uses_forecast_template_for_multi_day_forecast(tmp_path) -> None:
+    envelope = _load_sample("weather.forecast.v1")
+    second_day = json.loads(json.dumps(envelope["data"]["forecast"]["days"][0]))
+    second_day["date"] = "2026-07-12"
+    envelope["data"]["forecast"]["days"].append(second_day)
+
+    result = VisualizationOrchestrator().run(
+        VisualizationRequest(
+            domain_result={"weather_data": envelope, "answer": "Forecast answer."},
+            mode="auto",
+            output_dir=tmp_path,
+        )
+    )
+
+    assert result.ok is True
+    assert result.template_id == "weather_forecast"
+    assert "2026-07-11" in result.html
+    assert "2026-07-12" in result.html
 
 
 def test_orchestrator_uses_current_card_for_one_hour_forecast(tmp_path) -> None:

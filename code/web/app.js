@@ -128,7 +128,7 @@ function renderWeatherPanel(panel) {
   contentEyebrow.textContent = "Kết quả trực quan";
   contentTitle.textContent = "Thông tin thời tiết";
   contentBadge.textContent = "Dữ liệu từ Redis";
-  if (weatherFrame.srcdoc !== panel.html) weatherFrame.srcdoc = panel.html;
+  weatherFrame.srcdoc = panel.html;
 }
 
 function renderMusicPanel(panel) {

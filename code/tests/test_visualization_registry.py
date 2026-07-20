@@ -40,6 +40,7 @@ def test_list_templates_filters_by_domain() -> None:
     assert [template["id"] for template in weather_templates] == [
         "weather_basic",
         "weather_forecast",
+        "weather_single_day",
     ]
     assert list_templates(domain="news") == []
 

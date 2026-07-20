@@ -1,0 +1,73 @@
+{
+  "id": "weather_single_day",
+  "kind": "complete_template",
+  "domain": "weather",
+  "name": "Weather Single Day",
+  "description": "A focused one-day forecast card with a daily summary and hourly timeline.",
+  "template_file": "template.html",
+  "schema_versions": ["weather.forecast.v1"],
+  "required_fields": [
+    "location.name",
+    "forecast.days[].date",
+    "forecast.days[].intervals[].temperature_celsius"
+  ],
+  "optional_fields": [
+    "location.country",
+    "forecast.source_granularity",
+    "forecast.days[].temperature.min_celsius",
+    "forecast.days[].temperature.max_celsius",
+    "forecast.days[].max_rain_probability",
+    "forecast.days[].total_rain_mm",
+    "forecast.days[].condition.main",
+    "forecast.days[].condition.description",
+    "forecast.days[].humidity_percent",
+    "forecast.days[].wind_speed_mps",
+    "forecast.days[].intervals[].time",
+    "forecast.days[].intervals[].condition.main",
+    "forecast.days[].intervals[].condition.description",
+    "forecast.days[].intervals[].rain_probability"
+  ],
+  "tags": ["weather", "forecast", "single-day", "hourly"],
+  "display_scope": "single_day",
+  "fillable": true,
+  "style_targets": [
+    {
+      "id": "page_background",
+      "label": "nền toàn trang",
+      "selector": "body",
+      "properties": ["background_color"]
+    },
+    {
+      "id": "daily_summary",
+      "label": "thẻ tổng quan trong ngày",
+      "selector": ".summary-card",
+      "properties": ["background_color"]
+    },
+    {
+      "id": "hourly_forecast",
+      "label": "dải dự báo theo giờ",
+      "selector": ".hourly-card",
+      "properties": ["background_color"]
+    }
+  ],
+  "extension_points": [
+    {
+      "slot": "hero",
+      "selector": "[data-slot='hero']",
+      "allowed_operations": ["insert_component", "replace_component"],
+      "max_components": 1
+    },
+    {
+      "slot": "chart",
+      "selector": "[data-slot='chart']",
+      "allowed_operations": ["insert_component", "replace_component"],
+      "max_components": 2
+    },
+    {
+      "slot": "footer",
+      "selector": "[data-slot='footer']",
+      "allowed_operations": ["insert_component", "replace_component"],
+      "max_components": 1
+    }
+  ]
+}

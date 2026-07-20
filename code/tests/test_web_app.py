@@ -389,11 +389,23 @@ async def test_web_routes_serve_interface_and_clear_session(monkeypatch) -> None
     assert script.status_code == 200
     assert 'id="contentPanel"' in homepage.text
     assert 'id="weatherView"' in homepage.text
+    assert 'id="weatherFrame"' in homepage.text
+    assert 'scrolling="no"' in homepage.text
     assert 'id="musicView"' in homepage.text
     assert 'id="musicFrame"' in homepage.text
     assert "https://www.youtube-nocookie.com" in script.text
     assert "https://www.youtube.com/embed" not in script.text
     assert ".src = youtubeEmbedUrl" in script.text
     assert ".innerHTML" not in script.text
+    assert "height: 100dvh" in stylesheet.text
+    assert "#weatherFrame { width: 100%; height: 100%; min-height: 0" in stylesheet.text
+    assert ".workspace.has-dashboard {\n    flex: 1 1 0;\n    height: 100%;" in stylesheet.text
+    assert "grid-template-rows: minmax(0, 1fr);" in stylesheet.text
+    assert ".has-dashboard .dashboard-panel,\n  .has-dashboard .chat-panel {" in stylesheet.text
+    assert "height: 100%;" in stylesheet.text
+    assert "max-height: none;" in stylesheet.text
+    assert ".has-dashboard .dashboard-panel {\n    height: calc(100% + 110px);" in stylesheet.text
+    assert "overflow-y: auto;" in stylesheet.text
+    assert "weatherFrame.srcdoc = panel.html;" in script.text
     assert chat.json()["messages"][-1]["content"] == "Xin chào!"
     assert cleared.json()["messages"] == []
