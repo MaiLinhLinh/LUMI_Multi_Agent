@@ -117,6 +117,7 @@ class WebChatService:
         query: str,
         *,
         response_stream_callback: Callable[[str, str], None] | None = None,
+        latency_marker_callback: Callable[[str], None] | None = None,
     ) -> dict[str, Any]:
         self.ensure_ready()
         session = self.store.get(session_id)
@@ -135,6 +136,8 @@ class WebChatService:
             }
             if response_stream_callback is not None:
                 state["response_stream_callback"] = response_stream_callback
+            if latency_marker_callback is not None:
+                state["latency_marker_callback"] = latency_marker_callback
 
             try:
                 result = self.workflow.invoke(state)
@@ -411,6 +414,7 @@ async def chat(request: Request) -> JSONResponse:
 async def chat_stream(request: Request) -> JSONResponse | StreamingResponse:
     """Stream Weather/Music LLM2 text chunks and finish with session state."""
 
+    request_received_at = time.perf_counter()
     try:
         payload = await request.json()
         session_id = _valid_session_id(payload.get("session_id"))
@@ -427,16 +431,45 @@ async def chat_stream(request: Request) -> JSONResponse | StreamingResponse:
         event_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         stream_open = threading.Event()
         stream_open.set()
+        first_text_delta_sent = False
+        first_text_delta_lock = threading.Lock()
 
-        def publish_chunk(domain: str, text: str) -> None:
-            if not stream_open.is_set() or not isinstance(text, str) or not text:
-                return
-            event = {"type": "text_delta", "domain": domain, "delta": text}
+        def timing_event(
+            marker: str,
+            elapsed_ms: float | None = None,
+        ) -> dict[str, Any]:
+            return {
+                "type": "timing",
+                "marker": marker,
+                "elapsed_ms": round(
+                    (time.perf_counter() - request_received_at) * 1000
+                    if elapsed_ms is None
+                    else elapsed_ms,
+                    3,
+                ),
+            }
+
+        def publish_event(event: dict[str, Any]) -> None:
             try:
                 loop.call_soon_threadsafe(event_queue.put_nowait, event)
             except RuntimeError:
                 # The browser disconnected after the model had already emitted.
                 stream_open.clear()
+
+        def publish_timing_marker(marker: str) -> None:
+            if stream_open.is_set():
+                publish_event(timing_event(marker))
+
+        def publish_chunk(domain: str, text: str) -> None:
+            nonlocal first_text_delta_sent
+            if not stream_open.is_set() or not isinstance(text, str) or not text:
+                return
+            with first_text_delta_lock:
+                if not first_text_delta_sent:
+                    first_text_delta_sent = True
+                    publish_timing_marker("first_text_delta_sent")
+            event = {"type": "text_delta", "domain": domain, "delta": text}
+            publish_event(event)
 
         async def execute_workflow() -> None:
             try:
@@ -445,6 +478,7 @@ async def chat_stream(request: Request) -> JSONResponse | StreamingResponse:
                     session_id,
                     query,
                     response_stream_callback=publish_chunk,
+                    latency_marker_callback=publish_timing_marker,
                 )
                 await event_queue.put({"type": "final", "payload": result})
             except Exception as exc:  # noqa: BLE001 - streaming API boundary
@@ -461,6 +495,14 @@ async def chat_stream(request: Request) -> JSONResponse | StreamingResponse:
 
         task = asyncio.create_task(execute_workflow())
         try:
+            yield (
+                json.dumps(
+                    timing_event("server_request_received", 0.0),
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                )
+                + "\n"
+            ).encode("utf-8")
             while True:
                 event = await event_queue.get()
                 yield (

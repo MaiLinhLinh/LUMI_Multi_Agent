@@ -293,6 +293,7 @@ def social_node(state: GraphState) -> GraphState:
 
 
 def manager_classify_node(state: GraphState) -> GraphState:
+    _emit_latency_marker(state, "manager_started")
     started_at = perf_counter()
     client = state.get("manager_client") or _create_gemini_client(_get_settings(state))
     semantic_result = state.get("semantic_result")
@@ -309,6 +310,7 @@ def manager_classify_node(state: GraphState) -> GraphState:
     raw_history = state.get("history", [])
     history = raw_history if isinstance(raw_history, list) else []
     plan = classify_intent(client, manager_query, history=history)
+    _emit_latency_marker(state, "manager_finished")
     return {
         "intent": plan,
         "execution_mode": plan["execution_mode"],
@@ -400,17 +402,21 @@ def wiki_node(state: GraphState) -> GraphState:
 
 
 def music_node(state: GraphState) -> GraphState:
-    return _merge_state_updates(
-        [
-            _state_metadata(state),
-            run_music_agent(
-                state,
-                settings=_get_settings(state),
-                client=state.get("music_client"),
-                search_service=state.get("music_search_service"),
-            ),
-        ]
-    )
+    _emit_latency_marker(state, "music_started")
+    try:
+        return _merge_state_updates(
+            [
+                _state_metadata(state),
+                run_music_agent(
+                    state,
+                    settings=_get_settings(state),
+                    client=state.get("music_client"),
+                    search_service=state.get("music_search_service"),
+                ),
+            ]
+        )
+    finally:
+        _emit_latency_marker(state, "music_finished")
 
 
 def execute_parallel_node(state: GraphState) -> GraphState:
@@ -729,6 +735,12 @@ def _create_gemini_client(settings: Settings) -> Any:
 
 def _elapsed_since(started_at: float) -> float:
     return perf_counter() - started_at
+
+
+def _emit_latency_marker(state: GraphState, marker: str) -> None:
+    callback = state.get("latency_marker_callback")
+    if callable(callback):
+        callback(marker)
 
 
 def _merge_state_updates(updates: list[GraphState]) -> GraphState:

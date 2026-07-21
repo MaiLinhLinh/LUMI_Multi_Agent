@@ -486,9 +486,15 @@ async def test_web_chat_stream_emits_deltas_before_final_session(monkeypatch) ->
 
     events = [web_app.json.loads(line) for line in response.text.splitlines()]
     assert [event["type"] for event in events] == [
+        "timing",
+        "timing",
         "text_delta",
         "text_delta",
         "final",
     ]
-    assert "".join(event["delta"] for event in events[:-1]) == "Hà Nội 30°C"
+    assert [event["marker"] for event in events[:2]] == [
+        "server_request_received",
+        "first_text_delta_sent",
+    ]
+    assert "".join(event["delta"] for event in events[2:-1]) == "Hà Nội 30°C"
     assert events[-1]["payload"]["messages"][-1]["content"] == "Hà Nội 30°C"

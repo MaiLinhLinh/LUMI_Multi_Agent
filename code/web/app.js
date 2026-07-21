@@ -19,12 +19,23 @@ const queryInput = document.querySelector("#queryInput");
 const sendButton = document.querySelector("#sendButton");
 const clearButton = document.querySelector("#clearButton");
 const connectionStatus = document.querySelector("#connectionStatus");
+const firstTextLog = document.querySelector("#firstTextLog");
 const messageTemplate = document.querySelector("#messageTemplate");
 
 const SESSION_KEY = "lumi_web_session_id";
 const YOUTUBE_NOCOOKIE_ORIGIN = "https://www.youtube-nocookie.com";
 const YOUTUBE_VIDEO_ID_PATTERN = /^[A-Za-z0-9_-]{11}$/;
 const STREAM_CHARACTER_DELAY_MS = 18;
+const TIMING_MARKER_LABELS = {
+  server_request_received: "Server nhận request",
+  manager_started: "Manager bắt đầu",
+  manager_finished: "Manager kết thúc",
+  music_started: "Music bắt đầu",
+  music_finished: "Music kết thúc",
+  first_text_delta_sent: "Server bắt đầu gửi text_delta",
+  first_text_delta_received: "Frontend nhận text_delta",
+  first_text_rendered: "Text đầu tiên được render (TTFT)",
+};
 const sessionId = getOrCreateSessionId();
 let state = {
   messages: [],
@@ -35,6 +46,7 @@ let state = {
 let busy = false;
 let renderedPanelRevision = null;
 let streamingDraft = null;
+const latencyMarkers = [];
 
 function getOrCreateSessionId() {
   const existing = window.localStorage.getItem(SESSION_KEY);
@@ -120,11 +132,39 @@ function render() {
       ? "Đang xử lý..."
       : "Sẵn sàng";
   connectionStatus.classList.toggle("busy", busy);
+  renderFirstTextLog();
   queryInput.disabled = busy;
   sendButton.disabled = busy;
   window.requestAnimationFrame(() => {
     messagesElement.scrollTop = messagesElement.scrollHeight;
   });
+}
+
+function renderFirstTextLog() {
+  if (!latencyMarkers.length) {
+    firstTextLog.hidden = true;
+    firstTextLog.textContent = "";
+    return;
+  }
+  firstTextLog.textContent = latencyMarkers
+    .map(({ label, elapsedMs, source }) => (
+      `[${source}] ${label}: ${(elapsedMs / 1000).toFixed(2)} giây`
+    ))
+    .join("\n");
+  firstTextLog.hidden = false;
+}
+
+function recordLatencyMarker(marker, elapsedMs, source) {
+  if (!Number.isFinite(elapsedMs) || latencyMarkers.some((item) => item.marker === marker)) {
+    return;
+  }
+  latencyMarkers.push({
+    marker,
+    elapsedMs,
+    source,
+    label: TIMING_MARKER_LABELS[marker] || marker,
+  });
+  renderFirstTextLog();
 }
 
 function getActivePanel() {
@@ -220,10 +260,11 @@ function createMessage(role, content, isStreaming = false) {
   return fragment;
 }
 
-function createCharacterStreamer() {
+function createCharacterStreamer(onFirstText = () => {}) {
   const characters = [];
   let timer = null;
   let drainResolvers = [];
+  let hasRenderedFirstText = false;
 
   function resolveDrain() {
     if (characters.length || timer !== null) return;
@@ -246,6 +287,10 @@ function createCharacterStreamer() {
     }
     streamingDraft = `${streamingDraft || ""}${character}`;
     paint();
+    if (!hasRenderedFirstText) {
+      hasRenderedFirstText = true;
+      onFirstText();
+    }
     const delay = characters.length > 120
       ? Math.max(8, STREAM_CHARACTER_DELAY_MS / 2)
       : STREAM_CHARACTER_DELAY_MS;
@@ -291,20 +336,39 @@ async function submitQuery(query) {
   const cleanQuery = query.trim();
   if (!cleanQuery || busy) return;
 
+  const requestStartedAt = performance.now();
+  latencyMarkers.length = 0;
   busy = true;
   state.messages = [...(state.messages || []), { role: "user", content: cleanQuery }];
   queryInput.value = "";
   resizeInput();
   render();
 
-  const characterStreamer = createCharacterStreamer();
+  const characterStreamer = createCharacterStreamer(() => {
+    recordLatencyMarker(
+      "first_text_rendered",
+      performance.now() - requestStartedAt,
+      "Frontend",
+    );
+  });
   let finalState = null;
+  let hasReceivedFirstTextDelta = false;
   try {
     await requestNdjson("/api/chat/stream", {
       method: "POST",
       body: JSON.stringify({ session_id: sessionId, query: cleanQuery }),
     }, (event) => {
-      if (event?.type === "text_delta") {
+      if (event?.type === "timing") {
+        recordLatencyMarker(event.marker, Number(event.elapsed_ms), "Server");
+      } else if (event?.type === "text_delta") {
+        if (!hasReceivedFirstTextDelta) {
+          hasReceivedFirstTextDelta = true;
+          recordLatencyMarker(
+            "first_text_delta_received",
+            performance.now() - requestStartedAt,
+            "Frontend",
+          );
+        }
         characterStreamer.push(event.delta);
       } else if (event?.type === "final") {
         finalState = event.payload;
@@ -356,6 +420,7 @@ suggestions.addEventListener("click", (event) => {
 
 clearButton.addEventListener("click", async () => {
   if (busy) return;
+  latencyMarkers.length = 0;
   busy = true;
   render();
   try {

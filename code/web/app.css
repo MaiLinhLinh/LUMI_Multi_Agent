@@ -395,6 +395,22 @@ button { -webkit-tap-highlight-color: transparent; }
 .message.typing .bubble i:nth-child(2) { animation-delay: 120ms; }
 .message.typing .bubble i:nth-child(3) { animation-delay: 240ms; }
 
+.first-text-log {
+  flex: 0 0 auto;
+  display: block;
+  margin: 0 18px 10px;
+  padding: 6px 9px;
+  border-radius: 8px;
+  background: #f1f5f9;
+  color: #64748b;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 0.68rem;
+  line-height: 1.55;
+  text-align: left;
+  white-space: pre-line;
+}
+.first-text-log[hidden] { display: none; }
+
 .suggestions {
   display: flex;
   gap: 8px;
