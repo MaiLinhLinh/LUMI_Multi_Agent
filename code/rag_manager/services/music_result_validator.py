@@ -150,6 +150,14 @@ class MusicResultValidator:
                 field="search_query",
             )
 
+        if extraction.get("action") == "search":
+            return {
+                "status": "completed",
+                "code": "music_search_results",
+                "reason": "catalog_search_completed",
+                "candidate_count": len(candidates),
+            }
+
         if extraction.get("sort_by") in {"release_date", "popularity"}:
             return _completed(candidates[0], "deterministic_structured_sort")
 

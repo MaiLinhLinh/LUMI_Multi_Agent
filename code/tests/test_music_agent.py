@@ -238,6 +238,53 @@ def test_music_agent_asks_when_artist_request_has_multiple_results() -> None:
     assert "Llw9Q6akRo4" not in client.calls[1][1]
 
 
+def test_music_agent_returns_search_results_without_asking_or_playing() -> None:
+    client = StubMusicClient(
+        {
+            "action": "search",
+            "search_query": "các bài hát của Sơn Tùng",
+            "title": None,
+            "artist": "Sơn Tùng",
+            "genre": None,
+            "mood": None,
+            "language": None,
+            "version": None,
+            "sort_by": None,
+            "sort_order": None,
+            "selection_index": None,
+        }
+    )
+    search = StubSearchService(
+        [
+            _candidate("Lạc Trôi", "Llw9Q6akRo4"),
+            _candidate("Nơi Này Có Anh", "FN7ALfpGxiI"),
+        ]
+    )
+
+    result = run_music_agent(
+        {"query": "Liệt kê các bài hát của Sơn Tùng", "history": []},
+        settings=_settings(),
+        client=client,
+        search_service=search,
+    )
+
+    assert result["music_status"] == "completed"
+    assert result["music_data"]["decision"] == {
+        "status": "completed",
+        "code": "music_search_results",
+        "reason": "catalog_search_completed",
+        "candidate_count": 2,
+    }
+    assert "1. Lạc Trôi" in result["music_answer"]
+    assert "2. Nơi Này Có Anh" in result["music_answer"]
+    assert "music_player" not in result
+    assert [call[0] for call in client.calls] == ["llm1"]
+    assert result["music_session"]["last_candidate_ids"] == [
+        "youtube_Llw9Q6akRo4",
+        "youtube_FN7ALfpGxiI",
+    ]
+
+
 def test_music_agent_selects_unique_search_alias_without_llm2() -> None:
     client = StubMusicClient(
         {

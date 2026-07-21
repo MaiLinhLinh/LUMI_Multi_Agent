@@ -178,7 +178,7 @@ class MusicSessionManager:
             return self._stop(session, source="llm1_action")
 
         title = normalize_music_text(_text(extraction.get("title")))
-        if action in {"play", "search"} and title and not any(
+        if action == "play" and title and not any(
             extraction.get(field)
             for field in ("genre", "mood", "language", "version", "sort_by")
         ):

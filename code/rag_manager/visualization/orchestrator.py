@@ -80,6 +80,21 @@ class VisualizationOrchestrator:
         """Execute a validated Semantic Router result without another LLM call."""
 
         semantic = request.semantic_result or {}
+        if semantic.get("route") == "template" and "template" not in semantic:
+            return self._run_template_agent(
+                VisualizationRequest(
+                    domain_result=request.domain_result,
+                    mode="design",
+                    template_id=request.source_template_id,
+                    source_template_id=request.source_template_id,
+                    output_dir=request.output_dir,
+                    user_request=request.user_request,
+                    previous_template_state=request.previous_template_state,
+                    action="design_template",
+                    requirements={},
+                    visualization_context=request.visualization_context,
+                )
+            )
         status = semantic.get("status")
         if status == "cancelled":
             return VisualizationResult(

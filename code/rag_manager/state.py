@@ -6,7 +6,7 @@ from typing import Any, Literal, TypedDict
 
 
 ExecutionMode = Literal["single", "parallel", "sequential"]
-InputRoute = Literal["domain", "visualize"]
+InputRoute = Literal["domain", "social", "visualize"]
 AgentTopic = Literal["weather", "news", "wiki", "music"]
 WeatherStatus = Literal[
     "needs_clarification",

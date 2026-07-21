@@ -34,6 +34,7 @@ def build_workflow():
     """Build and compile the application workflow."""
     graph = StateGraph(GraphState)
     graph.add_node("input_router", input_router_node)
+    graph.add_node("social", social_node)
     graph.add_node("manager_classify", manager_classify_node)
     graph.add_node("weather", weather_node)
     graph.add_node("news", news_node)
@@ -49,9 +50,11 @@ def build_workflow():
         route_input,
         {
             "manager_classify": "manager_classify",
+            "social": "social",
             "visualize": "visualize",
         },
     )
+    graph.add_edge("social", END)
     graph.add_conditional_edges(
         "manager_classify",
         route_execution_mode,
@@ -127,12 +130,13 @@ def input_router_node(state: GraphState) -> GraphState:
         if isinstance(state.get("available_templates", []), list)
         else [],
     )
-    semantic_result = _merge_semantic_requirements(
-        semantic_result,
-        previous_state=pending_template_state
-        if isinstance(pending_template_state, dict)
-        else None,
-    )
+    if semantic_result.get("route") == "visualize":
+        semantic_result = _merge_semantic_requirements(
+            semantic_result,
+            previous_state=pending_template_state
+            if isinstance(pending_template_state, dict)
+            else None,
+        )
     if semantic_result.get("route") == "domain":
         return {
             "input_route": "domain",
@@ -146,6 +150,47 @@ def input_router_node(state: GraphState) -> GraphState:
             **_llm_usage_update("semantic_router", client),
         }
 
+    if semantic_result.get("route") == "social":
+        return {
+            "input_route": "social",
+            "semantic_result": semantic_result,
+            "visualization_request": {},
+            "pending_visualization_action": "",
+            **_llm_usage_update("semantic_router", client),
+        }
+
+    if semantic_result.get("route") == "template":
+        visualization_context = _build_visualization_context(
+            previous_context=state.get("visualization_context")
+            if isinstance(state.get("visualization_context"), dict)
+            else {},
+            query=query,
+            domain_result=state.get("last_domain_result")
+            if isinstance(state.get("last_domain_result"), dict)
+            else None,
+            pending_state=pending_template_state
+            if isinstance(pending_template_state, dict)
+            else None,
+        )
+        return {
+            "input_route": "visualize",
+            "semantic_result": semantic_result,
+            "visualization_request": {
+                "mode": "auto",
+                "action": "semantic_request",
+                "user_request": query,
+                "semantic_result": semantic_result,
+                "previous_template_state": pending_template_state
+                if isinstance(pending_template_state, dict)
+                else {},
+                "visualization_context": visualization_context,
+            },
+            "pending_visualization_action": "template",
+            "visualization_context": visualization_context,
+            **_llm_usage_update("semantic_router", client),
+        }
+
+    # Compatibility path for legacy Semantic Router results.
     pending_state = _pending_template_state_from_semantic(
         semantic_result,
         previous_state=pending_template_state
@@ -222,7 +267,29 @@ def _has_active_weather_context(state: GraphState) -> bool:
 
 
 def route_input(state: GraphState) -> str:
+    if state.get("input_route") == "social":
+        return "social"
     return "visualize" if state.get("input_route") == "visualize" else "manager_classify"
+
+
+def social_node(state: GraphState) -> GraphState:
+    """Return a deterministic social response without invoking domain agents."""
+
+    query = _string_value(state.get("query"))
+    normalized = query.casefold()
+    if any(marker in normalized for marker in ("cảm ơn", "cam on", "thank", "thanks")):
+        answer = "Rất vui được giúp bạn!"
+    elif any(
+        marker in normalized
+        for marker in ("tạm biệt", "tam biet", "hẹn gặp lại", "hen gap lai")
+    ):
+        answer = "Tạm biệt! Hẹn gặp lại bạn."
+    else:
+        answer = "Xin chào! Tôi có thể giúp bạn về thời tiết hoặc âm nhạc."
+    return {
+        "selected_agents": [],
+        "final_response": answer,
+    }
 
 
 def manager_classify_node(state: GraphState) -> GraphState:
@@ -423,6 +490,23 @@ def visualize_node(state: GraphState) -> GraphState:
         isinstance(semantic_result, dict)
         and semantic_result.get("status") in {"needs_clarification", "cancelled"}
     )
+    is_minimal_template_route = (
+        isinstance(semantic_result, dict)
+        and semantic_result.get("route") == "template"
+    )
+    if not domain_result and is_minimal_template_route:
+        return {
+            "visualization_output": {
+                "ok": False,
+                "mode": visualization_request.get("mode", "auto"),
+                "message": (
+                    "Bạn cần có dữ liệu hiển thị trước khi chọn hoặc thay đổi template."
+                ),
+                "errors": ["missing_template_requirements"],
+            },
+            "pending_visualization_action": "",
+            "visualization_html_path": "",
+        }
     if not domain_result and visualization_request.get("action") not in {
         "create_template",
         "customize_template",

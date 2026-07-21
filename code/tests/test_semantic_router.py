@@ -3,7 +3,7 @@ from rag_manager.semantic_router import (
     is_explicit_visualization_query,
     is_high_confidence_domain_query,
 )
-from rag_manager.graph import input_router_node
+from rag_manager.graph import input_router_node, social_node
 from rag_manager.visualization.orchestrator import (
     VisualizationOrchestrator,
     VisualizationRequest,
@@ -41,6 +41,88 @@ def test_semantic_router_returns_validated_design_result() -> None:
     assert result["route"] == "visualize"
     assert result["template"]["action"] == "design_template"
     assert result["template"]["requirements"]["background_color"] == "light_pink"
+
+
+def test_semantic_router_returns_minimal_domain_result() -> None:
+    class FakeClient:
+        def chat_json(self, system_prompt, user_message):
+            return {
+                "route": "domain",
+                "domain_request": "Sơn Tùng có những bài nào?",
+            }
+
+    result = analyze_input(FakeClient(), query="Sơn Tùng có những bài nào?")
+
+    assert result == {
+        "route": "domain",
+        "domain_request": "Sơn Tùng có những bài nào?",
+    }
+
+
+def test_semantic_router_returns_minimal_social_and_template_results() -> None:
+    class FakeClient:
+        def __init__(self):
+            self.responses = [
+                {"route": "social", "domain_request": None},
+                {"route": "template", "domain_request": None},
+            ]
+
+        def chat_json(self, system_prompt, user_message):
+            return self.responses.pop(0)
+
+    client = FakeClient()
+
+    assert analyze_input(client, query="Xin chào") == {
+        "route": "social",
+        "domain_request": None,
+    }
+    assert analyze_input(client, query="Đổi giao diện sang nền tối") == {
+        "route": "template",
+        "domain_request": None,
+    }
+
+
+def test_input_router_sends_template_query_without_router_template_details() -> None:
+    class FakeClient:
+        def chat_json(self, system_prompt, user_message):
+            return {"route": "template", "domain_request": None}
+
+    result = input_router_node(
+        {
+            "query": "Đổi giao diện sang nền tối",
+            "history": [],
+            "semantic_router_client": FakeClient(),
+        }
+    )
+
+    assert result["input_route"] == "visualize"
+    assert result["semantic_result"] == {
+        "route": "template",
+        "domain_request": None,
+    }
+    assert result["visualization_request"]["action"] == "semantic_request"
+    assert result["visualization_request"]["user_request"] == (
+        "Đổi giao diện sang nền tối"
+    )
+
+
+def test_social_route_bypasses_domain_agents_with_fixed_response() -> None:
+    class FakeClient:
+        def chat_json(self, system_prompt, user_message):
+            return {"route": "social", "domain_request": None}
+
+    routed = input_router_node(
+        {
+            "query": "Cảm ơn bạn",
+            "history": [],
+            "semantic_router_client": FakeClient(),
+        }
+    )
+    result = social_node({"query": "Cảm ơn bạn", **routed})
+
+    assert routed["input_route"] == "social"
+    assert result["selected_agents"] == []
+    assert result["final_response"] == "Rất vui được giúp bạn!"
 
 
 def test_orchestrator_consumes_semantic_result_without_reinterpreting() -> None:

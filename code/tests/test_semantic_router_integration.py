@@ -127,6 +127,25 @@ def test_domain_semantic_route_runs_domain_workflow(monkeypatch):
     assert orchestrator.requests[0].semantic_result is None
 
 
+def test_social_semantic_route_bypasses_manager(monkeypatch):
+    def unexpected_manager(*args, **kwargs):
+        raise AssertionError("Social route must not call Manager Agent")
+
+    monkeypatch.setattr(graph, "classify_intent", unexpected_manager)
+    result = graph.build_workflow().invoke(
+        {
+            "query": "Cảm ơn bạn",
+            "semantic_router_client": FakeSemanticClient(
+                {"route": "social", "domain_request": None}
+            ),
+        }
+    )
+
+    assert result["input_route"] == "social"
+    assert result["selected_agents"] == []
+    assert result["final_response"] == "Rất vui được giúp bạn!"
+
+
 def test_visualize_show_options_uses_orchestrator(monkeypatch):
     orchestrator = FakeVisualizationOrchestrator()
     result = graph.build_workflow().invoke(

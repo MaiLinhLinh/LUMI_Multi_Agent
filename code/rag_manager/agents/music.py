@@ -238,7 +238,9 @@ def run_music_agent(
 
     if status == "completed":
         selected = decision.get("selected_candidate")
-        if decision.get("code") == "playback_stopped":
+        if decision.get("code") == "music_search_results":
+            answer = _search_results_answer(search_result.get("candidates"))
+        elif decision.get("code") == "playback_stopped":
             answer = "Đã dừng phát nhạc."
         elif not isinstance(selected, dict):
             status = "error"
@@ -325,7 +327,7 @@ def run_music_agent(
         }
 
     music_player: dict[str, Any] = {}
-    if status == "completed":
+    if status == "completed" and decision.get("code") != "music_search_results":
         player_candidate = decision.get("selected_candidate")
         if decision.get("code") == "playback_stopped":
             player_candidate = music_session.get("current_candidate")
@@ -607,6 +609,18 @@ def _candidate_summary(candidate: Mapping[str, Any], index: int) -> str:
     version = _text(candidate.get("version"))
     details = " — ".join(value for value in (artist, version) if value)
     return f"{index}. {title}" + (f" — {details}" if details else "")
+
+
+def _search_results_answer(raw_candidates: Any) -> str:
+    candidates = raw_candidates if isinstance(raw_candidates, list) else []
+    summaries = [
+        _candidate_summary(candidate, index)
+        for index, candidate in enumerate(candidates[:5], start=1)
+        if isinstance(candidate, Mapping)
+    ]
+    if not summaries:
+        return "Hiện tại tôi chưa tìm thấy kết quả phù hợp trong kho nhạc."
+    return "Tôi tìm thấy các bài sau:\n" + "\n".join(summaries)
 
 
 def _completed_answer(candidate: Mapping[str, Any]) -> str:

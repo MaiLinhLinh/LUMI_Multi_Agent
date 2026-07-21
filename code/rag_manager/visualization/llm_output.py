@@ -80,15 +80,30 @@ def validate_requirements_output(output: dict[str, Any]) -> dict[str, Any]:
 
 
 def validate_semantic_router_output(output: dict[str, Any]) -> dict[str, Any]:
-    """Validate the unified route/template semantic result."""
+    """Validate the minimal route result, with legacy visualization support."""
 
     _require_object(output, "semantic router")
+    route = output.get("route")
+    if route in {"domain", "social", "template"}:
+        domain_request = _string(output.get("domain_request")) or None
+        if route == "domain" and domain_request is None:
+            raise LlmOutputError("Domain route requires domain_request.")
+        if route in {"social", "template"} and domain_request is not None:
+            raise LlmOutputError(
+                f"{route.capitalize()} route requires domain_request=null."
+            )
+        return {
+            "route": route,
+            "domain_request": domain_request,
+        }
+
+    # Compatibility for stored fixtures/clients using the former semantic
+    # visualization contract. The production prompt no longer emits it.
     status = _string(output.get("status")) or "ready"
     if status not in {"ready", "needs_clarification", "cancelled"}:
         raise LlmOutputError(f"Invalid semantic router status: {status}")
 
-    route = output.get("route")
-    if route not in {"domain", "visualize", None}:
+    if route not in {"visualize", None}:
         raise LlmOutputError(f"Invalid semantic router route: {route}")
 
     template = output.get("template", {})

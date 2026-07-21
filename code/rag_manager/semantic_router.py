@@ -13,7 +13,6 @@ from rag_manager.visualization.llm_output import (
     validate_semantic_router_output,
 )
 from rag_manager.visualization.paths import resolve_asset_path
-from rag_manager.visualization.prompt_loader import render_prompt
 
 
 def is_high_confidence_domain_query(query: object) -> bool:
@@ -71,22 +70,24 @@ def analyze_input(
     active_template_id: str | None = None,
     available_templates: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Return one validated route/action/requirements JSON object."""
+    """Return one validated high-level route without domain/template details."""
 
+    has_template_context = bool(
+        previous_template_state or active_template_id or available_templates
+    )
     if client is None or not hasattr(client, "chat_json"):
-        return _fallback_semantic_result(query)
+        return _fallback_semantic_result(
+            query,
+            has_template_context=has_template_context,
+        )
 
     prompt_path = resolve_asset_path("prompts", "semantic_router.txt")
     context = {
-        "history": history or [],
-        "previous_template_state": previous_template_state or {},
-        "active_template_id": active_template_id,
-        "available_templates": available_templates or [],
+        "recent_history": _recent_router_history(query, history or []),
+        "template_request_pending": bool(previous_template_state),
+        "has_active_template": bool(active_template_id),
     }
-    prompt = render_prompt(
-        prompt_path.read_text(encoding="utf-8"),
-        {"input_json": {"query": query, "context": context}},
-    )
+    prompt = prompt_path.read_text(encoding="utf-8")
     _debug_print(f"[SemanticRouter] START prompt_chars={len(prompt)}")
     try:
         raw = client.chat_json(
@@ -100,42 +101,64 @@ def analyze_input(
         raise
     _debug_print(f"[SemanticRouter] RAW_RESULT {raw}")
     if isinstance(raw, dict) and raw.get("error"):
-        return _fallback_semantic_result(query)
+        return _fallback_semantic_result(
+            query,
+            has_template_context=has_template_context,
+        )
     try:
         return validate_semantic_router_output(raw)
     except (LlmOutputError, TypeError, AttributeError):
-        return _fallback_semantic_result(query)
+        return _fallback_semantic_result(
+            query,
+            has_template_context=has_template_context,
+        )
 
 
-def _fallback_semantic_result(query: str) -> dict[str, Any]:
-    if is_high_confidence_domain_query(query):
-        return {
-            "status": "ready",
-            "route": "domain",
-            "domain_request": query,
-            "template": _empty_template_result(),
-            "missing_information": [],
-            "clarifying_question": None,
-        }
-    return {
-        "status": "needs_clarification",
-        "route": None,
-        "domain_request": None,
-        "template": _empty_template_result(),
-        "missing_information": ["route"],
-        "clarifying_question": "Bạn muốn hỏi về dữ liệu hay muốn thay đổi giao diện/template?",
-    }
+def _fallback_semantic_result(
+    query: str,
+    *,
+    has_template_context: bool = False,
+) -> dict[str, Any]:
+    normalized = _normalize_text(query)
+    if _contains_visualization_signal(normalized) or (
+        has_template_context
+        and bool(re.fullmatch(r"(?:mau[ ]+)?[1-9][0-9]*", normalized))
+    ):
+        return {"route": "template", "domain_request": None}
+    if _is_social_query(normalized):
+        return {"route": "social", "domain_request": None}
+    return {"route": "domain", "domain_request": query}
 
 
-def _empty_template_result() -> dict[str, Any]:
-    return {
-        "action": None,
-        "source": "none",
-        "template_id": None,
-        "selection_index": None,
-        "requirements": {},
-        "extracted_keywords": [],
-    }
+def _recent_router_history(
+    query: str,
+    history: list[dict[str, Any]],
+) -> list[dict[str, str]]:
+    messages: list[dict[str, str]] = []
+    for item in history:
+        if not isinstance(item, dict):
+            continue
+        role = item.get("role")
+        content = item.get("content")
+        if role in {"user", "assistant"} and isinstance(content, str) and content.strip():
+            messages.append({"role": role, "content": content.strip()})
+    if (
+        messages
+        and messages[-1]["role"] == "user"
+        and messages[-1]["content"] == query.strip()
+    ):
+        messages.pop()
+    return messages[-4:]
+
+
+def _is_social_query(normalized: str) -> bool:
+    return bool(
+        re.fullmatch(
+            r"(?:xin chao|chao ban|hello|hi|hey|cam on|cam on ban|"
+            r"thank you|thanks|tam biet|hen gap lai)[!?.]*",
+            normalized,
+        )
+    )
 
 
 def _contains_visualization_signal(normalized: str) -> bool:
