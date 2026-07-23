@@ -1,0 +1,116 @@
+[weather_tomorrow] 01/10 success=True tool=True latency=4626ms
+[weather_week_followup] 01/10 success=True tool=True latency=7297ms
+[weather_tomorrow] 02/10 success=True tool=True latency=4994ms
+[weather_week_followup] 02/10 success=True tool=True latency=7971ms
+[weather_tomorrow] 03/10 success=False tool=False latency=5667ms
+[weather_week_followup] 03/10 success=False tool=False latency=3140ms
+[weather_tomorrow] 04/10 success=True tool=True latency=6304ms
+[weather_week_followup] 04/10 success=True tool=True latency=6851ms
+[weather_tomorrow] 05/10 success=True tool=True latency=4772ms
+[weather_week_followup] 05/10 success=True tool=True latency=7256ms
+[weather_tomorrow] 06/10 success=True tool=True latency=6824ms
+[weather_week_followup] 06/10 success=True tool=True latency=4573ms
+[weather_tomorrow] 07/10 success=True tool=True latency=6753ms
+[weather_week_followup] 07/10 success=True tool=True latency=7265ms
+[weather_tomorrow] 08/10 success=True tool=True latency=5228ms
+[weather_week_followup] 08/10 success=True tool=True latency=5401ms
+[weather_tomorrow] 09/10 success=False tool=False latency=5627ms
+[weather_week_followup] 09/10 success=False tool=False latency=3094ms
+[weather_tomorrow] 10/10 success=True tool=True latency=6988ms
+[weather_week_followup] 10/10 success=False tool=False latency=3513ms
+[weather_hourly] 01/10 success=True tool=True latency=5939ms
+[weather_hourly] 02/10 success=True tool=True latency=5698ms
+[weather_hourly] 03/10 success=True tool=True latency=6232ms
+[weather_hourly] 04/10 success=True tool=True latency=6097ms
+[weather_hourly] 05/10 success=True tool=True latency=6462ms
+[weather_hourly] 06/10 success=True tool=True latency=4155ms
+[weather_hourly] 07/10 success=True tool=True latency=6040ms
+[weather_hourly] 08/10 success=True tool=True latency=4185ms
+[weather_hourly] 09/10 success=True tool=True latency=5905ms
+[weather_hourly] 10/10 success=True tool=True latency=6036ms
+[music_exact] 01/10 success=False tool=False latency=7034ms
+[music_exact] 02/10 success=False tool=False latency=7226ms
+[music_exact] 03/10 success=False tool=False latency=7448ms
+[music_exact] 04/10 success=False tool=False latency=7130ms
+[music_exact] 05/10 success=False tool=False latency=7583ms
+[music_exact] 06/10 success=False tool=False latency=7153ms
+[music_exact] 07/10 success=False tool=False latency=7173ms
+[music_exact] 08/10 success=False tool=False latency=7018ms
+[music_exact] 09/10 success=False tool=False latency=7347ms
+[music_exact] 10/10 success=False tool=False latency=5919ms
+[music_discovery] 01/10 success=True tool=True latency=3353ms
+[music_discovery] 02/10 success=True tool=True latency=5294ms
+[music_discovery] 03/10 success=True tool=True latency=5542ms
+[music_discovery] 04/10 success=True tool=True latency=3148ms
+[music_discovery] 05/10 success=True tool=True latency=4884ms
+[music_discovery] 06/10 success=True tool=True latency=3336ms
+[music_discovery] 07/10 success=True tool=True latency=3601ms
+[music_discovery] 08/10 success=True tool=True latency=4917ms
+[music_discovery] 09/10 success=True tool=True latency=4959ms
+[music_discovery] 10/10 success=True tool=True latency=3339ms
+
+SUMMARY
+{
+  "weather_tomorrow": {
+    "requests": 10,
+    "successes": 8,
+    "success_rate_percent": 80.0,
+    "tool_call_correct": 8,
+    "tool_call_correct_rate_percent": 80.0,
+    "total_latency_p50_ms": 5647.16,
+    "total_latency_p95_ms": 6988.36,
+    "backend_e2e_ttft_p50_ms": 4356.87,
+    "input_tokens_p50": 1594.5,
+    "output_tokens_p50": 146.5
+  },
+  "weather_week_followup": {
+    "requests": 10,
+    "successes": 7,
+    "success_rate_percent": 70.0,
+    "tool_call_correct": 7,
+    "tool_call_correct_rate_percent": 70.0,
+    "total_latency_p50_ms": 6126.32,
+    "total_latency_p95_ms": 7970.58,
+    "backend_e2e_ttft_p50_ms": 4729.71,
+    "input_tokens_p50": 2374.5,
+    "output_tokens_p50": 170.5
+  },
+  "weather_hourly": {
+    "requests": 10,
+    "successes": 10,
+    "success_rate_percent": 100.0,
+    "tool_call_correct": 10,
+    "tool_call_correct_rate_percent": 100.0,
+    "total_latency_p50_ms": 5987.47,
+    "total_latency_p95_ms": 6461.5,
+    "backend_e2e_ttft_p50_ms": 4914.72,
+    "input_tokens_p50": 1549.5,
+    "output_tokens_p50": 143.5
+  },
+  "music_exact": {
+    "requests": 10,
+    "successes": 0,
+    "success_rate_percent": 0.0,
+    "tool_call_correct": 0,
+    "tool_call_correct_rate_percent": 0.0,
+    "total_latency_p50_ms": 7163.46,
+    "total_latency_p95_ms": 7582.51,
+    "backend_e2e_ttft_p50_ms": null,
+    "input_tokens_p50": 4482.0,
+    "output_tokens_p50": 166.0
+  },
+  "music_discovery": {
+    "requests": 10,
+    "successes": 10,
+    "success_rate_percent": 100.0,
+    "tool_call_correct": 10,
+    "tool_call_correct_rate_percent": 100.0,
+    "total_latency_p50_ms": 4242.69,
+    "total_latency_p95_ms": 5541.65,
+    "backend_e2e_ttft_p50_ms": 3736.29,
+    "input_tokens_p50": 1473.5,
+    "output_tokens_p50": 94.0
+  }
+}
+Saved: benchmark_results\poc_benchmark_20260723_001942.json
+

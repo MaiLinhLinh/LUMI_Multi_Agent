@@ -3,6 +3,11 @@
 
 # Bỏ qua file .env nằm trong thư mục code
 /code/.env
+.env
+*.env
+/code_toolcall/.env
+/code_toolcall/data
+/code_toolcall/benchmark_results
 /code/data/chroma_music/
 /code/data/music_catalog.generated.json
 /code/data/music_catalog_review.json

@@ -1,0 +1,26 @@
+{
+  "id": "forecast_chart",
+  "kind": "component",
+  "domain": "weather",
+  "name": "Forecast Chart",
+  "description": "Forecast timeline or daily forecast summary.",
+  "component_file": "component.html",
+  "supported_slots": [
+    "chart"
+  ],
+  "required_fields": [
+    "forecast.days[].date"
+  ],
+  "optional_fields": [
+    "forecast.days[].temperature.min_celsius",
+    "forecast.days[].temperature.max_celsius",
+    "forecast.days[].intervals[].time",
+    "forecast.days[].intervals[].temperature_celsius",
+    "forecast.days[].intervals[].condition.description",
+    "forecast.days[].intervals[].rain_probability"
+  ],
+  "tags": [
+    "forecast",
+    "chart"
+  ]
+}

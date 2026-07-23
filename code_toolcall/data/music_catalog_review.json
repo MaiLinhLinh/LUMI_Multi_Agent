@@ -1,0 +1,279 @@
+{
+  "review_version": "music.youtube-collection-review.v1",
+  "generated_at": "2026-07-22T10:24:46.164128Z",
+  "selection_policy": {
+    "source": "confirmed_channel_uploads_playlist",
+    "content_priority": [
+      "official_mv",
+      "official_audio",
+      "lyric_video",
+      "performance",
+      "acoustic",
+      "live",
+      "remix",
+      "other"
+    ],
+    "tie_breakers": [
+      "official_marker",
+      "view_count",
+      "published_at"
+    ],
+    "release_date_origin": "youtube_published_at_proxy",
+    "track_ranking": "selected_video_view_count_desc",
+    "max_tracks_per_channel": 10
+  },
+  "channel_reports": [
+    {
+      "artist": "Sơn Tùng M-TP",
+      "configured_channel_id": "UClyA28-01x4z60eWQ2kiNbA",
+      "youtube_channel_name": "Sơn Tùng M-TP Official",
+      "uploads_playlist_id": "UUlyA28-01x4z60eWQ2kiNbA",
+      "upload_items_seen": 40,
+      "video_details_found": 40,
+      "selected_tracks": 7,
+      "track_limit": 10,
+      "omitted_by_track_limit": [],
+      "selections": [
+        {
+          "artist": "Sơn Tùng M-TP",
+          "canonical_title": "ĐỪNG LÀM TRÁI TIM ANH ĐAU",
+          "canonical_key": "dung lam trai tim anh dau",
+          "selected_video_id": "abPmZCZZrFA",
+          "selected_content_type": "official_mv",
+          "selected_view_count": 180206293,
+          "review_required": false,
+          "alternatives": []
+        },
+        {
+          "artist": "Sơn Tùng M-TP",
+          "canonical_title": "CHÚNG TA CỦA TƯƠNG LAI",
+          "canonical_key": "chung ta cua tuong lai",
+          "selected_video_id": "zoEtcR5EW08",
+          "selected_content_type": "official_mv",
+          "selected_view_count": 90444816,
+          "review_required": false,
+          "alternatives": []
+        },
+        {
+          "artist": "Sơn Tùng M-TP",
+          "canonical_title": "SON TUNG M-TP x TYGA | COME MY WAY",
+          "canonical_key": "son tung m tp x tyga come my way",
+          "selected_video_id": "SlQR9iu09bQ",
+          "selected_content_type": "official_mv",
+          "selected_view_count": 39523760,
+          "review_required": false,
+          "alternatives": []
+        },
+        {
+          "artist": "Sơn Tùng M-TP",
+          "canonical_title": "7-MINUTE STAGE | CHÚNG TA CỦA TƯƠNG LAI",
+          "canonical_key": "7 minute stage chung ta cua tuong lai",
+          "selected_video_id": "IpDNg7Xj2R4",
+          "selected_content_type": "other",
+          "selected_view_count": 5025988,
+          "review_required": true,
+          "alternatives": []
+        },
+        {
+          "artist": "Sơn Tùng M-TP",
+          "canonical_title": "7-MINUTE STAGE | ĐỪNG LÀM TRÁI TIM ANH ĐAU",
+          "canonical_key": "7 minute stage dung lam trai tim anh dau",
+          "selected_video_id": "FEmnnU-HhnQ",
+          "selected_content_type": "other",
+          "selected_view_count": 4362253,
+          "review_required": true,
+          "alternatives": []
+        },
+        {
+          "artist": "Sơn Tùng M-TP",
+          "canonical_title": "COME MY WAY (softer version",
+          "canonical_key": "come my way softer version",
+          "selected_video_id": "yuuWdm5tBD0",
+          "selected_content_type": "official_mv",
+          "selected_view_count": 3815807,
+          "review_required": false,
+          "alternatives": []
+        },
+        {
+          "artist": "Sơn Tùng M-TP",
+          "canonical_title": "SƠN TÙNG M-TP x BOMATELA | CÓ CHẮC YÊU LÀ ĐÂY | SHOW RECAP",
+          "canonical_key": "son tung m tp x bomatela co chac yeu la day show recap",
+          "selected_video_id": "EhJqekMVxTc",
+          "selected_content_type": "remix",
+          "selected_view_count": 1873923,
+          "review_required": false,
+          "alternatives": []
+        }
+      ],
+      "rejected": [
+        {
+          "video_id": "prw-laHI2i8",
+          "title": "Tiền bạc, danh tiếng, sự giàu sang, anh không luyến lưu xin đổi hết cho giấc mơ này 🎶🎹❤️",
+          "reason": "below_minimum_duration"
+        },
+        {
+          "video_id": "lavDCSvsQrM",
+          "title": "COME MY WAY (softer version) OUT NOW ! 💋🔥",
+          "reason": "below_minimum_duration"
+        },
+        {
+          "video_id": "afQzOVUSdCM",
+          "title": "NHỚ !!! 20:00 • 12.07",
+          "reason": "below_minimum_duration"
+        },
+        {
+          "video_id": "HgSn0PiuNwk",
+          "title": "Vậy là 20 tuổi rồi ư ...... HAPPY BIRTHDAY TOMEEEEE 😚❤️‍🔥💋 À mà ... 12/7 có quà 🙂‍↔️",
+          "reason": "below_minimum_duration"
+        },
+        {
+          "video_id": "hmAXICsIPbE",
+          "title": "COME MY WAY | SON TUNG M-TP x TYGA | BEHIND THE SCENES",
+          "reason": "non_song_title"
+        },
+        {
+          "video_id": "Za-MzuhTTec",
+          "title": "ANH EM NHẢY CHƯA ĐỀU LẮM ĐÂU ĐẤYYYY ...😒",
+          "reason": "below_minimum_duration"
+        },
+        {
+          "video_id": "GqHNX_Le09Y",
+          "title": "📍COME MY WAY in NY Times Square & LA Sunset Boulevard 🌎 @YouTubeMusic",
+          "reason": "below_minimum_duration"
+        },
+        {
+          "video_id": "60_nmARdPGE",
+          "title": "Anh em vẫn đang COME MY WAY chứ 😗",
+          "reason": "below_minimum_duration"
+        },
+        {
+          "video_id": "4xrMtiZSkV8",
+          "title": "SON TUNG M-TP x TYGA | COME MY WAY | Show me your dance 😌🔥❤️‍🔥",
+          "reason": "below_minimum_duration"
+        },
+        {
+          "video_id": "WqfR22-TpAU",
+          "title": "Đến giờ đốt mỡ rồi mọi người, nhảy liên tục như này 30 phút đảm bảo đốt mỡ 😌 #dancechallenge",
+          "reason": "below_minimum_duration"
+        },
+        {
+          "video_id": "VYM4_ituJBM",
+          "title": "COME MY WAY | SON TUNG M-TP x TYGA | Stream it now 🔥",
+          "reason": "below_minimum_duration"
+        },
+        {
+          "video_id": "nM6x-KRw-p4",
+          "title": "COME MY WAY … OFFICIALLY OUT NOW",
+          "reason": "below_minimum_duration"
+        },
+        {
+          "video_id": "qD11_scCU88",
+          "title": "COME MY WAY | SON TUNG M-TP x TYGA | join premiere now !",
+          "reason": "below_minimum_duration"
+        },
+        {
+          "video_id": "J2SxjV-t6YE",
+          "title": "COME MY WAY | SON TUNG M-TP | PRE-SAVE NOW",
+          "reason": "below_minimum_duration"
+        },
+        {
+          "video_id": "cpkJY3hvSrI",
+          "title": "COME MY WAY | SON TUNG M-TP x TYGA",
+          "reason": "below_minimum_duration"
+        },
+        {
+          "video_id": "Kxr0kflgdtk",
+          "title": "SON TUNG M-TP | COME MY WAY | OFFICIAL TEASER",
+          "reason": "below_minimum_duration"
+        },
+        {
+          "video_id": "I1cRbOoqpj8",
+          "title": "OFFICIAL POSTER",
+          "reason": "below_minimum_duration"
+        },
+        {
+          "video_id": "fhgnlCWwtJ0",
+          "title": "#CMW",
+          "reason": "below_minimum_duration"
+        },
+        {
+          "video_id": "Wi0t2eXd-oQ",
+          "title": "ngày 12 tháng 5, 2026",
+          "reason": "below_minimum_duration"
+        },
+        {
+          "video_id": "l20CSfjNOgo",
+          "title": "ngày 11 tháng 5, 2026",
+          "reason": "below_minimum_duration"
+        },
+        {
+          "video_id": "dSD3pY1gJvA",
+          "title": "PONNIE x SƠN TÙNG M-TP | HƠN CẢ SỐ 1",
+          "reason": "below_minimum_duration"
+        },
+        {
+          "video_id": "FVF6ld2PaTs",
+          "title": "SƠN TÙNG M-TP | ĐỪNG LÀM TRÁI TIM ANH ĐAU | BEHIND THE SCENES",
+          "reason": "non_song_title"
+        },
+        {
+          "video_id": "A9u8T_xQmzg",
+          "title": "LA LA LA LA #DLTTAD DANCE 🧩🎧♥️",
+          "reason": "below_minimum_duration"
+        },
+        {
+          "video_id": "BgyXDlAUnvU",
+          "title": "ĐỪNG LÀM TRÁI TIM ANH ĐAU | DANCE CHALLENGE 🧩🎧🔥",
+          "reason": "below_minimum_duration"
+        },
+        {
+          "video_id": "cyKJyol7vLg",
+          "title": "Main Poster: ĐỪNG LÀM TRÁI TIM ANH ĐAU ❤️‍🩹",
+          "reason": "below_minimum_duration"
+        },
+        {
+          "video_id": "CQXQKr_3vKE",
+          "title": "SƠN TÙNG M-TP | ĐỪNG LÀM TRÁI TIM ANH ĐAU | OFFICIAL TEASER",
+          "reason": "below_minimum_duration"
+        },
+        {
+          "video_id": "gH-zvjVICMM",
+          "title": "ĐỪNG LÀM TRÁI TIM ANH ĐAU ❤️‍🩹 -coming soon- #DLTTAD 💍 #SonTungMTP",
+          "reason": "below_minimum_duration"
+        },
+        {
+          "video_id": "PKX7Wf-no3I",
+          "title": "… 👀 #DLTTAD 💍",
+          "reason": "below_minimum_duration"
+        },
+        {
+          "video_id": "Z0wXYITKY2E",
+          "title": "SƠN TÙNG M-TP | CHÚNG TA CỦA TƯƠNG LAI | BEHIND THE SCENES",
+          "reason": "non_song_title"
+        },
+        {
+          "video_id": "zzHuPgs1nTk",
+          "title": "ĐÃ BẢO ĐỪNG BẬT NỮA ...!",
+          "reason": "below_minimum_duration"
+        },
+        {
+          "video_id": "6jGbAKQ7KoM",
+          "title": "ACOUSTIC DEMO | CHÚNG TA CỦA TƯƠNG LAI",
+          "reason": "below_minimum_duration"
+        },
+        {
+          "video_id": "9K-82fomFhA",
+          "title": "SƠN TÙNG M-TP | CHÚNG TA CỦA TƯƠNG LAI | OFFICIAL TEASER",
+          "reason": "below_minimum_duration"
+        },
+        {
+          "video_id": "Kg4gHAmLDIQ",
+          "title": "MB x JCB x SƠN TÙNG M-TP | BE THE SKY",
+          "reason": "below_minimum_duration"
+        }
+      ]
+    }
+  ],
+  "selected_track_count": 7,
+  "review_required_count": 2
+}

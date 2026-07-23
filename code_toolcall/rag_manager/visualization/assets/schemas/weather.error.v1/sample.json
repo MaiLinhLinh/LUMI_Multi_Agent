@@ -1,0 +1,34 @@
+{
+  "domain": "weather",
+  "schema_version": "weather.error.v1",
+  "data_type": "error",
+  "location": "Ha Noi",
+  "data": {
+    "location": {
+      "name": "Ha Noi",
+      "country": "",
+      "timezone_offset_seconds": null
+    },
+    "current": null,
+    "forecast": null
+  },
+  "source": {
+    "provider": "openweathermap",
+    "tools_used": [
+      {
+        "name": "get_current_weather",
+        "cached": false
+      }
+    ]
+  },
+  "available_fields": [
+    "location.name"
+  ],
+  "errors": [
+    {
+      "source": "weather",
+      "message": "Missing OPENWEATHER_API_KEY.",
+      "status_code": null
+    }
+  ]
+}

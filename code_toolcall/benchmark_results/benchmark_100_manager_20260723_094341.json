@@ -1,0 +1,2416 @@
+{
+  "generated_at": "2026-07-23T09:43:41.321670",
+  "table": "manager",
+  "summary": {
+    "requests": 100,
+    "routing_accuracy_percent": 0.0,
+    "prefill_rate_p50_tok_s": 0.0,
+    "generation_rate_p50_tok_s": 0.0,
+    "inference_latency_p50_ms": 17.3,
+    "inference_latency_p95_ms": 41.52,
+    "input_tokens_p50": 0.0,
+    "output_tokens_p50": 0.0
+  },
+  "runs": [
+    {
+      "index": 1,
+      "query": "Thời tiết Hà Nội hôm nay thế nào?",
+      "expected_agent": "weather",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 179.64,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 179.62,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 2,
+      "query": "Cho tôi biết trời ở Hà Nội bây giờ.",
+      "expected_agent": "weather",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 10.96,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 10.89,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 3,
+      "query": "Hiện tại Hà Nội có mưa không?",
+      "expected_agent": "weather",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 19.54,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 19.46,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 4,
+      "query": "Nhiệt độ lúc này tại Hà Nội bao nhiêu?",
+      "expected_agent": "weather",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 10.22,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 10.14,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 5,
+      "query": "Xem thời tiết hiện giờ ở Hà Nội.",
+      "expected_agent": "weather",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 20.62,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 20.56,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 6,
+      "query": "Thời tiết Đà Nẵng hôm nay thế nào?",
+      "expected_agent": "weather",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 15.38,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 14.82,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 7,
+      "query": "Cho tôi biết trời ở Đà Nẵng bây giờ.",
+      "expected_agent": "weather",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 10.56,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 10.49,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 8,
+      "query": "Hiện tại Đà Nẵng có mưa không?",
+      "expected_agent": "weather",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 12.83,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 12.72,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 9,
+      "query": "Nhiệt độ lúc này tại Đà Nẵng bao nhiêu?",
+      "expected_agent": "weather",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 20.62,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 20.55,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 10,
+      "query": "Xem thời tiết hiện giờ ở Đà Nẵng.",
+      "expected_agent": "weather",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 10.53,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 10.46,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 11,
+      "query": "Thời tiết Hồ Chí Minh hôm nay thế nào?",
+      "expected_agent": "weather",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 12.68,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 12.6,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 12,
+      "query": "Cho tôi biết trời ở Hồ Chí Minh bây giờ.",
+      "expected_agent": "weather",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 10.7,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 10.64,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 13,
+      "query": "Hiện tại Hồ Chí Minh có mưa không?",
+      "expected_agent": "weather",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 19.38,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 19.2,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 14,
+      "query": "Nhiệt độ lúc này tại Hồ Chí Minh bao nhiêu?",
+      "expected_agent": "weather",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 13.07,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 13.0,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 15,
+      "query": "Xem thời tiết hiện giờ ở Hồ Chí Minh.",
+      "expected_agent": "weather",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 20.69,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 20.6,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 16,
+      "query": "Thời tiết Hải Phòng hôm nay thế nào?",
+      "expected_agent": "weather",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 12.41,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 12.28,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 17,
+      "query": "Cho tôi biết trời ở Hải Phòng bây giờ.",
+      "expected_agent": "weather",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 12.77,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 12.68,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 18,
+      "query": "Hiện tại Hải Phòng có mưa không?",
+      "expected_agent": "weather",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 11.79,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 11.61,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 19,
+      "query": "Nhiệt độ lúc này tại Hải Phòng bao nhiêu?",
+      "expected_agent": "weather",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 22.02,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 21.95,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 20,
+      "query": "Xem thời tiết hiện giờ ở Hải Phòng.",
+      "expected_agent": "weather",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 10.64,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 10.57,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 21,
+      "query": "Thời tiết Cần Thơ hôm nay thế nào?",
+      "expected_agent": "weather",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 5.07,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 5.03,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 22,
+      "query": "Cho tôi biết trời ở Cần Thơ bây giờ.",
+      "expected_agent": "weather",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 13.17,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 13.05,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 23,
+      "query": "Hiện tại Cần Thơ có mưa không?",
+      "expected_agent": "weather",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 19.86,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 19.79,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 24,
+      "query": "Nhiệt độ lúc này tại Cần Thơ bao nhiêu?",
+      "expected_agent": "weather",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 12.35,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 12.08,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 25,
+      "query": "Xem thời tiết hiện giờ ở Cần Thơ.",
+      "expected_agent": "weather",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 20.86,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 20.79,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 26,
+      "query": "Dự báo thời tiết Hà Nội ngày mai.",
+      "expected_agent": "weather",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 13.44,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 13.36,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 27,
+      "query": "Ngày mai ở Hà Nội có mưa không?",
+      "expected_agent": "weather",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 20.12,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 20.05,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 28,
+      "query": "Mai trời Hà Nội như thế nào?",
+      "expected_agent": "weather",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 13.05,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 12.76,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 29,
+      "query": "Xem nhiệt độ Hà Nội vào ngày mai.",
+      "expected_agent": "weather",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 20.39,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 20.32,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 30,
+      "query": "Cho tôi dự báo Hà Nội cho ngày mai.",
+      "expected_agent": "weather",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 13.86,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 13.79,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 31,
+      "query": "Dự báo thời tiết Đà Nẵng ngày mai.",
+      "expected_agent": "weather",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 17.96,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 17.91,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 32,
+      "query": "Ngày mai ở Đà Nẵng có mưa không?",
+      "expected_agent": "weather",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 13.84,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 13.74,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 33,
+      "query": "Mai trời Đà Nẵng như thế nào?",
+      "expected_agent": "weather",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 18.23,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 18.17,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 34,
+      "query": "Xem nhiệt độ Đà Nẵng vào ngày mai.",
+      "expected_agent": "weather",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 14.85,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 14.79,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 35,
+      "query": "Cho tôi dự báo Đà Nẵng cho ngày mai.",
+      "expected_agent": "weather",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 36.47,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 36.4,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 36,
+      "query": "Dự báo thời tiết Hồ Chí Minh ngày mai.",
+      "expected_agent": "weather",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 11.06,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 11.01,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 37,
+      "query": "Ngày mai ở Hồ Chí Minh có mưa không?",
+      "expected_agent": "weather",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 30.56,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 30.49,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 38,
+      "query": "Mai trời Hồ Chí Minh như thế nào?",
+      "expected_agent": "weather",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 16.86,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 16.79,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 39,
+      "query": "Xem nhiệt độ Hồ Chí Minh vào ngày mai.",
+      "expected_agent": "weather",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 96.38,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 96.3,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 40,
+      "query": "Cho tôi dự báo Hồ Chí Minh cho ngày mai.",
+      "expected_agent": "weather",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 18.62,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 18.5,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 41,
+      "query": "Mở một bài nhạc buồn.",
+      "expected_agent": "music",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 27.19,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 27.11,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 42,
+      "query": "Gợi ý cho tôi nhạc tâm trạng.",
+      "expected_agent": "music",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 10.71,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 10.66,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 43,
+      "query": "Tìm một ca khúc nhẹ nhàng, buồn.",
+      "expected_agent": "music",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 21.9,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 21.85,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 44,
+      "query": "Tôi muốn nghe nhạc buồn.",
+      "expected_agent": "music",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 11.64,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 11.59,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 45,
+      "query": "Có bài nào phù hợp lúc buồn không?",
+      "expected_agent": "music",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 21.41,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 21.32,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 46,
+      "query": "Tìm nhạc chill buồn trong kho.",
+      "expected_agent": "music",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 17.27,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 17.12,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 47,
+      "query": "Gợi ý nhạc để thư giãn buổi tối.",
+      "expected_agent": "music",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 15.61,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 15.53,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 48,
+      "query": "Mở một bài hát tâm trạng.",
+      "expected_agent": "music",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 30.25,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 30.17,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 49,
+      "query": "Tìm giúp tôi bài nhạc buồn nhé.",
+      "expected_agent": "music",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 41.52,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 41.46,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 50,
+      "query": "Cho tôi một gợi ý nhạc nhẹ nhàng.",
+      "expected_agent": "music",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 12.09,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 12.03,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 51,
+      "query": "Mở một bài nhạc buồn.",
+      "expected_agent": "music",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 35.79,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 35.63,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 52,
+      "query": "Gợi ý cho tôi nhạc tâm trạng.",
+      "expected_agent": "music",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 15.46,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 15.37,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 53,
+      "query": "Tìm một ca khúc nhẹ nhàng, buồn.",
+      "expected_agent": "music",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 29.41,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 29.08,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 54,
+      "query": "Tôi muốn nghe nhạc buồn.",
+      "expected_agent": "music",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 14.17,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 14.12,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 55,
+      "query": "Có bài nào phù hợp lúc buồn không?",
+      "expected_agent": "music",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 30.08,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 30.01,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 56,
+      "query": "Tìm nhạc chill buồn trong kho.",
+      "expected_agent": "music",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 16.46,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 16.26,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 57,
+      "query": "Gợi ý nhạc để thư giãn buổi tối.",
+      "expected_agent": "music",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 43.32,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 43.23,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 58,
+      "query": "Mở một bài hát tâm trạng.",
+      "expected_agent": "music",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 17.0,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 16.93,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 59,
+      "query": "Tìm giúp tôi bài nhạc buồn nhé.",
+      "expected_agent": "music",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 29.98,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 29.9,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 60,
+      "query": "Cho tôi một gợi ý nhạc nhẹ nhàng.",
+      "expected_agent": "music",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 15.41,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 15.33,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 61,
+      "query": "Mở một bài nhạc buồn.",
+      "expected_agent": "music",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 32.54,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 32.45,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 62,
+      "query": "Gợi ý cho tôi nhạc tâm trạng.",
+      "expected_agent": "music",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 18.98,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 18.89,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 63,
+      "query": "Tìm một ca khúc nhẹ nhàng, buồn.",
+      "expected_agent": "music",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 15.88,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 15.84,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 64,
+      "query": "Tôi muốn nghe nhạc buồn.",
+      "expected_agent": "music",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 10.48,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 10.35,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 65,
+      "query": "Có bài nào phù hợp lúc buồn không?",
+      "expected_agent": "music",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 33.63,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 33.58,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 66,
+      "query": "Tìm nhạc chill buồn trong kho.",
+      "expected_agent": "music",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 16.5,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 16.42,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 67,
+      "query": "Gợi ý nhạc để thư giãn buổi tối.",
+      "expected_agent": "music",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 31.74,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 31.67,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 68,
+      "query": "Mở một bài hát tâm trạng.",
+      "expected_agent": "music",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 8.68,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 8.64,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 69,
+      "query": "Tìm giúp tôi bài nhạc buồn nhé.",
+      "expected_agent": "music",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 35.36,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 35.31,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 70,
+      "query": "Cho tôi một gợi ý nhạc nhẹ nhàng.",
+      "expected_agent": "music",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 16.12,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 16.04,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 71,
+      "query": "Mở một bài nhạc buồn.",
+      "expected_agent": "music",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 32.55,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 32.49,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 72,
+      "query": "Gợi ý cho tôi nhạc tâm trạng.",
+      "expected_agent": "music",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 20.75,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 20.66,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 73,
+      "query": "Tìm một ca khúc nhẹ nhàng, buồn.",
+      "expected_agent": "music",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 29.59,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 29.53,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 74,
+      "query": "Tôi muốn nghe nhạc buồn.",
+      "expected_agent": "music",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 16.65,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 16.58,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 75,
+      "query": "Có bài nào phù hợp lúc buồn không?",
+      "expected_agent": "music",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 37.65,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 37.58,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 76,
+      "query": "Tìm nhạc chill buồn trong kho.",
+      "expected_agent": "music",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 18.89,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 18.81,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 77,
+      "query": "Gợi ý nhạc để thư giãn buổi tối.",
+      "expected_agent": "music",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 98.84,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 98.76,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 78,
+      "query": "Mở một bài hát tâm trạng.",
+      "expected_agent": "music",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 18.12,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 18.04,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 79,
+      "query": "Tìm giúp tôi bài nhạc buồn nhé.",
+      "expected_agent": "music",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 29.71,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 29.47,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 80,
+      "query": "Cho tôi một gợi ý nhạc nhẹ nhàng.",
+      "expected_agent": "music",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 16.52,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 16.43,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 81,
+      "query": "Tương tác với biểu đồ kết quả thời tiết 1.",
+      "expected_agent": "visual",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 31.64,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 31.58,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 82,
+      "query": "Tương tác với biểu đồ kết quả thời tiết 2.",
+      "expected_agent": "visual",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 10.43,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 10.36,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 83,
+      "query": "Tương tác với biểu đồ kết quả thời tiết 3.",
+      "expected_agent": "visual",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 33.76,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 33.69,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 84,
+      "query": "Tương tác với biểu đồ kết quả thời tiết 4.",
+      "expected_agent": "visual",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 12.85,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 12.79,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 85,
+      "query": "Tương tác với biểu đồ kết quả thời tiết 5.",
+      "expected_agent": "visual",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 29.85,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 29.78,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 86,
+      "query": "Tương tác với biểu đồ kết quả thời tiết 6.",
+      "expected_agent": "visual",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 16.27,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 16.11,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 87,
+      "query": "Tương tác với biểu đồ kết quả thời tiết 7.",
+      "expected_agent": "visual",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 29.42,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 29.33,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 88,
+      "query": "Tương tác với biểu đồ kết quả thời tiết 8.",
+      "expected_agent": "visual",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 16.6,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 16.53,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 89,
+      "query": "Tương tác với biểu đồ kết quả thời tiết 9.",
+      "expected_agent": "visual",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 35.81,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 35.74,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 90,
+      "query": "Tương tác với biểu đồ kết quả thời tiết 10.",
+      "expected_agent": "visual",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 16.52,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 16.4,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 91,
+      "query": "Tương tác với biểu đồ kết quả thời tiết 11.",
+      "expected_agent": "visual",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 35.84,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 35.67,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 92,
+      "query": "Tương tác với biểu đồ kết quả thời tiết 12.",
+      "expected_agent": "visual",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 14.72,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 14.66,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 93,
+      "query": "Tương tác với biểu đồ kết quả thời tiết 13.",
+      "expected_agent": "visual",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 15.38,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 15.31,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 94,
+      "query": "Tương tác với biểu đồ kết quả thời tiết 14.",
+      "expected_agent": "visual",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 16.4,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 16.33,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 95,
+      "query": "Tương tác với biểu đồ kết quả thời tiết 15.",
+      "expected_agent": "visual",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 32.71,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 32.65,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 96,
+      "query": "Tương tác với biểu đồ kết quả thời tiết 16.",
+      "expected_agent": "visual",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 17.32,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 17.24,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 97,
+      "query": "Tương tác với biểu đồ kết quả thời tiết 17.",
+      "expected_agent": "visual",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 42.4,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 42.33,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 98,
+      "query": "Tương tác với biểu đồ kết quả thời tiết 18.",
+      "expected_agent": "visual",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 16.94,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 16.86,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 99,
+      "query": "Tương tác với biểu đồ kết quả thời tiết 19.",
+      "expected_agent": "visual",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 29.52,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 29.45,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    },
+    {
+      "index": 100,
+      "query": "Tương tác với biểu đồ kết quả thời tiết 20.",
+      "expected_agent": "visual",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 15.03,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 14.98,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ConnectError",
+          "message": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+        }
+      }
+    }
+  ]
+}

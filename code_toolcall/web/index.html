@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f5f7fb">
+  <title>Trợ lí ảo chatbot</title>
+  <link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+  <div class="ambient ambient-one"></div>
+  <div class="ambient ambient-two"></div>
+
+  <div class="app-shell">
+    <header class="app-header">
+      <a class="brand" href="/" aria-label="Trang chủ Trợ lí ảo chatbot">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0-6 6v1.2A3.8 3.8 0 0 0 3 14v2a3 3 0 0 0 3 3h1.5v-7H6V9a6 6 0 0 1 12 0v3h-1.5v7H18a3 3 0 0 0 3-3v-2a3.8 3.8 0 0 0-3-3.8V9a6 6 0 0 0-6-6Z"/><path d="M9 20h6v1H9z"/></svg>
+        </span>
+        <span>
+          <strong>Trợ lí ảo chatbot</strong>
+          <small>Thời tiết, tin tức và tri thức trong một cuộc hội thoại</small>
+        </span>
+      </a>
+      <button id="clearButton" class="ghost-button" type="button" title="Dọn cuộc hội thoại">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l1 2h4v2H4V5h4l1-2Zm-2 6h10l-1 12H8L7 9Zm3 2v7h2v-7h-2Zm4 0v7h2v-7h-2Z"/></svg>
+        <span>Dọn cuộc hội thoại</span>
+      </button>
+    </header>
+
+    <main id="workspace" class="workspace no-dashboard">
+      <section id="welcome" class="welcome" aria-labelledby="welcomeTitle">
+        <span class="welcome-kicker">Lumi assistant</span>
+        <h1 id="welcomeTitle">Xin chào, hôm nay tôi có thể giúp gì cho bạn?</h1>
+        <p>Hãy hỏi về thời tiết, tin tức hoặc một chủ đề bạn quan tâm.</p>
+      </section>
+
+      <section id="contentPanel" class="dashboard-panel surface" aria-label="Nội dung trực quan" hidden>
+        <div class="panel-heading">
+          <div>
+            <span id="contentEyebrow" class="eyebrow">Kết quả trực quan</span>
+            <h2 id="contentTitle">Nội dung</h2>
+          </div>
+          <span id="contentBadge" class="live-badge"><i></i><span>Dữ liệu</span></span>
+        </div>
+        <div class="content-stage">
+          <div id="weatherView" class="weather-view" hidden>
+            <iframe id="weatherFrame" title="Kết quả thời tiết" sandbox="" scrolling="no"></iframe>
+          </div>
+
+          <div id="musicView" class="music-view" hidden>
+            <article class="music-player-card">
+              <div class="music-video-shell">
+                <iframe
+                  id="musicFrame"
+                  title="YouTube music player"
+                  allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture; web-share"
+                  referrerpolicy="strict-origin-when-cross-origin"
+                  allowfullscreen
+                  sandbox="allow-scripts allow-same-origin allow-presentation">
+                </iframe>
+                <div id="musicStopped" class="music-stopped" hidden>
+                  <span aria-hidden="true">♪</span>
+                  <strong>Đã dừng phát nhạc</strong>
+                  <small>Hãy yêu cầu phát lại khi bạn muốn tiếp tục.</small>
+                </div>
+              </div>
+              <div class="music-meta">
+                <div class="music-art" aria-hidden="true">♫</div>
+                <div>
+                  <span id="musicVersion" class="music-version">YouTube</span>
+                  <h3 id="musicTitle"></h3>
+                  <p id="musicArtist"></p>
+                </div>
+              </div>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <aside id="chatPanel" class="chat-panel surface" aria-label="Hội thoại">
+        <div class="chat-heading">
+          <div>
+            <span class="eyebrow">Trợ lí ảo</span>
+            <h2>Hội thoại</h2>
+          </div>
+          <span id="connectionStatus" class="connection-status">Sẵn sàng</span>
+        </div>
+
+        <div id="messages" class="messages" aria-live="polite"></div>
+
+        <output id="firstTextLog" class="first-text-log" aria-live="polite" hidden></output>
+
+        <div id="suggestions" class="suggestions" aria-label="Câu hỏi gợi ý">
+          <button type="button" data-query="Thời tiết Hà Nội hôm nay thế nào?">Thời tiết Hà Nội hôm nay</button>
+          <button type="button" data-query="Tin công nghệ mới nhất là gì?">Tin công nghệ mới nhất</button>
+          <button type="button" data-query="Xin chào">Xin chào</button>
+        </div>
+
+        <form id="chatForm" class="composer">
+          <label class="sr-only" for="queryInput">Nhập câu hỏi của bạn</label>
+          <textarea id="queryInput" rows="1" maxlength="8000" placeholder="Nhập câu hỏi của bạn" required></textarea>
+          <button id="sendButton" type="submit" aria-label="Gửi câu hỏi">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 4 17 8-17 8 3-7 8-1-8-1-3-7Z"/></svg>
+          </button>
+        </form>
+        <p class="composer-hint">Enter để gửi · Shift + Enter để xuống dòng</p>
+      </aside>
+    </main>
+  </div>
+
+  <template id="messageTemplate">
+    <article class="message">
+      <span class="avatar" aria-hidden="true"></span>
+      <div class="bubble"></div>
+    </article>
+  </template>
+
+  <script src="/assets/app.js" defer></script>
+</body>
+</html>

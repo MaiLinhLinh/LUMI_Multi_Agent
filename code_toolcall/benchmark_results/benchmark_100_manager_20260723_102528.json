@@ -1,0 +1,543 @@
+{
+  "generated_at": "2026-07-23T10:25:28.905604",
+  "table": "manager",
+  "summary": {
+    "requests": 25,
+    "sample_start_index": 26,
+    "sample_end_index": 50,
+    "routing_accuracy_percent": 100.0,
+    "prefill_rate_p50_tok_s": 25.06,
+    "generation_rate_p50_tok_s": 4.01,
+    "inference_latency_p50_ms": 10213.92,
+    "inference_latency_p95_ms": 45101.24,
+    "input_tokens_p50": 258,
+    "output_tokens_p50": 38
+  },
+  "runs": [
+    {
+      "index": 26,
+      "query": "Dự báo thời tiết Hà Nội ngày mai.",
+      "expected_agent": "weather",
+      "selected_agent": "weather",
+      "routing_correct": true,
+      "inference_latency_ms": 28196.66,
+      "rates": {
+        "input_tokens": 258,
+        "output_tokens": 34,
+        "inference_ms": 28196.55,
+        "prefill_rate_tok_s": 9.15,
+        "generation_rate_tok_s": 1.21
+      },
+      "manager_decision": {
+        "selected_agent": "weather",
+        "reason": "The user is asking for the weather forecast for Hanoi tomorrow.",
+        "source": "gemini_function_call",
+        "error": null
+      }
+    },
+    {
+      "index": 27,
+      "query": "Ngày mai ở Hà Nội có mưa không?",
+      "expected_agent": "weather",
+      "selected_agent": "weather",
+      "routing_correct": true,
+      "inference_latency_ms": 20701.36,
+      "rates": {
+        "input_tokens": 258,
+        "output_tokens": 38,
+        "inference_ms": 20701.16,
+        "prefill_rate_tok_s": 12.46,
+        "generation_rate_tok_s": 1.84
+      },
+      "manager_decision": {
+        "selected_agent": "weather",
+        "reason": "The user is asking about the weather forecast (rain) in Hanoi for tomorrow.",
+        "source": "gemini_function_call",
+        "error": null
+      }
+    },
+    {
+      "index": 28,
+      "query": "Mai trời Hà Nội như thế nào?",
+      "expected_agent": "weather",
+      "selected_agent": "weather",
+      "routing_correct": true,
+      "inference_latency_ms": 15157.27,
+      "rates": {
+        "input_tokens": 257,
+        "output_tokens": 42,
+        "inference_ms": 15157.16,
+        "prefill_rate_tok_s": 16.96,
+        "generation_rate_tok_s": 2.77
+      },
+      "manager_decision": {
+        "selected_agent": "weather",
+        "reason": "The user is asking about the weather in Hanoi tomorrow (\"Mai trời Hà Nội như thế nào?\").",
+        "source": "gemini_function_call",
+        "error": null
+      }
+    },
+    {
+      "index": 29,
+      "query": "Xem nhiệt độ Hà Nội vào ngày mai.",
+      "expected_agent": "weather",
+      "selected_agent": "weather",
+      "routing_correct": true,
+      "inference_latency_ms": 30999.12,
+      "rates": {
+        "input_tokens": 258,
+        "output_tokens": 33,
+        "inference_ms": 30999.01,
+        "prefill_rate_tok_s": 8.32,
+        "generation_rate_tok_s": 1.06
+      },
+      "manager_decision": {
+        "selected_agent": "weather",
+        "reason": "The user is asking for the temperature in Hanoi tomorrow.",
+        "source": "gemini_function_call",
+        "error": null
+      }
+    },
+    {
+      "index": 30,
+      "query": "Cho tôi dự báo Hà Nội cho ngày mai.",
+      "expected_agent": "weather",
+      "selected_agent": "weather",
+      "routing_correct": true,
+      "inference_latency_ms": 46752.36,
+      "rates": {
+        "input_tokens": 259,
+        "output_tokens": 34,
+        "inference_ms": 46752.17,
+        "prefill_rate_tok_s": 5.54,
+        "generation_rate_tok_s": 0.73
+      },
+      "manager_decision": {
+        "selected_agent": "weather",
+        "reason": "The user is asking for the weather forecast for Hanoi tomorrow.",
+        "source": "gemini_function_call",
+        "error": null
+      }
+    },
+    {
+      "index": 31,
+      "query": "Dự báo thời tiết Đà Nẵng ngày mai.",
+      "expected_agent": "weather",
+      "selected_agent": "weather",
+      "routing_correct": true,
+      "inference_latency_ms": 15852.01,
+      "rates": {
+        "input_tokens": 260,
+        "output_tokens": 35,
+        "inference_ms": 15851.9,
+        "prefill_rate_tok_s": 16.4,
+        "generation_rate_tok_s": 2.21
+      },
+      "manager_decision": {
+        "selected_agent": "weather",
+        "reason": "The user is asking for the weather forecast for Da Nang tomorrow.",
+        "source": "gemini_function_call",
+        "error": null
+      }
+    },
+    {
+      "index": 32,
+      "query": "Ngày mai ở Đà Nẵng có mưa không?",
+      "expected_agent": "weather",
+      "selected_agent": "weather",
+      "routing_correct": true,
+      "inference_latency_ms": 8023.25,
+      "rates": {
+        "input_tokens": 260,
+        "output_tokens": 39,
+        "inference_ms": 8023.13,
+        "prefill_rate_tok_s": 32.41,
+        "generation_rate_tok_s": 4.86
+      },
+      "manager_decision": {
+        "selected_agent": "weather",
+        "reason": "The user is asking about the weather forecast (rain) in Da Nang for tomorrow.",
+        "source": "gemini_function_call",
+        "error": null
+      }
+    },
+    {
+      "index": 33,
+      "query": "Mai trời Đà Nẵng như thế nào?",
+      "expected_agent": "weather",
+      "selected_agent": "weather",
+      "routing_correct": true,
+      "inference_latency_ms": 6119.83,
+      "rates": {
+        "input_tokens": 259,
+        "output_tokens": 34,
+        "inference_ms": 6119.68,
+        "prefill_rate_tok_s": 42.32,
+        "generation_rate_tok_s": 5.56
+      },
+      "manager_decision": {
+        "selected_agent": "weather",
+        "reason": "The user is asking about the weather in Da Nang tomorrow.",
+        "source": "gemini_function_call",
+        "error": null
+      }
+    },
+    {
+      "index": 34,
+      "query": "Xem nhiệt độ Đà Nẵng vào ngày mai.",
+      "expected_agent": "weather",
+      "selected_agent": "weather",
+      "routing_correct": true,
+      "inference_latency_ms": 1654.23,
+      "rates": {
+        "input_tokens": 260,
+        "output_tokens": 34,
+        "inference_ms": 1654.06,
+        "prefill_rate_tok_s": 157.19,
+        "generation_rate_tok_s": 20.56
+      },
+      "manager_decision": {
+        "selected_agent": "weather",
+        "reason": "The user is asking for the temperature in Da Nang tomorrow.",
+        "source": "gemini_function_call",
+        "error": null
+      }
+    },
+    {
+      "index": 35,
+      "query": "Cho tôi dự báo Đà Nẵng cho ngày mai.",
+      "expected_agent": "weather",
+      "selected_agent": "weather",
+      "routing_correct": true,
+      "inference_latency_ms": 8703.84,
+      "rates": {
+        "input_tokens": 261,
+        "output_tokens": 35,
+        "inference_ms": 8703.73,
+        "prefill_rate_tok_s": 29.99,
+        "generation_rate_tok_s": 4.02
+      },
+      "manager_decision": {
+        "selected_agent": "weather",
+        "reason": "The user is asking for the weather forecast for Da Nang tomorrow.",
+        "source": "gemini_function_call",
+        "error": null
+      }
+    },
+    {
+      "index": 36,
+      "query": "Dự báo thời tiết Hồ Chí Minh ngày mai.",
+      "expected_agent": "weather",
+      "selected_agent": "weather",
+      "routing_correct": true,
+      "inference_latency_ms": 3970.2,
+      "rates": {
+        "input_tokens": 259,
+        "output_tokens": 37,
+        "inference_ms": 3970.06,
+        "prefill_rate_tok_s": 65.24,
+        "generation_rate_tok_s": 9.32
+      },
+      "manager_decision": {
+        "selected_agent": "weather",
+        "reason": "The user is asking for the weather forecast for Ho Chi Minh City tomorrow.",
+        "source": "gemini_function_call",
+        "error": null
+      }
+    },
+    {
+      "index": 37,
+      "query": "Ngày mai ở Hồ Chí Minh có mưa không?",
+      "expected_agent": "weather",
+      "selected_agent": "weather",
+      "routing_correct": true,
+      "inference_latency_ms": 3868.2,
+      "rates": {
+        "input_tokens": 259,
+        "output_tokens": 41,
+        "inference_ms": 3868.03,
+        "prefill_rate_tok_s": 66.96,
+        "generation_rate_tok_s": 10.6
+      },
+      "manager_decision": {
+        "selected_agent": "weather",
+        "reason": "The user is asking about the weather forecast (rain) in Ho Chi Minh City for tomorrow.",
+        "source": "gemini_function_call",
+        "error": null
+      }
+    },
+    {
+      "index": 38,
+      "query": "Mai trời Hồ Chí Minh như thế nào?",
+      "expected_agent": "weather",
+      "selected_agent": "weather",
+      "routing_correct": true,
+      "inference_latency_ms": 9249.63,
+      "rates": {
+        "input_tokens": 258,
+        "output_tokens": 47,
+        "inference_ms": 9249.5,
+        "prefill_rate_tok_s": 27.89,
+        "generation_rate_tok_s": 5.08
+      },
+      "manager_decision": {
+        "selected_agent": "weather",
+        "reason": "The user is asking about the weather forecast for Ho Chi Minh City tomorrow (\"Mai trời Hồ Chí Minh như thế nào?\").",
+        "source": "gemini_function_call",
+        "error": null
+      }
+    },
+    {
+      "index": 39,
+      "query": "Xem nhiệt độ Hồ Chí Minh vào ngày mai.",
+      "expected_agent": "weather",
+      "selected_agent": "weather",
+      "routing_correct": true,
+      "inference_latency_ms": 16655.59,
+      "rates": {
+        "input_tokens": 259,
+        "output_tokens": 36,
+        "inference_ms": 16655.44,
+        "prefill_rate_tok_s": 15.55,
+        "generation_rate_tok_s": 2.16
+      },
+      "manager_decision": {
+        "selected_agent": "weather",
+        "reason": "The user is asking for the temperature in Ho Chi Minh City tomorrow.",
+        "source": "gemini_function_call",
+        "error": null
+      }
+    },
+    {
+      "index": 40,
+      "query": "Cho tôi dự báo Hồ Chí Minh cho ngày mai.",
+      "expected_agent": "weather",
+      "selected_agent": "weather",
+      "routing_correct": true,
+      "inference_latency_ms": 27405.14,
+      "rates": {
+        "input_tokens": 260,
+        "output_tokens": 38,
+        "inference_ms": 27405.02,
+        "prefill_rate_tok_s": 9.49,
+        "generation_rate_tok_s": 1.39
+      },
+      "manager_decision": {
+        "selected_agent": "weather",
+        "reason": "The user is asking for the weather forecast for Ho Chi Minh City for tomorrow.",
+        "source": "gemini_function_call",
+        "error": null
+      }
+    },
+    {
+      "index": 41,
+      "query": "Mở một bài nhạc buồn.",
+      "expected_agent": "music",
+      "selected_agent": "music",
+      "routing_correct": true,
+      "inference_latency_ms": 19215.99,
+      "rates": {
+        "input_tokens": 256,
+        "output_tokens": 39,
+        "inference_ms": 19215.85,
+        "prefill_rate_tok_s": 13.32,
+        "generation_rate_tok_s": 2.03
+      },
+      "manager_decision": {
+        "selected_agent": "music",
+        "reason": "The user is asking to play a sad song (\"Mở một bài nhạc buồn\").",
+        "source": "gemini_function_call",
+        "error": null
+      }
+    },
+    {
+      "index": 42,
+      "query": "Gợi ý cho tôi nhạc tâm trạng.",
+      "expected_agent": "music",
+      "selected_agent": "music",
+      "routing_correct": true,
+      "inference_latency_ms": 45101.24,
+      "rates": {
+        "input_tokens": 258,
+        "output_tokens": 46,
+        "inference_ms": 45101.11,
+        "prefill_rate_tok_s": 5.72,
+        "generation_rate_tok_s": 1.02
+      },
+      "manager_decision": {
+        "selected_agent": "music",
+        "reason": "The user is asking for music suggestions (\"Gợi ý cho tôi nhạc tâm trạng\"), which falls under the music domain.",
+        "source": "gemini_function_call",
+        "error": null
+      }
+    },
+    {
+      "index": 43,
+      "query": "Tìm một ca khúc nhẹ nhàng, buồn.",
+      "expected_agent": "music",
+      "selected_agent": "music",
+      "routing_correct": true,
+      "inference_latency_ms": 23273.27,
+      "rates": {
+        "input_tokens": 258,
+        "output_tokens": 34,
+        "inference_ms": 23273.16,
+        "prefill_rate_tok_s": 11.09,
+        "generation_rate_tok_s": 1.46
+      },
+      "manager_decision": {
+        "selected_agent": "music",
+        "reason": "The user is asking to find a gentle and sad song.",
+        "source": "gemini_function_call",
+        "error": null
+      }
+    },
+    {
+      "index": 44,
+      "query": "Tôi muốn nghe nhạc buồn.",
+      "expected_agent": "music",
+      "selected_agent": "music",
+      "routing_correct": true,
+      "inference_latency_ms": 16012.18,
+      "rates": {
+        "input_tokens": 255,
+        "output_tokens": 37,
+        "inference_ms": 16011.98,
+        "prefill_rate_tok_s": 15.93,
+        "generation_rate_tok_s": 2.31
+      },
+      "manager_decision": {
+        "selected_agent": "music",
+        "reason": "The user wants to listen to sad music (\"Tôi muốn nghe nhạc buồn\").",
+        "source": "gemini_function_call",
+        "error": null
+      }
+    },
+    {
+      "index": 45,
+      "query": "Có bài nào phù hợp lúc buồn không?",
+      "expected_agent": "music",
+      "selected_agent": "music",
+      "routing_correct": true,
+      "inference_latency_ms": 3491.5,
+      "rates": {
+        "input_tokens": 258,
+        "output_tokens": 47,
+        "inference_ms": 3491.38,
+        "prefill_rate_tok_s": 73.9,
+        "generation_rate_tok_s": 13.46
+      },
+      "manager_decision": {
+        "selected_agent": "music",
+        "reason": "The user is asking for music recommendations suitable for when they are feeling sad (\"Có bài nào phù hợp lúc buồn không?\").",
+        "source": "gemini_function_call",
+        "error": null
+      }
+    },
+    {
+      "index": 46,
+      "query": "Tìm nhạc chill buồn trong kho.",
+      "expected_agent": "music",
+      "selected_agent": "music",
+      "routing_correct": true,
+      "inference_latency_ms": 10213.92,
+      "rates": {
+        "input_tokens": 256,
+        "output_tokens": 41,
+        "inference_ms": 10213.75,
+        "prefill_rate_tok_s": 25.06,
+        "generation_rate_tok_s": 4.01
+      },
+      "manager_decision": {
+        "selected_agent": "music",
+        "reason": "The user is asking to find \"chill buồn\" (sad chill) music in the catalog.",
+        "source": "gemini_function_call",
+        "error": null
+      }
+    },
+    {
+      "index": 47,
+      "query": "Gợi ý nhạc để thư giãn buổi tối.",
+      "expected_agent": "music",
+      "selected_agent": "music",
+      "routing_correct": true,
+      "inference_latency_ms": 3360.36,
+      "rates": {
+        "input_tokens": 259,
+        "output_tokens": 35,
+        "inference_ms": 3360.16,
+        "prefill_rate_tok_s": 77.08,
+        "generation_rate_tok_s": 10.42
+      },
+      "manager_decision": {
+        "selected_agent": "music",
+        "reason": "The user is asking for music suggestions to relax in the evening.",
+        "source": "gemini_function_call",
+        "error": null
+      }
+    },
+    {
+      "index": 48,
+      "query": "Mở một bài hát tâm trạng.",
+      "expected_agent": "music",
+      "selected_agent": "music",
+      "routing_correct": true,
+      "inference_latency_ms": 5595.84,
+      "rates": {
+        "input_tokens": 257,
+        "output_tokens": 43,
+        "inference_ms": 5595.7,
+        "prefill_rate_tok_s": 45.93,
+        "generation_rate_tok_s": 7.68
+      },
+      "manager_decision": {
+        "selected_agent": "music",
+        "reason": "The user is asking to play a \"moody song\" (Mở một bài hát tâm trạng).",
+        "source": "gemini_function_call",
+        "error": null
+      }
+    },
+    {
+      "index": 49,
+      "query": "Tìm giúp tôi bài nhạc buồn nhé.",
+      "expected_agent": "music",
+      "selected_agent": "music",
+      "routing_correct": true,
+      "inference_latency_ms": 6257.67,
+      "rates": {
+        "input_tokens": 257,
+        "output_tokens": 39,
+        "inference_ms": 6257.53,
+        "prefill_rate_tok_s": 41.07,
+        "generation_rate_tok_s": 6.23
+      },
+      "manager_decision": {
+        "selected_agent": "music",
+        "reason": "The user is asking to find sad music (\"Tìm giúp tôi bài nhạc buồn nhé\").",
+        "source": "gemini_function_call",
+        "error": null
+      }
+    },
+    {
+      "index": 50,
+      "query": "Cho tôi một gợi ý nhạc nhẹ nhàng.",
+      "expected_agent": "music",
+      "selected_agent": "music",
+      "routing_correct": true,
+      "inference_latency_ms": 4097.66,
+      "rates": {
+        "input_tokens": 258,
+        "output_tokens": 38,
+        "inference_ms": 4097.53,
+        "prefill_rate_tok_s": 62.96,
+        "generation_rate_tok_s": 9.27
+      },
+      "manager_decision": {
+        "selected_agent": "music",
+        "reason": "The user is asking for a suggestion for gentle music (\"nhạc nhẹ nhàng\").",
+        "source": "gemini_function_call",
+        "error": null
+      }
+    }
+  ]
+}

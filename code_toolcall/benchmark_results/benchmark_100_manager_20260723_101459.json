@@ -1,0 +1,546 @@
+{
+  "generated_at": "2026-07-23T10:14:59.593835",
+  "table": "manager",
+  "summary": {
+    "requests": 25,
+    "sample_start_index": 1,
+    "sample_end_index": 25,
+    "routing_accuracy_percent": 96.0,
+    "prefill_rate_p50_tok_s": 25.87,
+    "generation_rate_p50_tok_s": 3.71,
+    "inference_latency_p50_ms": 4395.14,
+    "inference_latency_p95_ms": 22788.8,
+    "input_tokens_p50": 259,
+    "output_tokens_p50": 34
+  },
+  "runs": [
+    {
+      "index": 1,
+      "query": "Thời tiết Hà Nội hôm nay thế nào?",
+      "expected_agent": "weather",
+      "selected_agent": "weather",
+      "routing_correct": true,
+      "inference_latency_ms": 22788.8,
+      "rates": {
+        "input_tokens": 258,
+        "output_tokens": 33,
+        "inference_ms": 22788.7,
+        "prefill_rate_tok_s": 11.32,
+        "generation_rate_tok_s": 1.45
+      },
+      "manager_decision": {
+        "selected_agent": "weather",
+        "reason": "The user is asking about the weather in Hanoi today.",
+        "source": "gemini_function_call",
+        "error": null
+      }
+    },
+    {
+      "index": 2,
+      "query": "Cho tôi biết trời ở Hà Nội bây giờ.",
+      "expected_agent": "weather",
+      "selected_agent": "weather",
+      "routing_correct": true,
+      "inference_latency_ms": 12508.43,
+      "rates": {
+        "input_tokens": 259,
+        "output_tokens": 33,
+        "inference_ms": 12508.26,
+        "prefill_rate_tok_s": 20.71,
+        "generation_rate_tok_s": 2.64
+      },
+      "manager_decision": {
+        "selected_agent": "weather",
+        "reason": "The user is asking for the current weather in Hanoi.",
+        "source": "gemini_function_call",
+        "error": null
+      }
+    },
+    {
+      "index": 3,
+      "query": "Hiện tại Hà Nội có mưa không?",
+      "expected_agent": "weather",
+      "selected_agent": "weather",
+      "routing_correct": true,
+      "inference_latency_ms": 12813.87,
+      "rates": {
+        "input_tokens": 257,
+        "output_tokens": 34,
+        "inference_ms": 12813.77,
+        "prefill_rate_tok_s": 20.06,
+        "generation_rate_tok_s": 2.65
+      },
+      "manager_decision": {
+        "selected_agent": "weather",
+        "reason": "The user is asking if it is currently raining in Hanoi.",
+        "source": "gemini_function_call",
+        "error": null
+      }
+    },
+    {
+      "index": 4,
+      "query": "Nhiệt độ lúc này tại Hà Nội bao nhiêu?",
+      "expected_agent": "weather",
+      "selected_agent": "weather",
+      "routing_correct": true,
+      "inference_latency_ms": 17095.48,
+      "rates": {
+        "input_tokens": 260,
+        "output_tokens": 33,
+        "inference_ms": 17095.35,
+        "prefill_rate_tok_s": 15.21,
+        "generation_rate_tok_s": 1.93
+      },
+      "manager_decision": {
+        "selected_agent": "weather",
+        "reason": "The user is asking for the current temperature in Hanoi.",
+        "source": "gemini_function_call",
+        "error": null
+      }
+    },
+    {
+      "index": 5,
+      "query": "Xem thời tiết hiện giờ ở Hà Nội.",
+      "expected_agent": "weather",
+      "selected_agent": "weather",
+      "routing_correct": true,
+      "inference_latency_ms": 4395.14,
+      "rates": {
+        "input_tokens": 258,
+        "output_tokens": 33,
+        "inference_ms": 4395.01,
+        "prefill_rate_tok_s": 58.7,
+        "generation_rate_tok_s": 7.51
+      },
+      "manager_decision": {
+        "selected_agent": "weather",
+        "reason": "The user is asking for the current weather in Hanoi.",
+        "source": "gemini_function_call",
+        "error": null
+      }
+    },
+    {
+      "index": 6,
+      "query": "Thời tiết Đà Nẵng hôm nay thế nào?",
+      "expected_agent": "weather",
+      "selected_agent": "weather",
+      "routing_correct": true,
+      "inference_latency_ms": 2238.98,
+      "rates": {
+        "input_tokens": 260,
+        "output_tokens": 34,
+        "inference_ms": 2238.82,
+        "prefill_rate_tok_s": 116.13,
+        "generation_rate_tok_s": 15.19
+      },
+      "manager_decision": {
+        "selected_agent": "weather",
+        "reason": "The user is asking for the current weather in Da Nang.",
+        "source": "gemini_function_call",
+        "error": null
+      }
+    },
+    {
+      "index": 7,
+      "query": "Cho tôi biết trời ở Đà Nẵng bây giờ.",
+      "expected_agent": "weather",
+      "selected_agent": "weather",
+      "routing_correct": true,
+      "inference_latency_ms": 3854.11,
+      "rates": {
+        "input_tokens": 261,
+        "output_tokens": 34,
+        "inference_ms": 3853.96,
+        "prefill_rate_tok_s": 67.72,
+        "generation_rate_tok_s": 8.82
+      },
+      "manager_decision": {
+        "selected_agent": "weather",
+        "reason": "The user is asking for the current weather in Da Nang.",
+        "source": "gemini_function_call",
+        "error": null
+      }
+    },
+    {
+      "index": 8,
+      "query": "Hiện tại Đà Nẵng có mưa không?",
+      "expected_agent": "weather",
+      "selected_agent": "weather",
+      "routing_correct": true,
+      "inference_latency_ms": 1771.79,
+      "rates": {
+        "input_tokens": 259,
+        "output_tokens": 35,
+        "inference_ms": 1771.63,
+        "prefill_rate_tok_s": 146.19,
+        "generation_rate_tok_s": 19.76
+      },
+      "manager_decision": {
+        "selected_agent": "weather",
+        "reason": "The user is asking if it is currently raining in Da Nang.",
+        "source": "gemini_function_call",
+        "error": null
+      }
+    },
+    {
+      "index": 9,
+      "query": "Nhiệt độ lúc này tại Đà Nẵng bao nhiêu?",
+      "expected_agent": "weather",
+      "selected_agent": "weather",
+      "routing_correct": true,
+      "inference_latency_ms": 1835.51,
+      "rates": {
+        "input_tokens": 262,
+        "output_tokens": 34,
+        "inference_ms": 1835.17,
+        "prefill_rate_tok_s": 142.77,
+        "generation_rate_tok_s": 18.53
+      },
+      "manager_decision": {
+        "selected_agent": "weather",
+        "reason": "The user is asking for the current temperature in Da Nang.",
+        "source": "gemini_function_call",
+        "error": null
+      }
+    },
+    {
+      "index": 10,
+      "query": "Xem thời tiết hiện giờ ở Đà Nẵng.",
+      "expected_agent": "weather",
+      "selected_agent": "weather",
+      "routing_correct": true,
+      "inference_latency_ms": 1860.76,
+      "rates": {
+        "input_tokens": 260,
+        "output_tokens": 34,
+        "inference_ms": 1860.59,
+        "prefill_rate_tok_s": 139.74,
+        "generation_rate_tok_s": 18.27
+      },
+      "manager_decision": {
+        "selected_agent": "weather",
+        "reason": "The user is asking for the current weather in Da Nang.",
+        "source": "gemini_function_call",
+        "error": null
+      }
+    },
+    {
+      "index": 11,
+      "query": "Thời tiết Hồ Chí Minh hôm nay thế nào?",
+      "expected_agent": "weather",
+      "selected_agent": "weather",
+      "routing_correct": true,
+      "inference_latency_ms": 1721.42,
+      "rates": {
+        "input_tokens": 259,
+        "output_tokens": 36,
+        "inference_ms": 1721.3,
+        "prefill_rate_tok_s": 150.47,
+        "generation_rate_tok_s": 20.91
+      },
+      "manager_decision": {
+        "selected_agent": "weather",
+        "reason": "The user is asking for the current weather in Ho Chi Minh City.",
+        "source": "gemini_function_call",
+        "error": null
+      }
+    },
+    {
+      "index": 12,
+      "query": "Cho tôi biết trời ở Hồ Chí Minh bây giờ.",
+      "expected_agent": "weather",
+      "selected_agent": "weather",
+      "routing_correct": true,
+      "inference_latency_ms": 3130.23,
+      "rates": {
+        "input_tokens": 260,
+        "output_tokens": 36,
+        "inference_ms": 3130.1,
+        "prefill_rate_tok_s": 83.06,
+        "generation_rate_tok_s": 11.5
+      },
+      "manager_decision": {
+        "selected_agent": "weather",
+        "reason": "The user is asking for the current weather in Ho Chi Minh City.",
+        "source": "gemini_function_call",
+        "error": null
+      }
+    },
+    {
+      "index": 13,
+      "query": "Hiện tại Hồ Chí Minh có mưa không?",
+      "expected_agent": "weather",
+      "selected_agent": "weather",
+      "routing_correct": true,
+      "inference_latency_ms": 9972.73,
+      "rates": {
+        "input_tokens": 258,
+        "output_tokens": 37,
+        "inference_ms": 9972.58,
+        "prefill_rate_tok_s": 25.87,
+        "generation_rate_tok_s": 3.71
+      },
+      "manager_decision": {
+        "selected_agent": "weather",
+        "reason": "The user is asking if it is currently raining in Ho Chi Minh City.",
+        "source": "gemini_function_call",
+        "error": null
+      }
+    },
+    {
+      "index": 14,
+      "query": "Nhiệt độ lúc này tại Hồ Chí Minh bao nhiêu?",
+      "expected_agent": "weather",
+      "selected_agent": "weather",
+      "routing_correct": true,
+      "inference_latency_ms": 13979.88,
+      "rates": {
+        "input_tokens": 261,
+        "output_tokens": 36,
+        "inference_ms": 13979.75,
+        "prefill_rate_tok_s": 18.67,
+        "generation_rate_tok_s": 2.58
+      },
+      "manager_decision": {
+        "selected_agent": "weather",
+        "reason": "The user is asking for the current temperature in Ho Chi Minh City.",
+        "source": "gemini_function_call",
+        "error": null
+      }
+    },
+    {
+      "index": 15,
+      "query": "Xem thời tiết hiện giờ ở Hồ Chí Minh.",
+      "expected_agent": "weather",
+      "selected_agent": "weather",
+      "routing_correct": true,
+      "inference_latency_ms": 13423.91,
+      "rates": {
+        "input_tokens": 259,
+        "output_tokens": 36,
+        "inference_ms": 13423.66,
+        "prefill_rate_tok_s": 19.29,
+        "generation_rate_tok_s": 2.68
+      },
+      "manager_decision": {
+        "selected_agent": "weather",
+        "reason": "The user is asking for the current weather in Ho Chi Minh City.",
+        "source": "gemini_function_call",
+        "error": null
+      }
+    },
+    {
+      "index": 16,
+      "query": "Thời tiết Hải Phòng hôm nay thế nào?",
+      "expected_agent": "weather",
+      "selected_agent": "weather",
+      "routing_correct": true,
+      "inference_latency_ms": 1974.35,
+      "rates": {
+        "input_tokens": 258,
+        "output_tokens": 34,
+        "inference_ms": 1974.25,
+        "prefill_rate_tok_s": 130.68,
+        "generation_rate_tok_s": 17.22
+      },
+      "manager_decision": {
+        "selected_agent": "weather",
+        "reason": "The user is asking for the current weather in Hai Phong.",
+        "source": "gemini_function_call",
+        "error": null
+      }
+    },
+    {
+      "index": 17,
+      "query": "Cho tôi biết trời ở Hải Phòng bây giờ.",
+      "expected_agent": "weather",
+      "selected_agent": "weather",
+      "routing_correct": true,
+      "inference_latency_ms": 40214.69,
+      "rates": {
+        "input_tokens": 259,
+        "output_tokens": 34,
+        "inference_ms": 40214.55,
+        "prefill_rate_tok_s": 6.44,
+        "generation_rate_tok_s": 0.85
+      },
+      "manager_decision": {
+        "selected_agent": "weather",
+        "reason": "The user is asking for the current weather in Hai Phong.",
+        "source": "gemini_function_call",
+        "error": null
+      }
+    },
+    {
+      "index": 18,
+      "query": "Hiện tại Hải Phòng có mưa không?",
+      "expected_agent": "weather",
+      "selected_agent": "weather",
+      "routing_correct": true,
+      "inference_latency_ms": 2166.55,
+      "rates": {
+        "input_tokens": 257,
+        "output_tokens": 35,
+        "inference_ms": 2166.43,
+        "prefill_rate_tok_s": 118.63,
+        "generation_rate_tok_s": 16.16
+      },
+      "manager_decision": {
+        "selected_agent": "weather",
+        "reason": "The user is asking if it is currently raining in Hai Phong.",
+        "source": "gemini_function_call",
+        "error": null
+      }
+    },
+    {
+      "index": 19,
+      "query": "Nhiệt độ lúc này tại Hải Phòng bao nhiêu?",
+      "expected_agent": "weather",
+      "selected_agent": "error",
+      "routing_correct": false,
+      "inference_latency_ms": 1264.72,
+      "rates": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "inference_ms": 1264.62,
+        "prefill_rate_tok_s": 0.0,
+        "generation_rate_tok_s": 0.0
+      },
+      "manager_decision": {
+        "selected_agent": "error",
+        "reason": "Manager LLM did not return a valid route.",
+        "source": "gemini_function_call",
+        "error": {
+          "type": "ServerError",
+          "message": "500 INTERNAL. {'error': {'code': 500, 'message': 'Internal error encountered.', 'status': 'INTERNAL'}}"
+        }
+      }
+    },
+    {
+      "index": 20,
+      "query": "Xem thời tiết hiện giờ ở Hải Phòng.",
+      "expected_agent": "weather",
+      "selected_agent": "weather",
+      "routing_correct": true,
+      "inference_latency_ms": 21633.74,
+      "rates": {
+        "input_tokens": 258,
+        "output_tokens": 34,
+        "inference_ms": 21633.59,
+        "prefill_rate_tok_s": 11.93,
+        "generation_rate_tok_s": 1.57
+      },
+      "manager_decision": {
+        "selected_agent": "weather",
+        "reason": "The user is asking for the current weather in Hai Phong.",
+        "source": "gemini_function_call",
+        "error": null
+      }
+    },
+    {
+      "index": 21,
+      "query": "Thời tiết Cần Thơ hôm nay thế nào?",
+      "expected_agent": "weather",
+      "selected_agent": "weather",
+      "routing_correct": true,
+      "inference_latency_ms": 20961.29,
+      "rates": {
+        "input_tokens": 260,
+        "output_tokens": 34,
+        "inference_ms": 20961.15,
+        "prefill_rate_tok_s": 12.4,
+        "generation_rate_tok_s": 1.62
+      },
+      "manager_decision": {
+        "selected_agent": "weather",
+        "reason": "The user is asking for the current weather in Can Tho.",
+        "source": "gemini_function_call",
+        "error": null
+      }
+    },
+    {
+      "index": 22,
+      "query": "Cho tôi biết trời ở Cần Thơ bây giờ.",
+      "expected_agent": "weather",
+      "selected_agent": "weather",
+      "routing_correct": true,
+      "inference_latency_ms": 12409.43,
+      "rates": {
+        "input_tokens": 261,
+        "output_tokens": 34,
+        "inference_ms": 12409.3,
+        "prefill_rate_tok_s": 21.03,
+        "generation_rate_tok_s": 2.74
+      },
+      "manager_decision": {
+        "selected_agent": "weather",
+        "reason": "The user is asking for the current weather in Can Tho.",
+        "source": "gemini_function_call",
+        "error": null
+      }
+    },
+    {
+      "index": 23,
+      "query": "Hiện tại Cần Thơ có mưa không?",
+      "expected_agent": "weather",
+      "selected_agent": "weather",
+      "routing_correct": true,
+      "inference_latency_ms": 14049.53,
+      "rates": {
+        "input_tokens": 259,
+        "output_tokens": 35,
+        "inference_ms": 14049.37,
+        "prefill_rate_tok_s": 18.43,
+        "generation_rate_tok_s": 2.49
+      },
+      "manager_decision": {
+        "selected_agent": "weather",
+        "reason": "The user is asking if it is currently raining in Can Tho.",
+        "source": "gemini_function_call",
+        "error": null
+      }
+    },
+    {
+      "index": 24,
+      "query": "Nhiệt độ lúc này tại Cần Thơ bao nhiêu?",
+      "expected_agent": "weather",
+      "selected_agent": "weather",
+      "routing_correct": true,
+      "inference_latency_ms": 2172.02,
+      "rates": {
+        "input_tokens": 262,
+        "output_tokens": 34,
+        "inference_ms": 2171.89,
+        "prefill_rate_tok_s": 120.63,
+        "generation_rate_tok_s": 15.65
+      },
+      "manager_decision": {
+        "selected_agent": "weather",
+        "reason": "The user is asking for the current temperature in Can Tho.",
+        "source": "gemini_function_call",
+        "error": null
+      }
+    },
+    {
+      "index": 25,
+      "query": "Xem thời tiết hiện giờ ở Cần Thơ.",
+      "expected_agent": "weather",
+      "selected_agent": "weather",
+      "routing_correct": true,
+      "inference_latency_ms": 2438.72,
+      "rates": {
+        "input_tokens": 260,
+        "output_tokens": 34,
+        "inference_ms": 2438.57,
+        "prefill_rate_tok_s": 106.62,
+        "generation_rate_tok_s": 13.94
+      },
+      "manager_decision": {
+        "selected_agent": "weather",
+        "reason": "The user is asking for the current weather in Can Tho.",
+        "source": "gemini_function_call",
+        "error": null
+      }
+    }
+  ]
+}

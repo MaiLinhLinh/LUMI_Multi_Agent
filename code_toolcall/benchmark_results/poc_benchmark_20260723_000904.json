@@ -1,0 +1,1313 @@
+{
+  "generated_at": "2026-07-23T00:09:06.424799",
+  "summary": {
+    "weather_tomorrow": {
+      "requests": 10,
+      "successes": 0,
+      "success_rate_percent": 0.0,
+      "tool_call_correct": 0,
+      "tool_call_correct_rate_percent": 0.0,
+      "total_latency_p50_ms": 10.46,
+      "total_latency_p95_ms": 62.02,
+      "backend_e2e_ttft_p50_ms": null,
+      "input_tokens_p50": null,
+      "output_tokens_p50": null
+    },
+    "weather_week_followup": {
+      "requests": 10,
+      "successes": 0,
+      "success_rate_percent": 0.0,
+      "tool_call_correct": 0,
+      "tool_call_correct_rate_percent": 0.0,
+      "total_latency_p50_ms": 10.23,
+      "total_latency_p95_ms": 16.35,
+      "backend_e2e_ttft_p50_ms": null,
+      "input_tokens_p50": null,
+      "output_tokens_p50": null
+    },
+    "weather_hourly": {
+      "requests": 10,
+      "successes": 0,
+      "success_rate_percent": 0.0,
+      "tool_call_correct": 0,
+      "tool_call_correct_rate_percent": 0.0,
+      "total_latency_p50_ms": 9.46,
+      "total_latency_p95_ms": 10.04,
+      "backend_e2e_ttft_p50_ms": null,
+      "input_tokens_p50": null,
+      "output_tokens_p50": null
+    },
+    "music_exact": {
+      "requests": 10,
+      "successes": 0,
+      "success_rate_percent": 0.0,
+      "tool_call_correct": 0,
+      "tool_call_correct_rate_percent": 0.0,
+      "total_latency_p50_ms": 10.11,
+      "total_latency_p95_ms": 11.84,
+      "backend_e2e_ttft_p50_ms": null,
+      "input_tokens_p50": null,
+      "output_tokens_p50": null
+    },
+    "music_discovery": {
+      "requests": 10,
+      "successes": 0,
+      "success_rate_percent": 0.0,
+      "tool_call_correct": 0,
+      "tool_call_correct_rate_percent": 0.0,
+      "total_latency_p50_ms": 10.11,
+      "total_latency_p95_ms": 11.09,
+      "backend_e2e_ttft_p50_ms": null,
+      "input_tokens_p50": null,
+      "output_tokens_p50": null
+    }
+  },
+  "runs": {
+    "weather_tomorrow": [
+      {
+        "query": "Thời tiết Hà Nội ngày mai thế nào?",
+        "agent": "weather",
+        "answer": "",
+        "total_latency_ms": 62.02,
+        "backend_e2e_ttft_ms": null,
+        "timings": {
+          "weather_ms": 53.98,
+          "time_to_first_visible_ms": null,
+          "time_to_end_visible_ms": null
+        },
+        "llm_usage": [],
+        "tool_trace": [],
+        "visualization": {},
+        "case": "weather_tomorrow",
+        "functional_success": false,
+        "tool_call_correct": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "note": "agent=weather, template=None"
+      },
+      {
+        "query": "Dự báo thời tiết Hà Nội ngày mai ra sao?",
+        "agent": "weather",
+        "answer": "",
+        "total_latency_ms": 9.03,
+        "backend_e2e_ttft_ms": null,
+        "timings": {
+          "weather_ms": 7.13,
+          "time_to_first_visible_ms": null,
+          "time_to_end_visible_ms": null
+        },
+        "llm_usage": [],
+        "tool_trace": [],
+        "visualization": {},
+        "case": "weather_tomorrow",
+        "functional_success": false,
+        "tool_call_correct": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "note": "agent=weather, template=None"
+      },
+      {
+        "query": "Ngày mai ở Hà Nội có mưa không?",
+        "agent": "error",
+        "answer": "Tôi chưa xác định được yêu cầu thuộc nhóm hỗ trợ nào. Bạn có thể nói rõ hơn về thời tiết, âm nhạc hoặc phần trực quan không?",
+        "total_latency_ms": 9.86,
+        "backend_e2e_ttft_ms": null,
+        "timings": {
+          "manager_ms": 7.25
+        },
+        "llm_usage": [
+          {
+            "stage": "manager",
+            "inference_ms": 7.23
+          }
+        ],
+        "tool_trace": [],
+        "visualization": {},
+        "case": "weather_tomorrow",
+        "functional_success": false,
+        "tool_call_correct": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "note": "agent=error, template=None"
+      },
+      {
+        "query": "Cho tôi xem dự báo Hà Nội vào ngày mai.",
+        "agent": "error",
+        "answer": "Tôi chưa xác định được yêu cầu thuộc nhóm hỗ trợ nào. Bạn có thể nói rõ hơn về thời tiết, âm nhạc hoặc phần trực quan không?",
+        "total_latency_ms": 12.03,
+        "backend_e2e_ttft_ms": null,
+        "timings": {
+          "manager_ms": 9.5
+        },
+        "llm_usage": [
+          {
+            "stage": "manager",
+            "inference_ms": 9.47
+          }
+        ],
+        "tool_trace": [],
+        "visualization": {},
+        "case": "weather_tomorrow",
+        "functional_success": false,
+        "tool_call_correct": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "note": "agent=error, template=None"
+      },
+      {
+        "query": "Thời tiết ngày mai tại Hà Nội như thế nào?",
+        "agent": "weather",
+        "answer": "",
+        "total_latency_ms": 17.69,
+        "backend_e2e_ttft_ms": null,
+        "timings": {
+          "weather_ms": 14.29,
+          "time_to_first_visible_ms": null,
+          "time_to_end_visible_ms": null
+        },
+        "llm_usage": [],
+        "tool_trace": [],
+        "visualization": {},
+        "case": "weather_tomorrow",
+        "functional_success": false,
+        "tool_call_correct": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "note": "agent=weather, template=None"
+      },
+      {
+        "query": "Mai ở Hà Nội trời thế nào?",
+        "agent": "error",
+        "answer": "Tôi chưa xác định được yêu cầu thuộc nhóm hỗ trợ nào. Bạn có thể nói rõ hơn về thời tiết, âm nhạc hoặc phần trực quan không?",
+        "total_latency_ms": 14.8,
+        "backend_e2e_ttft_ms": null,
+        "timings": {
+          "manager_ms": 11.07
+        },
+        "llm_usage": [
+          {
+            "stage": "manager",
+            "inference_ms": 11.03
+          }
+        ],
+        "tool_trace": [],
+        "visualization": {},
+        "case": "weather_tomorrow",
+        "functional_success": false,
+        "tool_call_correct": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "note": "agent=error, template=None"
+      },
+      {
+        "query": "Hà Nội ngày mai có nóng không?",
+        "agent": "error",
+        "answer": "Tôi chưa xác định được yêu cầu thuộc nhóm hỗ trợ nào. Bạn có thể nói rõ hơn về thời tiết, âm nhạc hoặc phần trực quan không?",
+        "total_latency_ms": 11.01,
+        "backend_e2e_ttft_ms": null,
+        "timings": {
+          "manager_ms": 8.75
+        },
+        "llm_usage": [
+          {
+            "stage": "manager",
+            "inference_ms": 8.72
+          }
+        ],
+        "tool_trace": [],
+        "visualization": {},
+        "case": "weather_tomorrow",
+        "functional_success": false,
+        "tool_call_correct": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "note": "agent=error, template=None"
+      },
+      {
+        "query": "Xem giúp tôi dự báo thời tiết Hà Nội cho ngày mai.",
+        "agent": "weather",
+        "answer": "",
+        "total_latency_ms": 8.64,
+        "backend_e2e_ttft_ms": null,
+        "timings": {
+          "weather_ms": 6.56,
+          "time_to_first_visible_ms": null,
+          "time_to_end_visible_ms": null
+        },
+        "llm_usage": [],
+        "tool_trace": [],
+        "visualization": {},
+        "case": "weather_tomorrow",
+        "functional_success": false,
+        "tool_call_correct": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "note": "agent=weather, template=None"
+      },
+      {
+        "query": "Ngày mai Hà Nội nhiệt độ khoảng bao nhiêu?",
+        "agent": "error",
+        "answer": "Tôi chưa xác định được yêu cầu thuộc nhóm hỗ trợ nào. Bạn có thể nói rõ hơn về thời tiết, âm nhạc hoặc phần trực quan không?",
+        "total_latency_ms": 9.01,
+        "backend_e2e_ttft_ms": null,
+        "timings": {
+          "manager_ms": 6.59
+        },
+        "llm_usage": [
+          {
+            "stage": "manager",
+            "inference_ms": 6.57
+          }
+        ],
+        "tool_trace": [],
+        "visualization": {},
+        "case": "weather_tomorrow",
+        "functional_success": false,
+        "tool_call_correct": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "note": "agent=error, template=None"
+      },
+      {
+        "query": "Dự báo cho Hà Nội vào ngày mai nhé.",
+        "agent": "error",
+        "answer": "Tôi chưa xác định được yêu cầu thuộc nhóm hỗ trợ nào. Bạn có thể nói rõ hơn về thời tiết, âm nhạc hoặc phần trực quan không?",
+        "total_latency_ms": 9.9,
+        "backend_e2e_ttft_ms": null,
+        "timings": {
+          "manager_ms": 6.88
+        },
+        "llm_usage": [
+          {
+            "stage": "manager",
+            "inference_ms": 6.86
+          }
+        ],
+        "tool_trace": [],
+        "visualization": {},
+        "case": "weather_tomorrow",
+        "functional_success": false,
+        "tool_call_correct": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "note": "agent=error, template=None"
+      }
+    ],
+    "weather_week_followup": [
+      {
+        "query": "Thế cả tuần thì sao?",
+        "agent": "error",
+        "answer": "Tôi chưa xác định được yêu cầu thuộc nhóm hỗ trợ nào. Bạn có thể nói rõ hơn về thời tiết, âm nhạc hoặc phần trực quan không?",
+        "total_latency_ms": 13.4,
+        "backend_e2e_ttft_ms": null,
+        "timings": {
+          "manager_ms": 8.97
+        },
+        "llm_usage": [
+          {
+            "stage": "manager",
+            "inference_ms": 8.94
+          }
+        ],
+        "tool_trace": [],
+        "visualization": {},
+        "case": "weather_week_followup",
+        "functional_success": false,
+        "tool_call_correct": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "note": "agent=error, days=None, template=None"
+      },
+      {
+        "query": "Cả tuần tới thì sao?",
+        "agent": "error",
+        "answer": "Tôi chưa xác định được yêu cầu thuộc nhóm hỗ trợ nào. Bạn có thể nói rõ hơn về thời tiết, âm nhạc hoặc phần trực quan không?",
+        "total_latency_ms": 10.73,
+        "backend_e2e_ttft_ms": null,
+        "timings": {
+          "manager_ms": 7.85
+        },
+        "llm_usage": [
+          {
+            "stage": "manager",
+            "inference_ms": 7.82
+          }
+        ],
+        "tool_trace": [],
+        "visualization": {},
+        "case": "weather_week_followup",
+        "functional_success": false,
+        "tool_call_correct": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "note": "agent=error, days=None, template=None"
+      },
+      {
+        "query": "Cho tôi xem dự báo 7 ngày tới.",
+        "agent": "error",
+        "answer": "Tôi chưa xác định được yêu cầu thuộc nhóm hỗ trợ nào. Bạn có thể nói rõ hơn về thời tiết, âm nhạc hoặc phần trực quan không?",
+        "total_latency_ms": 11.4,
+        "backend_e2e_ttft_ms": null,
+        "timings": {
+          "manager_ms": 8.26
+        },
+        "llm_usage": [
+          {
+            "stage": "manager",
+            "inference_ms": 8.23
+          }
+        ],
+        "tool_trace": [],
+        "visualization": {},
+        "case": "weather_week_followup",
+        "functional_success": false,
+        "tool_call_correct": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "note": "agent=error, days=None, template=None"
+      },
+      {
+        "query": "Vậy tình hình cả tuần tới ra sao?",
+        "agent": "error",
+        "answer": "Tôi chưa xác định được yêu cầu thuộc nhóm hỗ trợ nào. Bạn có thể nói rõ hơn về thời tiết, âm nhạc hoặc phần trực quan không?",
+        "total_latency_ms": 12.43,
+        "backend_e2e_ttft_ms": null,
+        "timings": {
+          "manager_ms": 8.47
+        },
+        "llm_usage": [
+          {
+            "stage": "manager",
+            "inference_ms": 8.43
+          }
+        ],
+        "tool_trace": [],
+        "visualization": {},
+        "case": "weather_week_followup",
+        "functional_success": false,
+        "tool_call_correct": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "note": "agent=error, days=None, template=None"
+      },
+      {
+        "query": "Còn dự báo cho cả tuần thì thế nào?",
+        "agent": "error",
+        "answer": "Tôi chưa xác định được yêu cầu thuộc nhóm hỗ trợ nào. Bạn có thể nói rõ hơn về thời tiết, âm nhạc hoặc phần trực quan không?",
+        "total_latency_ms": 16.35,
+        "backend_e2e_ttft_ms": null,
+        "timings": {
+          "manager_ms": 12.75
+        },
+        "llm_usage": [
+          {
+            "stage": "manager",
+            "inference_ms": 12.7
+          }
+        ],
+        "tool_trace": [],
+        "visualization": {},
+        "case": "weather_week_followup",
+        "functional_success": false,
+        "tool_call_correct": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "note": "agent=error, days=None, template=None"
+      },
+      {
+        "query": "Xem tiếp thời tiết cả tuần nhé.",
+        "agent": "weather",
+        "answer": "",
+        "total_latency_ms": 9.74,
+        "backend_e2e_ttft_ms": null,
+        "timings": {
+          "weather_ms": 7.55,
+          "time_to_first_visible_ms": null,
+          "time_to_end_visible_ms": null
+        },
+        "llm_usage": [],
+        "tool_trace": [],
+        "visualization": {},
+        "case": "weather_week_followup",
+        "functional_success": false,
+        "tool_call_correct": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "note": "agent=weather, days=None, template=None"
+      },
+      {
+        "query": "Thế 7 ngày tới có gì đáng chú ý?",
+        "agent": "error",
+        "answer": "Tôi chưa xác định được yêu cầu thuộc nhóm hỗ trợ nào. Bạn có thể nói rõ hơn về thời tiết, âm nhạc hoặc phần trực quan không?",
+        "total_latency_ms": 8.27,
+        "backend_e2e_ttft_ms": null,
+        "timings": {
+          "manager_ms": 6.29
+        },
+        "llm_usage": [
+          {
+            "stage": "manager",
+            "inference_ms": 6.27
+          }
+        ],
+        "tool_trace": [],
+        "visualization": {},
+        "case": "weather_week_followup",
+        "functional_success": false,
+        "tool_call_correct": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "note": "agent=error, days=None, template=None"
+      },
+      {
+        "query": "Cả tuần tới thời tiết thay đổi thế nào?",
+        "agent": "weather",
+        "answer": "",
+        "total_latency_ms": 8.89,
+        "backend_e2e_ttft_ms": null,
+        "timings": {
+          "weather_ms": 6.34,
+          "time_to_first_visible_ms": null,
+          "time_to_end_visible_ms": null
+        },
+        "llm_usage": [],
+        "tool_trace": [],
+        "visualization": {},
+        "case": "weather_week_followup",
+        "functional_success": false,
+        "tool_call_correct": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "note": "agent=weather, days=None, template=None"
+      },
+      {
+        "query": "Cho tôi dự báo trong tuần tới.",
+        "agent": "error",
+        "answer": "Tôi chưa xác định được yêu cầu thuộc nhóm hỗ trợ nào. Bạn có thể nói rõ hơn về thời tiết, âm nhạc hoặc phần trực quan không?",
+        "total_latency_ms": 9.22,
+        "backend_e2e_ttft_ms": null,
+        "timings": {
+          "manager_ms": 7.12
+        },
+        "llm_usage": [
+          {
+            "stage": "manager",
+            "inference_ms": 7.09
+          }
+        ],
+        "tool_trace": [],
+        "visualization": {},
+        "case": "weather_week_followup",
+        "functional_success": false,
+        "tool_call_correct": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "note": "agent=error, days=None, template=None"
+      },
+      {
+        "query": "Vậy dự báo dài ngày thì sao?",
+        "agent": "error",
+        "answer": "Tôi chưa xác định được yêu cầu thuộc nhóm hỗ trợ nào. Bạn có thể nói rõ hơn về thời tiết, âm nhạc hoặc phần trực quan không?",
+        "total_latency_ms": 9.25,
+        "backend_e2e_ttft_ms": null,
+        "timings": {
+          "manager_ms": 7.18
+        },
+        "llm_usage": [
+          {
+            "stage": "manager",
+            "inference_ms": 7.16
+          }
+        ],
+        "tool_trace": [],
+        "visualization": {},
+        "case": "weather_week_followup",
+        "functional_success": false,
+        "tool_call_correct": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "note": "agent=error, days=None, template=None"
+      }
+    ],
+    "weather_hourly": [
+      {
+        "query": "10 giờ tối nay ở Hà Nội có mưa không?",
+        "agent": "error",
+        "answer": "Tôi chưa xác định được yêu cầu thuộc nhóm hỗ trợ nào. Bạn có thể nói rõ hơn về thời tiết, âm nhạc hoặc phần trực quan không?",
+        "total_latency_ms": 8.62,
+        "backend_e2e_ttft_ms": null,
+        "timings": {
+          "manager_ms": 6.29
+        },
+        "llm_usage": [
+          {
+            "stage": "manager",
+            "inference_ms": 6.27
+          }
+        ],
+        "tool_trace": [],
+        "visualization": {},
+        "case": "weather_hourly",
+        "functional_success": false,
+        "tool_call_correct": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "note": "agent=error, time=None, template=None"
+      },
+      {
+        "query": "Lúc 22 giờ tối nay Hà Nội có mưa không?",
+        "agent": "error",
+        "answer": "Tôi chưa xác định được yêu cầu thuộc nhóm hỗ trợ nào. Bạn có thể nói rõ hơn về thời tiết, âm nhạc hoặc phần trực quan không?",
+        "total_latency_ms": 9.49,
+        "backend_e2e_ttft_ms": null,
+        "timings": {
+          "manager_ms": 7.12
+        },
+        "llm_usage": [
+          {
+            "stage": "manager",
+            "inference_ms": 7.09
+          }
+        ],
+        "tool_trace": [],
+        "visualization": {},
+        "case": "weather_hourly",
+        "functional_success": false,
+        "tool_call_correct": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "note": "agent=error, time=None, template=None"
+      },
+      {
+        "query": "Dự báo Hà Nội vào 22:00 tối nay thế nào?",
+        "agent": "error",
+        "answer": "Tôi chưa xác định được yêu cầu thuộc nhóm hỗ trợ nào. Bạn có thể nói rõ hơn về thời tiết, âm nhạc hoặc phần trực quan không?",
+        "total_latency_ms": 9.43,
+        "backend_e2e_ttft_ms": null,
+        "timings": {
+          "manager_ms": 6.69
+        },
+        "llm_usage": [
+          {
+            "stage": "manager",
+            "inference_ms": 6.67
+          }
+        ],
+        "tool_trace": [],
+        "visualization": {},
+        "case": "weather_hourly",
+        "functional_success": false,
+        "tool_call_correct": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "note": "agent=error, time=None, template=None"
+      },
+      {
+        "query": "Khoảng 10 giờ đêm nay ở Hà Nội trời có mưa chứ?",
+        "agent": "error",
+        "answer": "Tôi chưa xác định được yêu cầu thuộc nhóm hỗ trợ nào. Bạn có thể nói rõ hơn về thời tiết, âm nhạc hoặc phần trực quan không?",
+        "total_latency_ms": 9.76,
+        "backend_e2e_ttft_ms": null,
+        "timings": {
+          "manager_ms": 7.68
+        },
+        "llm_usage": [
+          {
+            "stage": "manager",
+            "inference_ms": 7.66
+          }
+        ],
+        "tool_trace": [],
+        "visualization": {},
+        "case": "weather_hourly",
+        "functional_success": false,
+        "tool_call_correct": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "note": "agent=error, time=None, template=None"
+      },
+      {
+        "query": "Tối nay lúc 22 giờ Hà Nội có mưa không?",
+        "agent": "error",
+        "answer": "Tôi chưa xác định được yêu cầu thuộc nhóm hỗ trợ nào. Bạn có thể nói rõ hơn về thời tiết, âm nhạc hoặc phần trực quan không?",
+        "total_latency_ms": 9.77,
+        "backend_e2e_ttft_ms": null,
+        "timings": {
+          "manager_ms": 7.34
+        },
+        "llm_usage": [
+          {
+            "stage": "manager",
+            "inference_ms": 7.32
+          }
+        ],
+        "tool_trace": [],
+        "visualization": {},
+        "case": "weather_hourly",
+        "functional_success": false,
+        "tool_call_correct": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "note": "agent=error, time=None, template=None"
+      },
+      {
+        "query": "Cho tôi biết thời tiết Hà Nội lúc 10 giờ tối nay.",
+        "agent": "weather",
+        "answer": "",
+        "total_latency_ms": 9.17,
+        "backend_e2e_ttft_ms": null,
+        "timings": {
+          "weather_ms": 6.91,
+          "time_to_first_visible_ms": null,
+          "time_to_end_visible_ms": null
+        },
+        "llm_usage": [],
+        "tool_trace": [],
+        "visualization": {},
+        "case": "weather_hourly",
+        "functional_success": false,
+        "tool_call_correct": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "note": "agent=weather, time=None, template=None"
+      },
+      {
+        "query": "22 giờ hôm nay tại Hà Nội có mưa không?",
+        "agent": "error",
+        "answer": "Tôi chưa xác định được yêu cầu thuộc nhóm hỗ trợ nào. Bạn có thể nói rõ hơn về thời tiết, âm nhạc hoặc phần trực quan không?",
+        "total_latency_ms": 10.04,
+        "backend_e2e_ttft_ms": null,
+        "timings": {
+          "manager_ms": 7.19
+        },
+        "llm_usage": [
+          {
+            "stage": "manager",
+            "inference_ms": 7.16
+          }
+        ],
+        "tool_trace": [],
+        "visualization": {},
+        "case": "weather_hourly",
+        "functional_success": false,
+        "tool_call_correct": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "note": "agent=error, time=None, template=None"
+      },
+      {
+        "query": "Thời tiết ở Hà Nội vào 10 giờ đêm nay ra sao?",
+        "agent": "weather",
+        "answer": "",
+        "total_latency_ms": 8.98,
+        "backend_e2e_ttft_ms": null,
+        "timings": {
+          "weather_ms": 7.28,
+          "time_to_first_visible_ms": null,
+          "time_to_end_visible_ms": null
+        },
+        "llm_usage": [],
+        "tool_trace": [],
+        "visualization": {},
+        "case": "weather_hourly",
+        "functional_success": false,
+        "tool_call_correct": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "note": "agent=weather, time=None, template=None"
+      },
+      {
+        "query": "Vào lúc 22:00 hôm nay, Hà Nội có mưa không?",
+        "agent": "error",
+        "answer": "Tôi chưa xác định được yêu cầu thuộc nhóm hỗ trợ nào. Bạn có thể nói rõ hơn về thời tiết, âm nhạc hoặc phần trực quan không?",
+        "total_latency_ms": 9.71,
+        "backend_e2e_ttft_ms": null,
+        "timings": {
+          "manager_ms": 7.24
+        },
+        "llm_usage": [
+          {
+            "stage": "manager",
+            "inference_ms": 7.23
+          }
+        ],
+        "tool_trace": [],
+        "visualization": {},
+        "case": "weather_hourly",
+        "functional_success": false,
+        "tool_call_correct": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "note": "agent=error, time=None, template=None"
+      },
+      {
+        "query": "Kiểm tra giúp tôi mưa ở Hà Nội lúc 10 giờ tối nay.",
+        "agent": "error",
+        "answer": "Tôi chưa xác định được yêu cầu thuộc nhóm hỗ trợ nào. Bạn có thể nói rõ hơn về thời tiết, âm nhạc hoặc phần trực quan không?",
+        "total_latency_ms": 8.91,
+        "backend_e2e_ttft_ms": null,
+        "timings": {
+          "manager_ms": 6.56
+        },
+        "llm_usage": [
+          {
+            "stage": "manager",
+            "inference_ms": 6.55
+          }
+        ],
+        "tool_trace": [],
+        "visualization": {},
+        "case": "weather_hourly",
+        "functional_success": false,
+        "tool_call_correct": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "note": "agent=error, time=None, template=None"
+      }
+    ],
+    "music_exact": [
+      {
+        "query": "Bật bài Đừng Làm Trái Tim Anh Đau của Sơn Tùng M-TP.",
+        "agent": "error",
+        "answer": "Tôi chưa xác định được yêu cầu thuộc nhóm hỗ trợ nào. Bạn có thể nói rõ hơn về thời tiết, âm nhạc hoặc phần trực quan không?",
+        "total_latency_ms": 9.83,
+        "backend_e2e_ttft_ms": null,
+        "timings": {
+          "manager_ms": 7.75
+        },
+        "llm_usage": [
+          {
+            "stage": "manager",
+            "inference_ms": 7.73
+          }
+        ],
+        "tool_trace": [],
+        "visualization": {},
+        "case": "music_exact",
+        "functional_success": false,
+        "tool_call_correct": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "note": "agent=error, search=None, played=False"
+      },
+      {
+        "query": "Mở cho tôi bài Đừng Làm Trái Tim Anh Đau của Sơn Tùng M-TP.",
+        "agent": "error",
+        "answer": "Tôi chưa xác định được yêu cầu thuộc nhóm hỗ trợ nào. Bạn có thể nói rõ hơn về thời tiết, âm nhạc hoặc phần trực quan không?",
+        "total_latency_ms": 9.02,
+        "backend_e2e_ttft_ms": null,
+        "timings": {
+          "manager_ms": 6.78
+        },
+        "llm_usage": [
+          {
+            "stage": "manager",
+            "inference_ms": 6.76
+          }
+        ],
+        "tool_trace": [],
+        "visualization": {},
+        "case": "music_exact",
+        "functional_success": false,
+        "tool_call_correct": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "note": "agent=error, search=None, played=False"
+      },
+      {
+        "query": "Phát bài Đừng Làm Trái Tim Anh Đau, ca sĩ Sơn Tùng M-TP.",
+        "agent": "error",
+        "answer": "Tôi chưa xác định được yêu cầu thuộc nhóm hỗ trợ nào. Bạn có thể nói rõ hơn về thời tiết, âm nhạc hoặc phần trực quan không?",
+        "total_latency_ms": 10.73,
+        "backend_e2e_ttft_ms": null,
+        "timings": {
+          "manager_ms": 8.36
+        },
+        "llm_usage": [
+          {
+            "stage": "manager",
+            "inference_ms": 8.34
+          }
+        ],
+        "tool_trace": [],
+        "visualization": {},
+        "case": "music_exact",
+        "functional_success": false,
+        "tool_call_correct": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "note": "agent=error, search=None, played=False"
+      },
+      {
+        "query": "Cho mình nghe Đừng Làm Trái Tim Anh Đau của Sơn Tùng M-TP.",
+        "agent": "error",
+        "answer": "Tôi chưa xác định được yêu cầu thuộc nhóm hỗ trợ nào. Bạn có thể nói rõ hơn về thời tiết, âm nhạc hoặc phần trực quan không?",
+        "total_latency_ms": 11.84,
+        "backend_e2e_ttft_ms": null,
+        "timings": {
+          "manager_ms": 9.62
+        },
+        "llm_usage": [
+          {
+            "stage": "manager",
+            "inference_ms": 9.6
+          }
+        ],
+        "tool_trace": [],
+        "visualization": {},
+        "case": "music_exact",
+        "functional_success": false,
+        "tool_call_correct": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "note": "agent=error, search=None, played=False"
+      },
+      {
+        "query": "Bật giúp tôi ca khúc Đừng Làm Trái Tim Anh Đau của Sơn Tùng M-TP.",
+        "agent": "error",
+        "answer": "Tôi chưa xác định được yêu cầu thuộc nhóm hỗ trợ nào. Bạn có thể nói rõ hơn về thời tiết, âm nhạc hoặc phần trực quan không?",
+        "total_latency_ms": 9.64,
+        "backend_e2e_ttft_ms": null,
+        "timings": {
+          "manager_ms": 7.14
+        },
+        "llm_usage": [
+          {
+            "stage": "manager",
+            "inference_ms": 7.13
+          }
+        ],
+        "tool_trace": [],
+        "visualization": {},
+        "case": "music_exact",
+        "functional_success": false,
+        "tool_call_correct": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "note": "agent=error, search=None, played=False"
+      },
+      {
+        "query": "Mở bài Đừng Làm Trái Tim Anh Đau do Sơn Tùng M-TP hát.",
+        "agent": "error",
+        "answer": "Tôi chưa xác định được yêu cầu thuộc nhóm hỗ trợ nào. Bạn có thể nói rõ hơn về thời tiết, âm nhạc hoặc phần trực quan không?",
+        "total_latency_ms": 10.38,
+        "backend_e2e_ttft_ms": null,
+        "timings": {
+          "manager_ms": 8.19
+        },
+        "llm_usage": [
+          {
+            "stage": "manager",
+            "inference_ms": 8.17
+          }
+        ],
+        "tool_trace": [],
+        "visualization": {},
+        "case": "music_exact",
+        "functional_success": false,
+        "tool_call_correct": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "note": "agent=error, search=None, played=False"
+      },
+      {
+        "query": "Tôi muốn nghe bài Đừng Làm Trái Tim Anh Đau của Sơn Tùng M-TP.",
+        "agent": "error",
+        "answer": "Tôi chưa xác định được yêu cầu thuộc nhóm hỗ trợ nào. Bạn có thể nói rõ hơn về thời tiết, âm nhạc hoặc phần trực quan không?",
+        "total_latency_ms": 10.57,
+        "backend_e2e_ttft_ms": null,
+        "timings": {
+          "manager_ms": 8.13
+        },
+        "llm_usage": [
+          {
+            "stage": "manager",
+            "inference_ms": 8.11
+          }
+        ],
+        "tool_trace": [],
+        "visualization": {},
+        "case": "music_exact",
+        "functional_success": false,
+        "tool_call_correct": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "note": "agent=error, search=None, played=False"
+      },
+      {
+        "query": "Phát Đừng Làm Trái Tim Anh Đau của Sơn Tùng M-TP đi.",
+        "agent": "error",
+        "answer": "Tôi chưa xác định được yêu cầu thuộc nhóm hỗ trợ nào. Bạn có thể nói rõ hơn về thời tiết, âm nhạc hoặc phần trực quan không?",
+        "total_latency_ms": 9.06,
+        "backend_e2e_ttft_ms": null,
+        "timings": {
+          "manager_ms": 7.03
+        },
+        "llm_usage": [
+          {
+            "stage": "manager",
+            "inference_ms": 7.01
+          }
+        ],
+        "tool_trace": [],
+        "visualization": {},
+        "case": "music_exact",
+        "functional_success": false,
+        "tool_call_correct": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "note": "agent=error, search=None, played=False"
+      },
+      {
+        "query": "Hãy bật bài Đừng Làm Trái Tim Anh Đau của Sơn Tùng M-TP.",
+        "agent": "error",
+        "answer": "Tôi chưa xác định được yêu cầu thuộc nhóm hỗ trợ nào. Bạn có thể nói rõ hơn về thời tiết, âm nhạc hoặc phần trực quan không?",
+        "total_latency_ms": 10.38,
+        "backend_e2e_ttft_ms": null,
+        "timings": {
+          "manager_ms": 8.06
+        },
+        "llm_usage": [
+          {
+            "stage": "manager",
+            "inference_ms": 8.04
+          }
+        ],
+        "tool_trace": [],
+        "visualization": {},
+        "case": "music_exact",
+        "functional_success": false,
+        "tool_call_correct": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "note": "agent=error, search=None, played=False"
+      },
+      {
+        "query": "Mở nhạc Đừng Làm Trái Tim Anh Đau - Sơn Tùng M-TP.",
+        "agent": "music",
+        "answer": "",
+        "total_latency_ms": 9.61,
+        "backend_e2e_ttft_ms": null,
+        "timings": {
+          "music_ms": 7.1,
+          "time_to_first_visible_ms": null,
+          "time_to_end_visible_ms": null,
+          "visual_ms": 0.01
+        },
+        "llm_usage": [],
+        "tool_trace": [
+          {
+            "tool": "skip_visualization",
+            "args": {},
+            "status": "completed",
+            "result": {
+              "status": "completed",
+              "data": {}
+            },
+            "latency_ms": 0.0,
+            "executor": "visual_code"
+          }
+        ],
+        "visualization": {},
+        "case": "music_exact",
+        "functional_success": false,
+        "tool_call_correct": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "note": "agent=music, search=None, played=False"
+      }
+    ],
+    "music_discovery": [
+      {
+        "query": "Mở một bài nhạc buồn.",
+        "agent": "music",
+        "answer": "",
+        "total_latency_ms": 10.23,
+        "backend_e2e_ttft_ms": null,
+        "timings": {
+          "music_ms": 7.81,
+          "time_to_first_visible_ms": null,
+          "time_to_end_visible_ms": null,
+          "visual_ms": 0.01
+        },
+        "llm_usage": [],
+        "tool_trace": [
+          {
+            "tool": "skip_visualization",
+            "args": {},
+            "status": "completed",
+            "result": {
+              "status": "completed",
+              "data": {}
+            },
+            "latency_ms": 0.0,
+            "executor": "visual_code"
+          }
+        ],
+        "visualization": {},
+        "case": "music_discovery",
+        "functional_success": false,
+        "tool_call_correct": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "note": "agent=music, searched=False, played=False"
+      },
+      {
+        "query": "Gợi ý cho tôi một bài nhạc buồn.",
+        "agent": "error",
+        "answer": "Tôi chưa xác định được yêu cầu thuộc nhóm hỗ trợ nào. Bạn có thể nói rõ hơn về thời tiết, âm nhạc hoặc phần trực quan không?",
+        "total_latency_ms": 10.67,
+        "backend_e2e_ttft_ms": null,
+        "timings": {
+          "manager_ms": 8.28
+        },
+        "llm_usage": [
+          {
+            "stage": "manager",
+            "inference_ms": 8.26
+          }
+        ],
+        "tool_trace": [],
+        "visualization": {},
+        "case": "music_discovery",
+        "functional_success": false,
+        "tool_call_correct": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "note": "agent=error, searched=False, played=False"
+      },
+      {
+        "query": "Tìm giúp tôi một ca khúc tâm trạng.",
+        "agent": "error",
+        "answer": "Tôi chưa xác định được yêu cầu thuộc nhóm hỗ trợ nào. Bạn có thể nói rõ hơn về thời tiết, âm nhạc hoặc phần trực quan không?",
+        "total_latency_ms": 9.99,
+        "backend_e2e_ttft_ms": null,
+        "timings": {
+          "manager_ms": 7.71
+        },
+        "llm_usage": [
+          {
+            "stage": "manager",
+            "inference_ms": 7.69
+          }
+        ],
+        "tool_trace": [],
+        "visualization": {},
+        "case": "music_discovery",
+        "functional_success": false,
+        "tool_call_correct": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "note": "agent=error, searched=False, played=False"
+      },
+      {
+        "query": "Tôi muốn nghe nhạc buồn.",
+        "agent": "music",
+        "answer": "",
+        "total_latency_ms": 10.42,
+        "backend_e2e_ttft_ms": null,
+        "timings": {
+          "music_ms": 8.14,
+          "time_to_first_visible_ms": null,
+          "time_to_end_visible_ms": null,
+          "visual_ms": 0.01
+        },
+        "llm_usage": [],
+        "tool_trace": [
+          {
+            "tool": "skip_visualization",
+            "args": {},
+            "status": "completed",
+            "result": {
+              "status": "completed",
+              "data": {}
+            },
+            "latency_ms": 0.0,
+            "executor": "visual_code"
+          }
+        ],
+        "visualization": {},
+        "case": "music_discovery",
+        "functional_success": false,
+        "tool_call_correct": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "note": "agent=music, searched=False, played=False"
+      },
+      {
+        "query": "Có bài nào buồn để nghe không?",
+        "agent": "error",
+        "answer": "Tôi chưa xác định được yêu cầu thuộc nhóm hỗ trợ nào. Bạn có thể nói rõ hơn về thời tiết, âm nhạc hoặc phần trực quan không?",
+        "total_latency_ms": 9.35,
+        "backend_e2e_ttft_ms": null,
+        "timings": {
+          "manager_ms": 7.24
+        },
+        "llm_usage": [
+          {
+            "stage": "manager",
+            "inference_ms": 7.23
+          }
+        ],
+        "tool_trace": [],
+        "visualization": {},
+        "case": "music_discovery",
+        "functional_success": false,
+        "tool_call_correct": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "note": "agent=error, searched=False, played=False"
+      },
+      {
+        "query": "Mở cho tôi một bài hát có tâm trạng buồn.",
+        "agent": "music",
+        "answer": "",
+        "total_latency_ms": 11.04,
+        "backend_e2e_ttft_ms": null,
+        "timings": {
+          "music_ms": 8.22,
+          "time_to_first_visible_ms": null,
+          "time_to_end_visible_ms": null,
+          "visual_ms": 0.01
+        },
+        "llm_usage": [],
+        "tool_trace": [
+          {
+            "tool": "skip_visualization",
+            "args": {},
+            "status": "completed",
+            "result": {
+              "status": "completed",
+              "data": {}
+            },
+            "latency_ms": 0.0,
+            "executor": "visual_code"
+          }
+        ],
+        "visualization": {},
+        "case": "music_discovery",
+        "functional_success": false,
+        "tool_call_correct": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "note": "agent=music, searched=False, played=False"
+      },
+      {
+        "query": "Tìm một bài nhạc nhẹ nhàng, buồn nhé.",
+        "agent": "music",
+        "answer": "",
+        "total_latency_ms": 11.09,
+        "backend_e2e_ttft_ms": null,
+        "timings": {
+          "music_ms": 8.47,
+          "time_to_first_visible_ms": null,
+          "time_to_end_visible_ms": null,
+          "visual_ms": 0.01
+        },
+        "llm_usage": [],
+        "tool_trace": [
+          {
+            "tool": "skip_visualization",
+            "args": {},
+            "status": "completed",
+            "result": {
+              "status": "completed",
+              "data": {}
+            },
+            "latency_ms": 0.0,
+            "executor": "visual_code"
+          }
+        ],
+        "visualization": {},
+        "case": "music_discovery",
+        "functional_success": false,
+        "tool_call_correct": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "note": "agent=music, searched=False, played=False"
+      },
+      {
+        "query": "Gợi ý nhạc buồn cho tôi.",
+        "agent": "error",
+        "answer": "Tôi chưa xác định được yêu cầu thuộc nhóm hỗ trợ nào. Bạn có thể nói rõ hơn về thời tiết, âm nhạc hoặc phần trực quan không?",
+        "total_latency_ms": 8.9,
+        "backend_e2e_ttft_ms": null,
+        "timings": {
+          "manager_ms": 6.81
+        },
+        "llm_usage": [
+          {
+            "stage": "manager",
+            "inference_ms": 6.79
+          }
+        ],
+        "tool_trace": [],
+        "visualization": {},
+        "case": "music_discovery",
+        "functional_success": false,
+        "tool_call_correct": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "note": "agent=error, searched=False, played=False"
+      },
+      {
+        "query": "Cho tôi nghe một bài phù hợp lúc buồn.",
+        "agent": "error",
+        "answer": "Tôi chưa xác định được yêu cầu thuộc nhóm hỗ trợ nào. Bạn có thể nói rõ hơn về thời tiết, âm nhạc hoặc phần trực quan không?",
+        "total_latency_ms": 9.7,
+        "backend_e2e_ttft_ms": null,
+        "timings": {
+          "manager_ms": 7.33
+        },
+        "llm_usage": [
+          {
+            "stage": "manager",
+            "inference_ms": 7.31
+          }
+        ],
+        "tool_trace": [],
+        "visualization": {},
+        "case": "music_discovery",
+        "functional_success": false,
+        "tool_call_correct": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "note": "agent=error, searched=False, played=False"
+      },
+      {
+        "query": "Tìm nhạc buồn trong kho bài hát.",
+        "agent": "music",
+        "answer": "",
+        "total_latency_ms": 9.24,
+        "backend_e2e_ttft_ms": null,
+        "timings": {
+          "music_ms": 6.5,
+          "time_to_first_visible_ms": null,
+          "time_to_end_visible_ms": null,
+          "visual_ms": 0.01
+        },
+        "llm_usage": [],
+        "tool_trace": [
+          {
+            "tool": "skip_visualization",
+            "args": {},
+            "status": "completed",
+            "result": {
+              "status": "completed",
+              "data": {}
+            },
+            "latency_ms": 0.0,
+            "executor": "visual_code"
+          }
+        ],
+        "visualization": {},
+        "case": "music_discovery",
+        "functional_success": false,
+        "tool_call_correct": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "note": "agent=music, searched=False, played=False"
+      }
+    ]
+  }
+}

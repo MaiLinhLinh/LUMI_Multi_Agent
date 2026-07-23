@@ -1,0 +1,75 @@
+{
+  "weather": [
+    {
+      "name": "get_weather",
+      "description": "Read verified weather data from the Redis snapshot for Vietnamese provinces and cities. Never invent weather values. For a follow-up without a location, omit location_text only when confirmed weather context is available.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "location_text": {"type": "string", "description": "Location named by the user."},
+          "date_text": {"type": "string", "description": "A date reference such as today, tomorrow, or YYYY-MM-DD."},
+          "time_text": {"type": "string", "description": "Exact local clock time in HH:MM (24-hour) for request_type=hourly; for example 22:00."},
+          "days": {"type": "integer", "minimum": 1, "maximum": 8, "description": "Number of consecutive forecast days. Use 7 for a full week."},
+          "request_type": {"type": "string", "enum": ["current", "forecast", "rain", "temperature", "hourly"], "description": "Required. Use current only for present conditions (now/currently). Use forecast for any named day or multi-day outlook."}
+        },
+        "required": ["request_type"]
+      }
+    }
+  ],
+  "manager": [
+    {
+      "name": "select_subagent",
+      "description": "Select the one sub-agent that should handle the user's current request. Use weather for weather conditions or forecasts, music for finding or playing catalog music, and visual only for an explicit request to interact with an existing visualization.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "agent": {"type": "string", "enum": ["weather", "music", "visual"], "description": "The single sub-agent responsible for the current request."},
+          "reason": {"type": "string", "description": "A short routing reason based only on the user request and relevant history."}
+        },
+        "required": ["agent", "reason"]
+      }
+    }
+  ],
+  "music": [
+    {
+      "name": "search_music",
+      "description": "Search the local music catalog and return one verified candidates list. For exact_track with title and artist, the backend first performs a deterministic title-plus-artist lookup without embeddings. If unavailable, data.status=not_found and data.candidates contains verified same-artist alternatives. If artist is absent, the backend uses semantic/BM25 retrieval and returns candidates, but never invents a track. data.exact_matches contains candidates eligible for play_music.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "query": {"type": "string", "description": "The user's music request, preserving the intended track or artist."},
+          "request_kind": {"type": "string", "enum": ["exact_track", "artist", "discovery"], "description": "Required. Use exact_track when the user names a specific song; then title is required. Use artist for an artist-only request, discovery for genre, mood, or general discovery."},
+          "title": {"type": "string", "description": "Required when request_kind=exact_track. Send only the named track title, without verbs such as play/open or artist text."},
+          "artist": {"type": "string", "description": "Requested artist, if named or established by immediate music context."},
+          "genre": {"type": "string"}, "mood": {"type": "string"}, "language": {"type": "string"}
+        },
+        "required": ["query", "request_kind"]
+      }
+    },
+    {
+      "name": "play_music",
+      "description": "Create a safe fixed-iframe YouTube player payload only from a record_id returned by search_music. Never invent a video ID or URL.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {"record_id": {"type": "string", "description": "record_id returned by search_music."}},
+        "required": ["record_id"]
+      }
+    }
+  ],
+  "visual": [
+    {
+      "name": "render_visualization",
+      "description": "Render verified data using an existing HTML template only; never generate a new HTML template.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {"template_id": {"type": "string", "enum": ["weather_basic", "weather_single_day", "weather_forecast"]}},
+        "required": ["template_id"]
+      }
+    }
+  ]
+}

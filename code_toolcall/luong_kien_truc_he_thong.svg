@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1210" viewBox="0 0 1800 1210">
+  <style>
+    text { font-family: Arial, 'Segoe UI', sans-serif; fill: #17233a; }
+    .title { font-size: 29px; font-weight: 800; } .subtitle { font-size: 14px; fill: #71809a; }
+    .section { font-size: 17px; font-weight: 800; } .head { font-size: 15px; font-weight: 800; }
+    .body { font-size: 12px; fill: #53627a; } .small { font-size: 11px; fill: #687892; }
+    .box { fill: white; stroke: #cbd8e8; stroke-width: 1.6; } .line { stroke: #7e8fa9; stroke-width: 2; fill: none; marker-end: url(#arrow); }
+    .dash { stroke: #9daac0; stroke-width: 1.5; fill: none; stroke-dasharray: 6 5; marker-end: url(#arrow); }
+  </style>
+  <defs><marker id="arrow" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8z" fill="#7e8fa9"/></marker></defs>
+  <rect width="1800" height="1210" fill="#fbfdff"/>
+  <text x="900" y="42" class="title" text-anchor="middle">KIẾN TRÚC VÀ LUỒNG HOẠT ĐỘNG HỆ THỐNG</text>
+  <text x="900" y="65" class="subtitle" text-anchor="middle">LangGraph đa tác tử · Gemini SDK Function Calling · Redis / ChromaDB</text>
+
+  <rect x="28" y="88" width="1744" height="168" rx="18" fill="#f8fbff" stroke="#d7e2ee" stroke-width="1.5"/>
+  <text x="48" y="116" class="section">1. TIẾP NHẬN VÀ ĐIỀU PHỐI YÊU CẦU</text>
+  <rect x="55" y="143" width="210" height="62" rx="12" class="box" stroke="#72c3fb"/><text x="160" y="170" class="head" text-anchor="middle">Người dùng</text><text x="160" y="189" class="body" text-anchor="middle">Text request</text>
+  <rect x="315" y="143" width="225" height="62" rx="12" class="box" stroke="#72c3fb"/><text x="428" y="170" class="head" text-anchor="middle">Web Chat Interface</text><text x="428" y="189" class="body" text-anchor="middle">HTML · CSS · JavaScript</text>
+  <rect x="590" y="143" width="225" height="62" rx="12" class="box" stroke="#f7bd55"/><text x="703" y="170" class="head" text-anchor="middle">Starlette API</text><text x="703" y="189" class="body" text-anchor="middle">Session · History · SSE streaming</text>
+  <rect x="865" y="143" width="220" height="62" rx="12" class="box" stroke="#78d8a5"/><text x="975" y="170" class="head" text-anchor="middle">Input Router</text><text x="975" y="189" class="body" text-anchor="middle">Rule rõ ràng / route nhanh</text>
+  <rect x="1135" y="143" width="260" height="62" rx="12" class="box" stroke="#b798f7"/><text x="1265" y="170" class="head" text-anchor="middle">Manager Agent · Gemini</text><text x="1265" y="189" class="body" text-anchor="middle">Function call: select_subagent</text>
+  <path d="M265 174H315 M540 174H590 M815 174H865 M1085 174H1135" class="line"/>
+  <text x="1265" y="231" class="small" text-anchor="middle">Câu mơ hồ / cần suy luận mới qua Manager; có thể mở rộng route song song.</text>
+
+  <rect x="28" y="278" width="1744" height="485" rx="18" fill="#f8fbff" stroke="#d7e2ee" stroke-width="1.5"/>
+  <text x="48" y="307" class="section">2. XỬ LÝ CÁC SUB-AGENT TRONG LANGGRAPH</text>
+  <path d="M1265 205V330H455V350 M1265 330H1325V350" class="line"/>
+  <rect x="58" y="330" width="790" height="395" rx="17" fill="#eef9ff" stroke="#76c7ef" stroke-width="1.8"/>
+  <text x="84" y="360" class="head" fill="#1477b8">☁ WEATHER AGENT</text><text x="84" y="380" class="body">Gemini tự gọi get_weather; Redis là nguồn dữ liệu đã xác thực</text>
+  <rect x="87" y="408" width="180" height="70" rx="12" class="box" stroke="#72c3fb"/><text x="177" y="435" class="head" text-anchor="middle">Weather Gemini</text><text x="177" y="455" class="body" text-anchor="middle">Hiểu history / thời gian</text>
+  <rect x="326" y="408" width="180" height="70" rx="12" class="box" stroke="#72c3fb"/><text x="416" y="435" class="head" text-anchor="middle">get_weather tool</text><text x="416" y="455" class="body" text-anchor="middle">Code chọn current / ngày / giờ</text>
+  <rect x="565" y="408" width="180" height="70" rx="12" class="box" stroke="#72c3fb"/><text x="655" y="435" class="head" text-anchor="middle">Redis Weather</text><text x="655" y="455" class="body" text-anchor="middle">Snapshot 63 tỉnh/thành</text>
+  <path d="M267 443H326 M506 443H565" class="line"/>
+  <rect x="180" y="540" width="480" height="76" rx="13" fill="#dff4ff" stroke="#63bde9" stroke-width="1.5"/><text x="420" y="570" class="head" text-anchor="middle">Weather Gemini · lượt trả lời</text><text x="420" y="591" class="body" text-anchor="middle">Nhận facts tóm tắt → stream câu trả lời tiếng Việt</text>
+  <path d="M655 478V510H420V540" class="line"/>
+  <text x="420" y="665" class="small" text-anchor="middle">Tool facts tối giản theo câu hỏi; không gửi toàn bộ 216 hourly intervals cho Gemini.</text>
+
+  <rect x="885" y="330" width="850" height="395" rx="17" fill="#f5f0ff" stroke="#b798f7" stroke-width="1.8"/>
+  <text x="911" y="360" class="head" fill="#7650c7">♫ MUSIC AGENT</text><text x="911" y="380" class="body">Gemini Function Calling với trạng thái Music Session được backend quản lý</text>
+  <rect x="914" y="408" width="192" height="70" rx="12" class="box" stroke="#b798f7"/><text x="1010" y="435" class="head" text-anchor="middle">Music Session</text><text x="1010" y="455" class="body" text-anchor="middle">last_candidates · record_id</text>
+  <rect x="1160" y="408" width="200" height="70" rx="12" class="box" stroke="#b798f7"/><text x="1260" y="435" class="head" text-anchor="middle">Music Gemini</text><text x="1260" y="455" class="body" text-anchor="middle">Tự chọn search / play</text>
+  <rect x="1414" y="408" width="275" height="70" rx="12" class="box" stroke="#b798f7"/><text x="1552" y="435" class="head" text-anchor="middle">search_music / play_music</text><text x="1552" y="455" class="body" text-anchor="middle">Native Gemini SDK tool loop</text>
+  <path d="M1106 443H1160 M1360 443H1414" class="line"/>
+  <rect x="972" y="540" width="290" height="87" rx="13" fill="#ede3ff" stroke="#a884ef" stroke-width="1.5"/><text x="1117" y="568" class="head" text-anchor="middle">Catalog RAM · tra cứu code</text><text x="1117" y="588" class="body" text-anchor="middle">title + artist chính xác</text><text x="1117" y="607" class="body" text-anchor="middle">fallback cùng artist</text>
+  <rect x="1350" y="540" width="300" height="87" rx="13" fill="#ede3ff" stroke="#a884ef" stroke-width="1.5"/><text x="1500" y="568" class="head" text-anchor="middle">Hybrid retrieval</text><text x="1500" y="588" class="body" text-anchor="middle">Ollama embedding + ChromaDB</text><text x="1500" y="607" class="body" text-anchor="middle">+ BM25 khi không có artist</text>
+  <path d="M1552 478V510H1117V540 M1552 478V540" class="line"/>
+  <text x="1285" y="675" class="small" text-anchor="middle">Nếu session khớp chắc chắn: chỉ khai báo play_music. Search ra đúng 1 exact_match: runtime ép lượt sau gọi play_music.</text>
+
+  <rect x="28" y="785" width="1744" height="232" rx="18" fill="#f8fbff" stroke="#d7e2ee" stroke-width="1.5"/>
+  <text x="48" y="815" class="section">3. TỔNG HỢP VÀ HIỂN THỊ KẾT QUẢ</text>
+  <path d="M420 616V850H750 M1285 627V850H750" class="line"/>
+  <rect x="750" y="826" width="300" height="75" rx="13" class="box" stroke="#78d8a5"/><text x="900" y="855" class="head" text-anchor="middle">Visual Renderer · Code</text><text x="900" y="876" class="body" text-anchor="middle">Không gọi Gemini</text>
+  <rect x="420" y="925" width="290" height="52" rx="12" class="box" stroke="#78d8a5"/><text x="565" y="947" class="head" text-anchor="middle">Weather templates</text><text x="565" y="965" class="body" text-anchor="middle">current · single-day · forecast</text>
+  <rect x="1090" y="925" width="290" height="52" rx="12" class="box" stroke="#b798f7"/><text x="1235" y="947" class="head" text-anchor="middle">Music iframe</text><text x="1235" y="965" class="body" text-anchor="middle">video_id → YouTube player payload</text>
+  <path d="M900 901V915H565V925 M900 915H1235V925 M1050 864H1485" class="line"/>
+  <rect x="1485" y="826" width="230" height="75" rx="13" class="box" stroke="#72c3fb"/><text x="1600" y="855" class="head" text-anchor="middle">Web UI</text><text x="1600" y="876" class="body" text-anchor="middle">Text stream + panel trực quan</text>
+
+  <rect x="28" y="1040" width="1744" height="136" rx="18" fill="#f8fbff" stroke="#d7e2ee" stroke-width="1.5"/>
+  <text x="48" y="1070" class="section">TIẾN TRÌNH CẬP NHẬT DỮ LIỆU NỀN</text>
+  <rect x="210" y="1100" width="440" height="46" rx="12" fill="#e9f8ff" stroke="#8bd1f0"/><text x="430" y="1120" class="head" text-anchor="middle">Open-Meteo → weather_snapshot_worker → Redis</text><text x="430" y="1137" class="small" text-anchor="middle">Snapshot dự báo theo tỉnh/thành</text>
+  <rect x="1050" y="1100" width="540" height="46" rx="12" fill="#f2eaff" stroke="#c2a4f7"/><text x="1320" y="1120" class="head" text-anchor="middle">YouTube metadata → catalog worker → ChromaDB / BM25</text><text x="1320" y="1137" class="small" text-anchor="middle">Server khởi động / refresh_index() → Catalog RAM</text>
+</svg>

@@ -1,0 +1,24 @@
+{
+  "id": "temperature_hero",
+  "kind": "component",
+  "domain": "weather",
+  "name": "Temperature Hero",
+  "description": "Large current temperature and condition summary.",
+  "component_file": "component.html",
+  "supported_slots": [
+    "hero"
+  ],
+  "required_fields": [
+    "location.name",
+    "current.temperature.current_celsius"
+  ],
+  "optional_fields": [
+    "location.country",
+    "current.condition.description"
+  ],
+  "tags": [
+    "current",
+    "hero",
+    "temperature"
+  ]
+}

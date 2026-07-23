@@ -1,0 +1,58 @@
+{
+  "domain": "weather",
+  "schema_version": "weather.current.v1",
+  "data_type": "current",
+  "location": "Ha Noi",
+  "data": {
+    "location": {
+      "name": "Ha Noi",
+      "country": "VN",
+      "timezone_offset_seconds": 25200
+    },
+    "current": {
+      "timestamp": 1783670000,
+      "timezone_offset_seconds": 25200,
+      "condition": {
+        "main": "Clouds",
+        "description": "scattered clouds"
+      },
+      "temperature": {
+        "current_celsius": 30.0,
+        "feels_like_celsius": 34.0
+      },
+      "humidity_percent": 70,
+      "pressure_hpa": 1008,
+      "wind": {
+        "speed_mps": 3.4,
+        "direction_degrees": 110
+      },
+      "cloudiness_percent": 40
+    },
+    "forecast": null
+  },
+  "source": {
+    "provider": "openweathermap",
+    "tools_used": [
+      {
+        "name": "get_current_weather",
+        "cached": false
+      }
+    ]
+  },
+  "available_fields": [
+    "location.name",
+    "location.country",
+    "location.timezone_offset_seconds",
+    "current.timestamp",
+    "current.timezone_offset_seconds",
+    "current.condition.main",
+    "current.condition.description",
+    "current.temperature.current_celsius",
+    "current.temperature.feels_like_celsius",
+    "current.humidity_percent",
+    "current.pressure_hpa",
+    "current.wind.speed_mps",
+    "current.wind.direction_degrees",
+    "current.cloudiness_percent"
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "id": "base_dashboard",
+  "slots": {
+    "hero": {
+      "required": true,
+      "max_components": 1
+    },
+    "metrics": {
+      "required": false,
+      "max_components": 4
+    },
+    "chart": {
+      "required": false,
+      "max_components": 2
+    },
+    "footer": {
+      "required": false,
+      "max_components": 2
+    }
+  },
+  "parameters": {
+    "page_title": {
+      "required": true,
+      "default": "Weather Dashboard"
+    }
+  },
+  "hooks": {
+    "head_end": {
+      "allowed": false
+    },
+    "body_end": {
+      "allowed": false
+    }
+  },
+  "missing_field_policy": "hide_component"
+}
