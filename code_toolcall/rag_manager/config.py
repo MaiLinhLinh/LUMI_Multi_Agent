@@ -13,8 +13,11 @@ class Settings:
     gemini_api_key: str
     gemini_model: str
     gemini_live_api_key: str = ""
+    # GEMINI_LIVE_MODEL is retained as the fallback for existing .env files.
     gemini_live_model: str = "gemini-3.1-flash-live-preview"
-    gemini_live_voice: str = ""
+    gemini_live_transcribe_model: str = "gemini-3.1-flash-live-preview"
+    gemini_live_speech_model: str = "gemini-3.1-flash-live-preview"
+    gemini_live_voice: str = "kore"
     redis_url: str = "redis://localhost:6379/0"
     weather_redis_prefix: str = "weather"
     weather_snapshot_max_age_seconds: int = 14400
@@ -43,7 +46,14 @@ def load_settings() -> Settings:
         gemini_model=os.getenv("GEMINI_MODEL", "gemma-4-26b-a4b-it").strip(),
         gemini_live_api_key=os.getenv("GEMINI_LIVE_API_KEY", "").strip(),
         gemini_live_model=os.getenv("GEMINI_LIVE_MODEL", "gemini-3.1-flash-live-preview").strip(),
-        gemini_live_voice=os.getenv("GEMINI_LIVE_VOICE", "").strip(),
+        gemini_live_transcribe_model=os.getenv(
+            "GEMINI_LIVE_TRANSCRIBE_MODEL", "gemini-3.1-flash-live-preview"
+        ).strip(),
+        gemini_live_speech_model=os.getenv(
+            "GEMINI_LIVE_SPEECH_MODEL",
+            os.getenv("GEMINI_LIVE_MODEL", "gemini-3.1-flash-live-preview"),
+        ).strip(),
+        gemini_live_voice=os.getenv("GEMINI_LIVE_VOICE", "kore").strip() or "kore",
         redis_url=os.getenv("REDIS_URL", "redis://localhost:6379/0"),
         weather_redis_prefix=os.getenv("WEATHER_REDIS_PREFIX", "weather"),
         weather_snapshot_max_age_seconds=number("WEATHER_SNAPSHOT_MAX_AGE_SECONDS", 14400),

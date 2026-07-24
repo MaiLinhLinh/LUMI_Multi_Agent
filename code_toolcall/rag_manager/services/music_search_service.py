@@ -179,8 +179,13 @@ class MusicSearchService:
         matches = [
             record
             for record in self._records
-            if _title_matches(record, requested_title)
-            and _artist_matches(record, requested_artist)
+            if _artist_matches(record, requested_artist)
+            and (
+                _title_matches(record, requested_title)
+                or _artist_prefixed_title_matches(
+                    record, requested_title, requested_artist
+                )
+            )
         ]
         return [
             _candidate_payload(record, final_score=None)
@@ -461,6 +466,26 @@ def _title_matches(record: MusicSearchRecord, requested_title: str) -> bool:
         else None,
     )
     return requested_title in aliases
+
+
+def _artist_prefixed_title_matches(
+    record: MusicSearchRecord,
+    requested_title: str,
+    requested_artist: str,
+) -> bool:
+    """Match catalog titles that prefix an otherwise exact title with its artist.
+
+    Some imported YouTube titles embed the performer/collaborator before the
+    actual song name (``Artist x Guest | Song``).  The LLM correctly supplies
+    the song title and artist separately, so accept that only when the catalog
+    title begins with the requested artist and ends with the requested title.
+    """
+
+    canonical_title = normalize_music_text(str(record.metadata.get("title", "")))
+    return (
+        canonical_title.startswith(requested_artist)
+        and canonical_title.endswith(requested_title)
+    )
 
 
 def _artist_matches(record: MusicSearchRecord, requested_artist: str) -> bool:

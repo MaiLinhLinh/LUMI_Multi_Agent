@@ -30,10 +30,10 @@ Browser microphone
 |---|---|---|---|
 | 1 | Khảo sát điểm tích hợp và chốt hợp đồng kiến trúc voice | Kế hoạch này; xác nhận `web_app.py` đã có `/api/chat/stream`, session và NDJSON stream | Hoàn thành |
 | 2 | Chốt cấu hình Gemini Live và secrets | Xác định model voice, biến môi trường, quyền API; không lộ API key | Hoàn thành có điều kiện |
-| 3 | Thêm Voice Gateway tối thiểu ở backend | Endpoint WebSocket chỉ nhận sự kiện voice, quản lý session/cancel và chưa sửa agent | Chờ |
-| 4 | Thêm microphone và trạng thái voice ở frontend | Nút ghi âm, quyền microphone, trạng thái nghe/lỗi; chưa gửi câu hỏi vào agent | Chờ |
-| 5 | Kết nối audio -> transcript -> `/api/chat/stream` | Một câu nói tạo đúng một query text trong cùng session và hiển thị transcript | Chờ |
-| 6 | Kết nối final answer/text stream -> audio | Câu trả lời của agent được đọc; player/panel hiện có vẫn hoạt động | Chờ |
+| 3 | Thêm Voice Gateway tối thiểu ở backend | Endpoint WebSocket chỉ nhận sự kiện voice, quản lý session/cancel và chưa sửa agent | Hoàn thành |
+| 4 | Thêm microphone và trạng thái voice ở frontend | Nút ghi âm, quyền microphone, trạng thái nghe/lỗi; chưa gửi câu hỏi vào agent | Hoàn thành |
+| 5 | Kết nối audio -> transcript -> `/api/chat/stream` | Một câu nói tạo đúng một query text trong cùng session và hiển thị transcript | Hoàn thành |
+| 6 | Kết nối final answer/text stream -> audio | Câu trả lời của agent được đọc; player/panel hiện có vẫn hoạt động | Hoàn thành |
 | 7 | Bổ sung ngắt lời, hủy audio và xử lý lỗi | Nói chen dừng audio cũ; kết nối/API lỗi có thông báo rõ | Chờ |
 | 8 | Kiểm thử tích hợp và tài liệu vận hành | Test text/voice nhiều lượt, nhạc, thời tiết, mất kết nối; hướng dẫn chạy | Chờ |
 
@@ -75,3 +75,36 @@ Browser microphone
 ## Thay đổi cấu hình bước 2
 
 `rag_manager/config.py` đã nhận thêm ba biến tách biệt: `GEMINI_LIVE_API_KEY`, `GEMINI_LIVE_MODEL` (mặc định `gemini-3.1-flash-live-preview`) và `GEMINI_LIVE_VOICE`. Chúng chưa được sử dụng bởi luồng agent hiện tại, nên không làm thay đổi hành vi chat text.
+
+## Kết quả bước 3
+
+- Thêm WebSocket `GET /ws/voice` trong `web_app.py` và module giao thức `rag_manager/voice_gateway.py`.
+- Sự kiện tối thiểu: `voice:start` (gắn session chat), `voice:ping` và `voice:cancel`.
+- Gateway kiểm tra `GEMINI_LIVE_API_KEY` và model voice nhưng chưa tạo kết nối Gemini Live, chưa nhận audio và không có quyền gọi agent/tool.
+- `voice:cancel` mới quản lý trạng thái socket; việc hủy audio/TTS/Gemini Live thật sẽ được thêm ở bước 7.
+
+## Kết quả bước 4
+
+- Frontend có nút microphone, trạng thái truy cập micro/đang nghe/lỗi và khả năng dừng ghi âm.
+- Audio được `MediaRecorder` giữ trong bộ nhớ cục bộ rồi giải phóng khi rời trang; chưa gửi tới WebSocket, Gemini Live hoặc agent.
+- Khi browser không hỗ trợ micro hoặc người dùng từ chối quyền, UI hiển thị lỗi tiếng Việt rõ ràng.
+
+## Kết quả bước 5
+
+- Browser thu mono PCM, resample về PCM 16 kHz và truyền binary qua `/ws/voice`; không gửi file audio hay đưa audio vào lịch sử agent.
+- Voice Gateway tạo một Gemini Live session chỉ có input audio transcription tiếng Việt, không khai báo tool và không chuyển response của Gemini thành câu trả lời nghiệp vụ.
+- Transcript tạm thời được hiển thị ở UI. Khi nhận transcript cuối, frontend gọi đúng `/api/chat/stream` với `session_id` hiện tại; do đó Manager/Gemma/tool/session cũ giữ nguyên.
+- Bước này chỉ trả về text qua UI hiện có. Tổng hợp text thành audio sẽ được thực hiện ở bước 6.
+- Key mới đã được Gemini chấp nhận; bắt tay Gemini Live thành công.
+- `gemini-3.5-live-translate-preview` không chốt được transcript trong kiểm thử audio thật, nên không được dùng làm STT. Cả STT và TTS mặc định dùng `gemini-3.1-flash-live-preview`: STT đọc `input_transcription`, TTS sinh `AUDIO`.
+- STT đặt `language_hints=["vi-VN"]` và các cụm thích nghi `Lumi`, `Hà Nội`, `Sơn Tùng M-TP` để ưu tiên nhận diện tiếng Việt và tên riêng của ứng dụng.
+- Biến cấu hình: `GEMINI_LIVE_TRANSCRIBE_MODEL` và `GEMINI_LIVE_SPEECH_MODEL` (đều mặc định 3.1 Flash Live). `GEMINI_LIVE_MODEL` cũ vẫn là fallback tương thích cho nhánh TTS.
+
+## Kết quả triển khai bước 6
+
+- Thêm `GeminiLiveSpeaker` tách biệt với transcriber: chỉ nhận text cuối do Gemma tạo, không có tool hay quyền agent, rồi trả PCM audio qua WebSocket.
+- Giọng cố định mặc định là `kore`; có thể đổi một lần cho toàn hệ thống bằng `GEMINI_LIVE_VOICE` trong `.env`.
+- Frontend xếp các chunk PCM để phát liên tục bằng Web Audio API; UI text, player nhạc và panel thời tiết không thay đổi.
+- Chỉ các lượt bắt đầu bằng voice mới tự đọc câu trả lời. Lượt gõ text giữ hành vi im lặng như trước.
+- TTS streaming: frontend gom ký tự text vừa hiển thị thành cụm tối đa khoảng 8 từ hoặc đến dấu câu, rồi lần lượt gửi chúng qua cùng một phiên Gemini Live. Vì vậy giọng có thể bắt đầu trước khi toàn bộ câu trả lời và minh hoạ hoàn tất; cụm sau chỉ gửi sau `voice_speech_end` của cụm trước.
+- Kiểm tra thật: Gemini Live đã đọc câu tiếng Việt thử nghiệm và trả về 57.122 byte PCM; không lưu audio ra file.

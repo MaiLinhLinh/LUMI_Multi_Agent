@@ -272,7 +272,11 @@ class GeminiFunctionCallingRuntime:
             force_text_only_next_turn = False
             text_choice_instruction_next_turn = None
             started_inference = time.perf_counter()
-            streaming_turn = on_text_chunk is not None and turn > 1
+            # A forced tool turn must preserve its function-call part.  Some
+            # streaming responses expose no visible text (and can lose that
+            # part when their final chunk only contains usage metadata), so
+            # stream only turns that are expected to produce user text.
+            streaming_turn = on_text_chunk is not None and turn > 1 and not turn_forced_names
             visible_parts: list[str] = []
             first_visible_at: float | None = None
             last_visible_at: float | None = None

@@ -38,28 +38,22 @@ class MusicTools:
         if isinstance(args.get("query"), str) and args["query"].strip():
             extraction["search_query"] = args["query"].strip()
         if request_kind == "exact_track" and not extraction.get("title"):
-            return {
-                "status": "completed",
-                "data": {
-                    "status": "needs_details",
-                    "requested_title": "",
-                    "artist": extraction.get("artist", ""),
-                    "candidates": [],
-                    "query": extraction.get("search_query", ""),
-                    "validation_error": "title_required_for_exact_track",
-                },
-            }
+            return self._search_response({
+                "status": "needs_details",
+                "requested_title": "",
+                "artist": extraction.get("artist", ""),
+                "candidates": [],
+                "query": extraction.get("search_query", ""),
+                "validation_error": "title_required_for_exact_track",
+            })
         if not extraction.get("search_query") and not extraction.get("title"):
-            return {
-                "status": "completed",
-                "data": {
-                    "status": "needs_details",
-                    "requested_title": "",
-                    "artist": "",
-                    "candidates": [],
-                    "query": "",
-                },
-            }
+            return self._search_response({
+                "status": "needs_details",
+                "requested_title": "",
+                "artist": "",
+                "candidates": [],
+                "query": "",
+            })
 
         requested_title = extraction.get("title", "")
         artist = extraction.get("artist", "")
@@ -81,16 +75,13 @@ class MusicTools:
                     for item in candidates
                     if item.get("record_id")
                 }
-                return {
-                    "status": "completed",
-                    "data": {
-                        "status": "not_found",
-                        "requested_title": requested_title,
-                        "artist": artist,
-                        "candidates": candidates,
-                        "query": result["query"],
-                    },
-                }
+                return self._search_response({
+                    "status": "not_found",
+                    "requested_title": requested_title,
+                    "artist": artist,
+                    "candidates": candidates,
+                    "query": result["query"],
+                })
         else:
             result = self.search.search(extraction)
             candidates = result.get("candidates", [])
@@ -103,16 +94,13 @@ class MusicTools:
                     for item in candidates
                     if item.get("record_id")
                 }
-                return {
-                    "status": "completed",
-                    "data": {
-                        "status": "not_found",
-                        "requested_title": requested_title,
-                        "artist": "",
-                        "candidates": candidates,
-                        "query": result.get("query", ""),
-                    },
-                }
+                return self._search_response({
+                    "status": "not_found",
+                    "requested_title": requested_title,
+                    "artist": "",
+                    "candidates": candidates,
+                    "query": result.get("query", ""),
+                })
         self.allowed = {
             str(item.get("record_id")): item
             for item in candidates
@@ -120,26 +108,60 @@ class MusicTools:
         }
         exact_matches = self._exact_title_matches(candidates, requested_title)
         if not candidates:
-            return {
-                "status": "completed",
-                "data": {
-                    "status": "not_found",
-                    "requested_title": requested_title,
-                    "artist": artist,
-                    "candidates": [],
-                    "query": result.get("query", ""),
-                },
-            }
-        return {
-            "status": "completed",
-            "data": {
-                "status": "found",
+            return self._search_response({
+                "status": "not_found",
                 "requested_title": requested_title,
                 "artist": artist,
-                "candidates": candidates,
-                "exact_matches": exact_matches,
+                "candidates": [],
                 "query": result.get("query", ""),
-            },
+            })
+        return self._search_response({
+            "status": "found",
+            "requested_title": requested_title,
+            "artist": artist,
+            "candidates": candidates,
+            "exact_matches": exact_matches,
+            "query": result.get("query", ""),
+        })
+
+    @staticmethod
+    def _search_response(data: dict[str, Any]) -> dict[str, Any]:
+        """Keep full search data for UI/session while minimizing the LLM turn."""
+
+        return {
+            "status": "completed",
+            "data": data,
+            "_llm_response": MusicTools._llm_search_payload(data),
+        }
+
+    @staticmethod
+    def _llm_search_payload(data: dict[str, Any]) -> dict[str, Any]:
+        candidates = data.get("candidates")
+        compact_candidates = []
+        if isinstance(candidates, list):
+            for candidate in candidates[:5]:
+                if not isinstance(candidate, dict):
+                    continue
+                artists = candidate.get("artists")
+                compact_candidates.append({
+                    "record_id": str(candidate.get("record_id") or ""),
+                    "title": str(candidate.get("title") or ""),
+                    "artists": [str(item) for item in artists if isinstance(item, str)] if isinstance(artists, list) else [],
+                    "version": str(candidate.get("version") or ""),
+                    "content_type": str(candidate.get("content_type") or ""),
+                })
+        exact_matches = data.get("exact_matches")
+        exact_match_record_ids = [
+            str(item.get("record_id"))
+            for item in exact_matches
+            if isinstance(item, dict) and item.get("record_id")
+        ] if isinstance(exact_matches, list) else []
+        return {
+            "status": str(data.get("status") or ""),
+            "requested_title": str(data.get("requested_title") or ""),
+            "requested_artist": str(data.get("artist") or ""),
+            "candidates": compact_candidates,
+            "exact_match_record_ids": exact_match_record_ids,
         }
 
     def play_music(
@@ -160,6 +182,17 @@ class MusicTools:
         requested = normalize_music_text(title)
         if not requested:
             return []
+        canonical_matches = [
+            candidate
+            for candidate in candidates
+            if MusicTools._is_canonical_exact_match(candidate, requested)
+        ]
+        # A catalog item can retain the song's short title as an alias even when
+        # its canonical title identifies a different version (for example, a
+        # stage performance).  Prefer a canonical-title match so an explicit
+        # request for the song does not become an artificial disambiguation.
+        if canonical_matches:
+            return canonical_matches
         return [
             candidate
             for candidate in candidates
@@ -169,3 +202,20 @@ class MusicTools:
                 if isinstance(alias, str)
             }
         ]
+
+    @staticmethod
+    def _is_canonical_exact_match(candidate: dict[str, Any], requested_title: str) -> bool:
+        canonical_title = normalize_music_text(str(candidate.get("title") or ""))
+        if canonical_title == requested_title:
+            return True
+        # Imported catalog titles sometimes include an artist/collaborator
+        # prefix.  Treat the remainder as exact only when the prefix is one of
+        # the verified candidate artists; this does not make a stage/version
+        # title an exact match merely because it shares an alias.
+        artists = candidate.get("artists")
+        return isinstance(artists, list) and any(
+            canonical_title.startswith(normalize_music_text(str(artist)))
+            and canonical_title.endswith(requested_title)
+            for artist in artists
+            if isinstance(artist, str) and normalize_music_text(artist)
+        )

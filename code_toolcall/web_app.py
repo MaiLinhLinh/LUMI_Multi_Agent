@@ -13,10 +13,12 @@ from starlette.applications import Starlette
 from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, StreamingResponse
-from starlette.routing import Mount, Route
+from starlette.routing import Mount, Route, WebSocketRoute
 from starlette.staticfiles import StaticFiles
+from starlette.websockets import WebSocket, WebSocketDisconnect
 from rag_manager.config import load_settings
 from rag_manager.graph import build_workflow
+from rag_manager.voice_gateway import GeminiLiveSpeaker, GeminiLiveTranscriber, VoiceProtocolError, VoiceSocketState, cancel_event, read_event, start_event
 
 BASE=Path(__file__).resolve().parent; WEB=BASE/"web"
 logging.basicConfig(
@@ -177,7 +179,96 @@ async def clear(request:Request):
     raw=await request.json(); key=str(raw.get("session_id","") or uuid.uuid4())
     with sessions_lock: sessions[key]=Session()
     return JSONResponse(payload(key,sessions[key]))
-routes=[Route("/",home),Route("/api/health",health),Route("/api/chat",chat,methods=["POST"]),Route("/api/chat/stream",chat_stream,methods=["POST"]),Route("/api/session/clear",clear,methods=["POST"]),Route("/api/session/{session_id}",get_session_route),Mount("/assets",app=StaticFiles(directory=WEB),name="assets")]
+
+async def voice_socket(websocket: WebSocket) -> None:
+    """Voice -> Gemini Live transcript -> browser, without agent/tool access."""
+    await websocket.accept()
+    state = VoiceSocketState()
+    settings = load_settings()
+
+    async def publish_transcript(text: str, is_final: bool) -> None:
+        clean_text = text.strip()
+        if clean_text:
+            await websocket.send_json({
+                "type": "voice_transcript",
+                "session_id": state.session_id,
+                "text": clean_text,
+                "final": is_final,
+            })
+
+    async def close_transcriber() -> None:
+        if state.transcriber is not None:
+            await state.transcriber.close()
+            state.transcriber = None
+
+    async def publish_speech_audio(audio: bytes, _: str) -> None:
+        await websocket.send_bytes(audio)
+
+    async def publish_speech_complete() -> None:
+        await websocket.send_json({"type": "voice_speech_end", "session_id": state.session_id})
+
+    async def close_speaker() -> None:
+        if state.speaker is not None:
+            await state.speaker.close()
+            state.speaker = None
+
+    try:
+        while True:
+            try:
+                packet = await websocket.receive()
+                if packet["type"] == "websocket.disconnect":
+                    break
+                if packet.get("bytes") is not None:
+                    if state.transcriber is None:
+                        raise VoiceProtocolError("Voice chưa sẵn sàng nhận audio.")
+                    await state.transcriber.send_audio(packet["bytes"])
+                    continue
+                if packet.get("text") is None:
+                    continue
+                event_type, raw = read_event(json.loads(packet["text"]))
+                if event_type == "voice:start":
+                    ready = start_event(raw, settings, state)
+                    get_session(ready["session_id"])
+                    await close_transcriber()
+                    state.transcriber = GeminiLiveTranscriber(settings, publish_transcript)
+                    await state.transcriber.connect()
+                    ready["phase"] = "transcription_ready"
+                    await websocket.send_json(ready)
+                elif event_type == "voice:speak":
+                    text = raw.get("text")
+                    if not isinstance(text, str) or not text.strip():
+                        raise VoiceProtocolError("Sự kiện voice:speak thiếu text.")
+                    if state.session_id is None:
+                        raise VoiceProtocolError("Voice chưa có session_id.")
+                    await close_transcriber()
+                    if state.speaker is None:
+                        state.speaker = GeminiLiveSpeaker(settings, publish_speech_audio, publish_speech_complete)
+                        await state.speaker.connect()
+                    await state.speaker.speak(text.strip())
+                elif event_type == "voice:audio_end":
+                    if state.transcriber is None:
+                        raise VoiceProtocolError("Voice chưa sẵn sàng nhận audio.")
+                    await state.transcriber.finish_audio()
+                elif event_type == "voice:cancel":
+                    await close_transcriber()
+                    await close_speaker()
+                    await websocket.send_json(cancel_event(state))
+                elif event_type == "voice:ping":
+                    await websocket.send_json({"type": "voice:pong", "session_id": state.session_id})
+                else:
+                    raise VoiceProtocolError(f"Sự kiện voice không hỗ trợ: {event_type}.")
+            except VoiceProtocolError as exc:
+                await websocket.send_json({"type": "voice_error", "message": str(exc)})
+            except Exception:
+                logger.exception("[VOICE][ERROR] session=%s", state.session_id)
+                await websocket.send_json({"type": "voice_error", "message": "Không thể xử lý voice. Hãy thử lại."})
+    except WebSocketDisconnect:
+        logger.info("[VOICE][DISCONNECT] session=%s", state.session_id)
+    finally:
+        await close_transcriber()
+        await close_speaker()
+
+routes=[Route("/",home),Route("/api/health",health),Route("/api/chat",chat,methods=["POST"]),Route("/api/chat/stream",chat_stream,methods=["POST"]),Route("/api/session/clear",clear,methods=["POST"]),Route("/api/session/{session_id}",get_session_route),WebSocketRoute("/ws/voice",voice_socket),Mount("/assets",app=StaticFiles(directory=WEB),name="assets")]
 app=Starlette(debug=False,routes=routes)
 if __name__=="__main__":
  import uvicorn; uvicorn.run(app,host="127.0.0.1",port=8000)
