@@ -1,9 +1,13 @@
 from rag_manager.config import Settings
-from rag_manager.voice_gateway import VoiceProtocolError, VoiceSocketState, cancel_event, read_event, start_event
+from rag_manager.voice_gateway import VoiceProtocolError, VoiceSocketState, cancel_event, read_event, speech_start_event, start_event
 
 
 def settings() -> Settings:
-    return Settings(gemini_api_key="agent-key", gemini_model="gemma-agent", gemini_live_api_key="voice-key")
+    return Settings(
+        gemini_api_key="agent-key",
+        gemini_model="gemma-agent",
+        gemini_live_api_key="voice-key",
+    )
 
 
 def test_start_keeps_voice_session_separate_from_agent_model() -> None:
@@ -42,3 +46,10 @@ def test_cancel_tracks_turns_and_event_requires_type() -> None:
         pass
     else:
         raise AssertionError("Expected VoiceProtocolError")
+
+
+def test_speech_start_binds_a_tts_only_session() -> None:
+    state = VoiceSocketState()
+    event = speech_start_event({"type": "voice:speech_start", "session_id": "session-1", "turn_id": "turn-1"}, settings(), state)
+    assert event["type"] == "voice_speech_ready"
+    assert state.session_id == "session-1"

@@ -24,6 +24,7 @@ class VoiceProtocolError(ValueError):
 @dataclass
 class VoiceSocketState:
     session_id: str | None = None
+    speech_turn_id: str | None = None
     cancelled_turns: int = 0
     transcriber: Any = None
     speaker: Any = None
@@ -48,9 +49,6 @@ def start_event(raw: dict[str, Any], settings: Settings, state: VoiceSocketState
         raise VoiceProtocolError("Thiếu GEMINI_LIVE_API_KEY trong code_toolcall/.env.")
     if not settings.gemini_live_transcribe_model:
         raise VoiceProtocolError("Thiếu GEMINI_LIVE_TRANSCRIBE_MODEL trong code_toolcall/.env.")
-    if not settings.gemini_live_speech_model:
-        raise VoiceProtocolError("Thiếu GEMINI_LIVE_SPEECH_MODEL trong code_toolcall/.env.")
-
     state.session_id = session_id.strip()
     return {
         "type": "voice_ready",
@@ -62,6 +60,29 @@ def start_event(raw: dict[str, Any], settings: Settings, state: VoiceSocketState
     }
 
 
+def speech_start_event(raw: dict[str, Any], settings: Settings, state: VoiceSocketState) -> dict[str, Any]:
+    """Bind a TTS-only socket without creating an STT connection."""
+    session_id = raw.get("session_id")
+    if not isinstance(session_id, str) or not session_id.strip():
+        raise VoiceProtocolError("Sự kiện voice:speech_start thiếu session_id.")
+    if len(session_id) > 200:
+        raise VoiceProtocolError("session_id voice quá dài.")
+    turn_id = raw.get("turn_id")
+    if not isinstance(turn_id, str) or not turn_id.strip() or len(turn_id) > 200:
+        raise VoiceProtocolError("Sự kiện voice TTS thiếu turn_id hợp lệ.")
+    if not settings.gemini_live_api_key:
+        raise VoiceProtocolError("Thiếu GEMINI_LIVE_API_KEY trong code_toolcall/.env.")
+    if not settings.gemini_live_speech_model:
+        raise VoiceProtocolError("Thiếu GEMINI_LIVE_SPEECH_MODEL trong code_toolcall/.env.")
+    state.session_id = session_id.strip()
+    state.speech_turn_id = turn_id.strip()
+    return {
+        "type": "voice_speech_ready",
+        "session_id": state.session_id,
+        "turn_id": state.speech_turn_id,
+        "speech_model": settings.gemini_live_speech_model,
+        "voice": settings.gemini_live_voice or None,
+    }
 def cancel_event(state: VoiceSocketState) -> dict[str, Any]:
     state.cancelled_turns += 1
     return {
@@ -156,7 +177,7 @@ class GeminiLiveTranscriber:
 
 
 class GeminiLiveSpeaker:
-    """Reads a Gemma-authored answer as PCM audio; it has no tools or agent access."""
+    """Reads one completed assistant answer through a dedicated Gemini Live session."""
 
     def __init__(self, settings: Settings, on_audio: Any, on_complete: Any) -> None:
         self._settings = settings
@@ -165,6 +186,7 @@ class GeminiLiveSpeaker:
         self._connection: Any = None
         self._session: Any = None
         self._receive_task: asyncio.Task[None] | None = None
+        self._awaiting_completion = False
 
     async def connect(self) -> None:
         client = genai.Client(api_key=self._settings.gemini_live_api_key)
@@ -195,6 +217,7 @@ class GeminiLiveSpeaker:
         if not self._session:
             raise RuntimeError("Gemini Live speech session is not connected.")
         instruction = "Read the following assistant answer aloud in Vietnamese, faithfully and without additions:\n\n" + text
+        self._awaiting_completion = True
         await self._session.send_client_content(turns=[{"role": "user", "parts": [{"text": instruction}]}])
 
     async def _receive(self) -> None:
@@ -208,7 +231,8 @@ class GeminiLiveSpeaker:
                 inline_data = part.inline_data
                 if inline_data and inline_data.data:
                     await self._on_audio(inline_data.data, inline_data.mime_type or "audio/pcm;rate=24000")
-            if server_content.turn_complete:
+            if self._awaiting_completion and server_content.turn_complete:
+                self._awaiting_completion = False
                 await self._on_complete()
 
     async def close(self) -> None:

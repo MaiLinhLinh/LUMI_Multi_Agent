@@ -69,12 +69,12 @@ Browser microphone
 - Model mặc định: `gemini-3.1-flash-live-preview`, là model Live hiện hành được tài liệu Gemini Live liệt kê. Nó chỉ được dùng ở Voice Gateway.
 - Model agent giữ nguyên: `GEMINI_MODEL=gemma-4-26b-a4b-it` không bị sửa hoặc dùng cho voice.
 - API key voice: biến riêng `GEMINI_LIVE_API_KEY`; không có cơ chế kế thừa `GEMINI_API_KEY`.
-- Giọng đọc: biến `GEMINI_LIVE_VOICE`, giá trị cố định cho toàn bộ phiên. Tên giọng phải được kiểm chứng với model/key thực tế ở bước 3 trước khi đặt giá trị.
+- Giọng đọc: biến `GEMINI_LIVE_VOICE`, giá trị cố định cho toàn bộ phiên Gemini Live.
 - Quota: rate limit áp theo Google project, không theo API key. Key riêng cần thuộc project riêng có billing/quota phù hợp nếu mục tiêu là cô lập quota voice khỏi agent. Không model nào bảo đảm không có lỗi 429; preview thường có quota hạn chế hơn model ổn định.
 
 ## Thay đổi cấu hình bước 2
 
-`rag_manager/config.py` đã nhận thêm ba biến tách biệt: `GEMINI_LIVE_API_KEY`, `GEMINI_LIVE_MODEL` (mặc định `gemini-3.1-flash-live-preview`) và `GEMINI_LIVE_VOICE`. Chúng chưa được sử dụng bởi luồng agent hiện tại, nên không làm thay đổi hành vi chat text.
+`rag_manager/config.py` tách `GEMINI_LIVE_TRANSCRIBE_MODEL` cho STT và `GEMINI_LIVE_SPEECH_MODEL`, `GEMINI_LIVE_VOICE` cho TTS. Chúng không làm thay đổi hành vi chat text.
 
 ## Kết quả bước 3
 
@@ -98,13 +98,13 @@ Browser microphone
 - Key mới đã được Gemini chấp nhận; bắt tay Gemini Live thành công.
 - `gemini-3.5-live-translate-preview` không chốt được transcript trong kiểm thử audio thật, nên không được dùng làm STT. Cả STT và TTS mặc định dùng `gemini-3.1-flash-live-preview`: STT đọc `input_transcription`, TTS sinh `AUDIO`.
 - STT đặt `language_hints=["vi-VN"]` và các cụm thích nghi `Lumi`, `Hà Nội`, `Sơn Tùng M-TP` để ưu tiên nhận diện tiếng Việt và tên riêng của ứng dụng.
-- Biến cấu hình: `GEMINI_LIVE_TRANSCRIBE_MODEL` và `GEMINI_LIVE_SPEECH_MODEL` (đều mặc định 3.1 Flash Live). `GEMINI_LIVE_MODEL` cũ vẫn là fallback tương thích cho nhánh TTS.
+- Biến cấu hình: `GEMINI_LIVE_TRANSCRIBE_MODEL` cho STT Live; `GEMINI_LIVE_SPEECH_MODEL` và `GEMINI_LIVE_VOICE` cho Gemini Live TTS.
 
 ## Kết quả triển khai bước 6
 
-- Thêm `GeminiLiveSpeaker` tách biệt với transcriber: chỉ nhận text cuối do Gemma tạo, không có tool hay quyền agent, rồi trả PCM audio qua WebSocket.
+- Thêm `GeminiLiveSpeaker` tách biệt với transcriber: nhận toàn bộ text cuối do Gemma tạo rồi trả PCM audio qua WebSocket.
 - Giọng cố định mặc định là `kore`; có thể đổi một lần cho toàn hệ thống bằng `GEMINI_LIVE_VOICE` trong `.env`.
 - Frontend xếp các chunk PCM để phát liên tục bằng Web Audio API; UI text, player nhạc và panel thời tiết không thay đổi.
 - Chỉ các lượt bắt đầu bằng voice mới tự đọc câu trả lời. Lượt gõ text giữ hành vi im lặng như trước.
-- TTS streaming: frontend gom ký tự text vừa hiển thị thành cụm tối đa khoảng 8 từ hoặc đến dấu câu, rồi lần lượt gửi chúng qua cùng một phiên Gemini Live. Vì vậy giọng có thể bắt đầu trước khi toàn bộ câu trả lời và minh hoạ hoàn tất; cụm sau chỉ gửi sau `voice_speech_end` của cụm trước.
+- TTS: frontend hiển thị text stream ngay, rồi chỉ gửi toàn bộ câu trả lời sang Gemini Live sau khi text đã render xong.
 - Kiểm tra thật: Gemini Live đã đọc câu tiếng Việt thử nghiệm và trả về 57.122 byte PCM; không lưu audio ra file.

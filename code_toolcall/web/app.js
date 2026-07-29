@@ -28,6 +28,7 @@ const SESSION_KEY = "lumi_web_session_id";
 const YOUTUBE_NOCOOKIE_ORIGIN = "https://www.youtube-nocookie.com";
 const YOUTUBE_VIDEO_ID_PATTERN = /^[A-Za-z0-9_-]{11}$/;
 const STREAM_CHARACTER_DELAY_MS = 18;
+const SPEECH_READY_TIMEOUT_MS = 5000;
 const TIMING_MARKER_LABELS = {
   server_request_received: "Server nhận request",
   manager_started: "Manager bắt đầu",
@@ -55,17 +56,19 @@ let microphoneSource = null;
 let microphoneProcessor = null;
 let microphoneMuteGain = null;
 let voiceSocket = null;
+let speechSocket = null;
 let voiceAwaitingTranscript = false;
 let voiceSpeaking = false;
 let speakerContext = null;
 let speakerNextStartTime = 0;
 const speakerSources = new Set();
-let streamedSpeechQueue = [];
-let streamedSpeechBuffer = "";
 let streamedSpeechReady = false;
 let streamedSpeechInFlight = false;
-let streamedSpeechInputFinished = false;
+let pendingSpeechText = "";
 let streamedSpeechFinishTimer = null;
+let speechReadyTimer = null;
+let activeSpeechTurnId = null;
+let speechUnavailable = false;
 
 function getOrCreateSessionId() {
   const existing = window.localStorage.getItem(SESSION_KEY);
@@ -156,7 +159,7 @@ function render({ preserveMessages = false } = {}) {
   renderFirstTextLog();
   queryInput.disabled = busy;
   sendButton.disabled = busy;
-  microphoneButton.disabled = busy || voiceAwaitingTranscript || voiceSpeaking;
+  microphoneButton.disabled = busy || voiceAwaitingTranscript;
   window.requestAnimationFrame(() => {
     messagesElement.scrollTop = messagesElement.scrollHeight;
   });
@@ -188,6 +191,11 @@ function releaseMicrophone() {
 function closeVoiceSocket() {
   if (voiceSocket && voiceSocket.readyState < WebSocket.CLOSING) voiceSocket.close();
   voiceSocket = null;
+}
+
+function closeSpeechSocket() {
+  if (speechSocket && speechSocket.readyState < WebSocket.CLOSING) speechSocket.close();
+  speechSocket = null;
 }
 
 function stopSpeakerAudio() {
@@ -223,13 +231,29 @@ function playPcmChunk(arrayBuffer, mimeType = "audio/pcm;rate=24000") {
 }
 
 function resetStreamedSpeechState() {
-  streamedSpeechQueue = [];
-  streamedSpeechBuffer = "";
   streamedSpeechReady = false;
   streamedSpeechInFlight = false;
-  streamedSpeechInputFinished = false;
+  pendingSpeechText = "";
   if (streamedSpeechFinishTimer !== null) window.clearTimeout(streamedSpeechFinishTimer);
   streamedSpeechFinishTimer = null;
+  if (speechReadyTimer !== null) window.clearTimeout(speechReadyTimer);
+  speechReadyTimer = null;
+}
+
+function newSpeechTurnId() {
+  return window.crypto?.randomUUID?.() || `speech-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function startSpeechReadyTimer(turnId) {
+  if (speechReadyTimer !== null) window.clearTimeout(speechReadyTimer);
+  speechReadyTimer = window.setTimeout(() => {
+    if (streamedSpeechReady || activeSpeechTurnId !== turnId) return;
+    speechUnavailable = true;
+    stopSpeakerAudio();
+    closeSpeechSocket();
+    microphoneButton.disabled = busy || voiceAwaitingTranscript;
+    setVoiceStatus("Không thể khởi tạo giọng nói; câu trả lời vẫn hiển thị bằng văn bản.", "error");
+  }, SPEECH_READY_TIMEOUT_MS);
 }
 
 function finishStreamedSpeechAfterPlayback() {
@@ -237,101 +261,93 @@ function finishStreamedSpeechAfterPlayback() {
   const remainingMs = Math.max(0, (speakerNextStartTime - speakerContext?.currentTime || 0) * 1000);
   streamedSpeechFinishTimer = window.setTimeout(() => {
     stopSpeakerAudio();
-    closeVoiceSocket();
+    closeSpeechSocket();
     resetStreamedSpeechState();
     setVoiceStatus("Nhấn micro để nói");
-    microphoneButton.disabled = busy || voiceAwaitingTranscript || voiceSpeaking;
+    microphoneButton.disabled = busy || voiceAwaitingTranscript;
   }, remainingMs + 50);
 }
 
-function sendNextSpeechChunk() {
-  if (!streamedSpeechReady || streamedSpeechInFlight || !voiceSocket || voiceSocket.readyState !== WebSocket.OPEN) return;
-  const text = streamedSpeechQueue.shift();
-  if (!text) {
-    if (streamedSpeechInputFinished) finishStreamedSpeechAfterPlayback();
-    return;
-  }
+function sendCompletedSpeech() {
+  if (!streamedSpeechReady || streamedSpeechInFlight || !pendingSpeechText || !speechSocket || speechSocket.readyState !== WebSocket.OPEN) return;
+  const text = pendingSpeechText;
+  pendingSpeechText = "";
   streamedSpeechInFlight = true;
-  voiceSocket.send(JSON.stringify({ type: "voice:speak", text }));
+  speechSocket.send(JSON.stringify({ type: "voice:speak", turn_id: activeSpeechTurnId, text }));
 }
 
-function startStreamedSpeech() {
+function startStreamedSpeech({ startReadyTimeout = true } = {}) {
   if (voiceSpeaking) return;
   resetStreamedSpeechState();
   stopSpeakerAudio();
-  closeVoiceSocket();
+  closeSpeechSocket();
   voiceSpeaking = true;
-  microphoneButton.disabled = true;
+  speechUnavailable = false;
+  activeSpeechTurnId = newSpeechTurnId();
+  if (startReadyTimeout) startSpeechReadyTimer(activeSpeechTurnId);
   setVoiceStatus("Đang chuẩn bị giọng nói…");
-  voiceSocket = new WebSocket(voiceSocketUrl());
-  voiceSocket.binaryType = "arraybuffer";
-  voiceSocket.addEventListener("open", () => {
-    voiceSocket.send(JSON.stringify({ type: "voice:start", session_id: sessionId }));
+  const socket = new WebSocket(voiceSocketUrl());
+  speechSocket = socket;
+  socket.binaryType = "arraybuffer";
+  socket.addEventListener("open", () => {
+    if (speechSocket !== socket) return;
+    socket.send(JSON.stringify({ type: "voice:speech_start", session_id: sessionId, turn_id: activeSpeechTurnId }));
   });
-  voiceSocket.addEventListener("message", (event) => {
+  socket.addEventListener("message", (event) => {
     if (event.data instanceof ArrayBuffer) {
       playPcmChunk(event.data);
       setVoiceStatus("Đang đọc câu trả lời…");
       return;
     }
     const message = JSON.parse(event.data);
-    if (message.type === "voice_ready") {
+    if (message.type === "voice_speech_ready") {
+      if (message.turn_id !== activeSpeechTurnId) return;
       streamedSpeechReady = true;
-      sendNextSpeechChunk();
-    } else if (message.type === "voice_speech_end") {
+      if (speechReadyTimer !== null) window.clearTimeout(speechReadyTimer);
+      speechReadyTimer = null;
+      sendCompletedSpeech();
+    } else if (message.type === "voice_speech_end" && message.turn_id === activeSpeechTurnId) {
       streamedSpeechInFlight = false;
-      sendNextSpeechChunk();
+      finishStreamedSpeechAfterPlayback();
     } else if (message.type === "voice_error") {
       stopSpeakerAudio();
-      closeVoiceSocket();
+      closeSpeechSocket();
       resetStreamedSpeechState();
       setVoiceStatus(message.message || "Không thể đọc câu trả lời.", "error");
-      microphoneButton.disabled = busy || voiceAwaitingTranscript || voiceSpeaking;
+      microphoneButton.disabled = busy || voiceAwaitingTranscript;
     }
   });
-  voiceSocket.addEventListener("error", () => {
+  socket.addEventListener("error", () => {
     if (voiceSpeaking) {
       stopSpeakerAudio();
-      closeVoiceSocket();
+      closeSpeechSocket();
       resetStreamedSpeechState();
       setVoiceStatus("Không thể kết nối giọng nói.", "error");
-      microphoneButton.disabled = busy || voiceAwaitingTranscript || voiceSpeaking;
+      microphoneButton.disabled = busy || voiceAwaitingTranscript;
     }
+  });
+  socket.addEventListener("close", () => {
+    if (speechSocket !== socket) return;
+    speechSocket = null;
+    if (!voiceSpeaking) return;
+    stopSpeakerAudio();
+    resetStreamedSpeechState();
+    microphoneButton.disabled = busy || voiceAwaitingTranscript;
   });
 }
 
-function queueStreamedSpeechText(text) {
-  if (!text) return;
+function speakCompletedResponse(text) {
+  if (!text?.trim()) return;
+  if (speechUnavailable) return;
   if (!voiceSpeaking) startStreamedSpeech();
-  streamedSpeechBuffer += text;
-  while (streamedSpeechBuffer) {
-    const punctuation = streamedSpeechBuffer.search(/[,.!?;:](?:\s|$)/);
-    const words = streamedSpeechBuffer.match(/\S+\s*/g) || [];
-    let end = 0;
-    if (punctuation >= 0 && words.length >= 3) {
-      end = punctuation + 1;
-    } else if (words.length >= 8) {
-      end = words.slice(0, 8).join("").length;
-    }
-    if (!end) break;
-    streamedSpeechQueue.push(streamedSpeechBuffer.slice(0, end).trim());
-    streamedSpeechBuffer = streamedSpeechBuffer.slice(end).trimStart();
-  }
-  sendNextSpeechChunk();
-}
-
-function finishStreamedSpeechInput() {
-  if (!voiceSpeaking) return;
-  if (streamedSpeechBuffer.trim()) streamedSpeechQueue.push(streamedSpeechBuffer.trim());
-  streamedSpeechBuffer = "";
-  streamedSpeechInputFinished = true;
-  sendNextSpeechChunk();
+  pendingSpeechText = text.trim();
+  sendCompletedSpeech();
 }
 
 function cancelStreamedSpeech() {
   if (!voiceSpeaking) return;
   stopSpeakerAudio();
-  closeVoiceSocket();
+  closeSpeechSocket();
   resetStreamedSpeechState();
   setVoiceStatus("Nhấn micro để nói");
 }
@@ -389,9 +405,11 @@ async function startVoiceTurn() {
     return;
   }
   try {
+    cancelStreamedSpeech();
     microphoneStream = await navigator.mediaDevices.getUserMedia({
       audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
     });
+    startStreamedSpeech({ startReadyTimeout: false });
     voiceSocket = new WebSocket(voiceSocketUrl());
     voiceSocket.binaryType = "arraybuffer";
     voiceSocket.addEventListener("open", () => {
@@ -399,6 +417,11 @@ async function startVoiceTurn() {
       setVoiceStatus("Đang kết nối nhận diện giọng nói…");
     });
     voiceSocket.addEventListener("message", async (event) => {
+      if (event.data instanceof ArrayBuffer) {
+        playPcmChunk(event.data);
+        setVoiceStatus("Đang đọc câu trả lời…");
+        return;
+      }
       const message = JSON.parse(event.data);
       if (message.type === "voice_ready") {
         startPcmCapture();
@@ -408,6 +431,9 @@ async function startVoiceTurn() {
           voiceAwaitingTranscript = false;
           releaseMicrophone();
           closeVoiceSocket();
+          if (!streamedSpeechReady) startSpeechReadyTimer(activeSpeechTurnId);
+          microphoneButton.disabled = true;
+          setVoiceStatus("Đang chuẩn bị giọng nói…");
           await submitQuery(message.text, { speakResponse: true });
         }
       } else if (message.type === "voice_error") {
@@ -560,7 +586,7 @@ function createMessage(role, content, isStreaming = false) {
   return fragment;
 }
 
-function createCharacterStreamer(onFirstText = () => {}, onVisibleText = () => {}) {
+function createCharacterStreamer(onFirstText = () => {}) {
   const characters = [];
   let timer = null;
   let drainResolvers = [];
@@ -587,7 +613,6 @@ function createCharacterStreamer(onFirstText = () => {}, onVisibleText = () => {
     }
     streamingDraft = `${streamingDraft || ""}${character}`;
     paint();
-    onVisibleText(character);
     if (!hasRenderedFirstText) {
       hasRenderedFirstText = true;
       onFirstText();
@@ -637,7 +662,7 @@ async function submitQuery(query, { speakResponse = false } = {}) {
   const cleanQuery = query.trim();
   if (!cleanQuery || busy) return;
 
-  cancelStreamedSpeech();
+  if (!speakResponse) cancelStreamedSpeech();
 
   const requestStartedAt = performance.now();
   latencyMarkers.length = 0;
@@ -653,8 +678,6 @@ async function submitQuery(query, { speakResponse = false } = {}) {
       performance.now() - requestStartedAt,
       "Frontend",
     );
-  }, (character) => {
-    if (speakResponse) queueStreamedSpeechText(character);
   });
   let finalState = null;
   let hasReceivedFirstTextDelta = false;
@@ -682,10 +705,15 @@ async function submitQuery(query, { speakResponse = false } = {}) {
       }
     });
     await characterStreamer.drain();
-    if (speakResponse) finishStreamedSpeechInput();
     if (!finalState || typeof finalState !== "object") {
       throw new Error("Máy chủ chưa gửi kết quả cuối cùng.");
     }
+    const finalAssistantAnswer = [...(finalState.messages || [])]
+      .reverse()
+      .find((message) => message?.role === "assistant" && typeof message.content === "string")
+      ?.content
+      ?.trim();
+    if (speakResponse && finalAssistantAnswer) speakCompletedResponse(finalAssistantAnswer);
     state = finalState;
   } catch (error) {
     characterStreamer.abort();
@@ -696,7 +724,9 @@ async function submitQuery(query, { speakResponse = false } = {}) {
   } finally {
     streamingDraft = null;
     busy = false;
-    render({ preserveMessages: speakResponse && Boolean(finalState) });
+    render({
+      preserveMessages: speakResponse && hasReceivedFirstTextDelta && Boolean(finalState),
+    });
     queryInput.focus();
   }
 }
@@ -729,6 +759,7 @@ window.addEventListener("pagehide", () => {
   releaseMicrophone();
   stopSpeakerAudio();
   closeVoiceSocket();
+  closeSpeechSocket();
 });
 
 suggestions.addEventListener("click", (event) => {

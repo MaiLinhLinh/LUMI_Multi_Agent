@@ -6,7 +6,7 @@ from rag_manager.llm.function_calling_runtime import GeminiFunctionCallingRuntim
 from rag_manager.tools.weather_tools import WEATHER_DECLARATION, WeatherTools
 
 
-SYSTEM = """You are the Weather sub-agent. Call get_weather only after the request has a resolved location and time scope, and use only tool facts in a completed answer. Its required request_type is current only for an explicitly stated present-time request, forecast for a named day or multi-day outlook, and hourly for an exact clock time. An hourly call must include time_text in HH:MM 24-hour format. A confirmed weather context may be supplied. Resolve location and time scope independently: a new location replaces only the location; a new date, time, or range replaces only that temporal field. For a conversational follow-up such as 'thế ... thì sao', 'còn ...', or a comparison, preserve the confirmed date/range/request_type when the user changes location but gives no new temporal expression. For a fresh standalone request, never assume current: if location is missing, ask for the location; if time scope is missing, ask whether the user means now, today, tomorrow, or another period; if both are missing, ask one concise question for both. Do not call a tool before this clarification. Answer in Vietnamese. Keep the final answer concise and focused: one short summary, then at most 3 short bullets only when useful."""
+SYSTEM = """You are the Weather sub-agent. Call get_weather only after the request has a resolved location and time scope, and use only tool facts in a completed answer. Its required request_type is current only for an explicitly stated present-time request, forecast for a named day or multi-day outlook, and hourly for an exact clock time. An hourly call must include time_text in HH:MM 24-hour format. A confirmed weather context may be supplied. Resolve location and time scope independently: a new location replaces only the location; a new date, time, or range replaces only that temporal field. For a conversational follow-up such as 'thế ... thì sao', 'còn ...', or a comparison, preserve the confirmed date/range/request_type when the user changes location but gives no new temporal expression. For a fresh standalone request, never assume current: if location is missing, ask for the location; if time scope is missing, ask whether the user means now, today, tomorrow, or another period; if both are missing, ask one concise question for both. Do not call a tool before this clarification. Nếu câu follow-up không xác định được rõ location, ngày/thời điểm hoặc hành động người dùng muốn, hãy hỏi một câu ngắn để làm rõ. Không đoán ngày mới và không gọi get_weather. Khi không gọi tool, chỉ được trả lời một câu hỏi làm rõ; không được khẳng định bất kỳ dữ liệu thời tiết nào. Answer in Vietnamese. Keep the final answer concise and focused: one short summary, then at most 3 short bullets only when useful.When the location and time scope are both clear, you must call get_weather."""
 
 
 def run_weather(
@@ -51,8 +51,13 @@ def run_weather(
     )
     latest = next(
         (item.get("result") for item in reversed(output["tool_trace"]) if item["tool"] == "get_weather"),
-        {"status": "error"},
+        None,
     )
+    answer = output.get("text", "")
+    if latest is None and output.get("completed_without_tool") and answer.strip():
+        latest = {"status": "needs_clarification", "data": {}}
+    elif latest is None:
+        latest = {"status": "error", "data": {}}
     data = latest.get("data", {}) if isinstance(latest, dict) else {}
     next_context = dict(context)
     if isinstance(data, dict) and data.get("location_id"):
@@ -63,7 +68,6 @@ def run_weather(
             "last_start_date": data.get("requested_date", ""),
             "last_days": data.get("requested_days", 1),
         }
-    answer = output.get("text", "")
     if not answer and latest.get("status") == "completed":
         answer = "Dữ liệu thời tiết đã được cập nhật. Bạn có thể xem đầy đủ thông tin ở phần trực quan bên cạnh."
     return {

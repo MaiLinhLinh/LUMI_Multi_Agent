@@ -18,7 +18,7 @@ from starlette.staticfiles import StaticFiles
 from starlette.websockets import WebSocket, WebSocketDisconnect
 from rag_manager.config import load_settings
 from rag_manager.graph import build_workflow
-from rag_manager.voice_gateway import GeminiLiveSpeaker, GeminiLiveTranscriber, VoiceProtocolError, VoiceSocketState, cancel_event, read_event, start_event
+from rag_manager.voice_gateway import GeminiLiveSpeaker, GeminiLiveTranscriber, VoiceProtocolError, VoiceSocketState, cancel_event, read_event, speech_start_event, start_event
 
 BASE=Path(__file__).resolve().parent; WEB=BASE/"web"
 logging.basicConfig(
@@ -128,6 +128,7 @@ def execute(key:str,query:str,response_stream_callback:Any=None)->dict[str,Any]:
         )
         return payload(key,s)
 async def home(_:Request): return FileResponse(WEB/"index.html")
+async def app_js(_:Request): return FileResponse(WEB/"app.js", media_type="application/javascript", headers={"Cache-Control":"no-store"})
 async def health(_:Request):
     try: get_workflow(); return JSONResponse({"ok":True})
     except Exception as exc: return JSONResponse({"ok":False,"message":str(exc)},status_code=503)
@@ -205,7 +206,8 @@ async def voice_socket(websocket: WebSocket) -> None:
         await websocket.send_bytes(audio)
 
     async def publish_speech_complete() -> None:
-        await websocket.send_json({"type": "voice_speech_end", "session_id": state.session_id})
+        logger.info("[TTS:END] turn=%s", state.speech_turn_id)
+        await websocket.send_json({"type": "voice_speech_end", "session_id": state.session_id, "turn_id": state.speech_turn_id})
 
     async def close_speaker() -> None:
         if state.speaker is not None:
@@ -234,16 +236,24 @@ async def voice_socket(websocket: WebSocket) -> None:
                     await state.transcriber.connect()
                     ready["phase"] = "transcription_ready"
                     await websocket.send_json(ready)
+                elif event_type == "voice:speech_start":
+                    ready = speech_start_event(raw, settings, state)
+                    get_session(ready["session_id"])
+                    if state.speaker is None:
+                        state.speaker = GeminiLiveSpeaker(settings, publish_speech_audio, publish_speech_complete)
+                        await state.speaker.connect()
+                    await websocket.send_json(ready)
                 elif event_type == "voice:speak":
                     text = raw.get("text")
                     if not isinstance(text, str) or not text.strip():
                         raise VoiceProtocolError("Sự kiện voice:speak thiếu text.")
                     if state.session_id is None:
                         raise VoiceProtocolError("Voice chưa có session_id.")
-                    await close_transcriber()
+                    if raw.get("turn_id") != state.speech_turn_id:
+                        raise VoiceProtocolError("Voice TTS thuộc lượt đã hết hiệu lực.")
                     if state.speaker is None:
-                        state.speaker = GeminiLiveSpeaker(settings, publish_speech_audio, publish_speech_complete)
-                        await state.speaker.connect()
+                        raise VoiceProtocolError("Voice TTS chưa sẵn sàng.")
+                    logger.info("[TTS:SPEAK] turn=%s text=%r", state.speech_turn_id, text.strip())
                     await state.speaker.speak(text.strip())
                 elif event_type == "voice:audio_end":
                     if state.transcriber is None:
@@ -268,7 +278,7 @@ async def voice_socket(websocket: WebSocket) -> None:
         await close_transcriber()
         await close_speaker()
 
-routes=[Route("/",home),Route("/api/health",health),Route("/api/chat",chat,methods=["POST"]),Route("/api/chat/stream",chat_stream,methods=["POST"]),Route("/api/session/clear",clear,methods=["POST"]),Route("/api/session/{session_id}",get_session_route),WebSocketRoute("/ws/voice",voice_socket),Mount("/assets",app=StaticFiles(directory=WEB),name="assets")]
+routes=[Route("/",home),Route("/assets/app.js",app_js),Route("/api/health",health),Route("/api/chat",chat,methods=["POST"]),Route("/api/chat/stream",chat_stream,methods=["POST"]),Route("/api/session/clear",clear,methods=["POST"]),Route("/api/session/{session_id}",get_session_route),WebSocketRoute("/ws/voice",voice_socket),Mount("/assets",app=StaticFiles(directory=WEB),name="assets")]
 app=Starlette(debug=False,routes=routes)
 if __name__=="__main__":
  import uvicorn; uvicorn.run(app,host="127.0.0.1",port=8000)

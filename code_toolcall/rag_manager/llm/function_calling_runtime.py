@@ -272,15 +272,16 @@ class GeminiFunctionCallingRuntime:
             force_text_only_next_turn = False
             text_choice_instruction_next_turn = None
             started_inference = time.perf_counter()
-            # A forced tool turn must preserve its function-call part.  Some
-            # streaming responses expose no visible text (and can lose that
-            # part when their final chunk only contains usage metadata), so
-            # stream only turns that are expected to produce user text.
-            streaming_turn = on_text_chunk is not None and turn > 1 and not turn_forced_names
+            # Keep explicitly forced tool turns non-streaming so their
+            # function-call part is preserved. Every other turn streams: this
+            # includes a first-turn clarification that returns text without
+            # calling a tool, as well as the answer after a tool result.
+            streaming_turn = on_text_chunk is not None and not turn_forced_names
             visible_parts: list[str] = []
             first_visible_at: float | None = None
             last_visible_at: float | None = None
             streamed_candidate = None
+            streamed_function_candidate = None
             try:
                 if streaming_turn:
                     response = None
@@ -288,9 +289,17 @@ class GeminiFunctionCallingRuntime:
                         response = chunk
                         candidate_content = _candidate_content(chunk)
                         if candidate_content is not None:
-                            streamed_candidate = candidate_content
+                            chunk_calls = [
+                                part.function_call
+                                for part in candidate_content.parts
+                                if getattr(part, "function_call", None)
+                            ]
+                            if chunk_calls:
+                                streamed_function_candidate = candidate_content
+                            elif streamed_function_candidate is None:
+                                streamed_candidate = candidate_content
                         text = _visible_text(chunk)
-                        if text:
+                        if text and streamed_function_candidate is None:
                             now = time.perf_counter()
                             if first_visible_at is None:
                                 first_visible_at = now
@@ -315,9 +324,13 @@ class GeminiFunctionCallingRuntime:
             usage.append(turn_usage)
             logger.info("[LLM:TURN] turn=%s mode=%s | %.1f ms | in=%s out=%s total=%s thought=%s cached=%s", turn, "stream" if streaming_turn else "normal", inference_ms, turn_usage["input_tokens"], turn_usage["output_tokens"], turn_usage["total_tokens"], turn_usage["thought_tokens"], turn_usage["cached_tokens"])
 
-            # The final SSE chunk may carry usage only.  Keep the last content
-            # chunk so function calls/text are not lost when that happens.
-            candidate = streamed_candidate if streaming_turn else _candidate_content(response)
+            # Keep a function-call candidate separately: later stream chunks
+            # can contain only trailing metadata and must not replace it.
+            candidate = (
+                streamed_function_candidate or streamed_candidate
+                if streaming_turn
+                else _candidate_content(response)
+            )
             if candidate is None:
                 return {"text": "Model did not return a valid response.", "tool_trace": trace, "usage": usage, "stream_timings": stream_timings}
             contents.append(candidate)
@@ -348,7 +361,13 @@ class GeminiFunctionCallingRuntime:
                     except Exception:
                         logger.exception("[LLM][STREAM-RETRY] turn=%s failed", turn)
                 logger.info("[LLM:DONE] turns=%s total_ms=%.1f", turn, (time.perf_counter() - request_started) * 1000)
-                return {"text": final_text, "tool_trace": trace, "usage": usage, "stream_timings": stream_timings}
+                return {
+                    "text": final_text,
+                    "tool_trace": trace,
+                    "usage": usage,
+                    "stream_timings": stream_timings,
+                    "completed_without_tool": True,
+                }
 
             parts: list[Any] = []
             called_names = {str(call.name) for call in calls}
