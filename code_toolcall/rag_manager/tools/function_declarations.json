@@ -25,10 +25,9 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "agent": {"type": "string", "enum": ["weather", "music", "visual"], "description": "The single sub-agent responsible for the current request."},
-          "reason": {"type": "string", "description": "A short routing reason based only on the user request and relevant history."}
+          "agent": {"type": "string", "enum": ["weather", "music", "visual"], "description": "The single sub-agent responsible for the current request."}
         },
-        "required": ["agent", "reason"]
+        "required": ["agent"]
       }
     }
   ],

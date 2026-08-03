@@ -1,5 +1,8 @@
+import asyncio
+from types import SimpleNamespace
+
 from rag_manager.config import Settings
-from rag_manager.voice_gateway import VoiceProtocolError, VoiceSocketState, cancel_event, read_event, speech_start_event, start_event
+from rag_manager.voice_gateway import GeminiLiveSpeaker, VoiceProtocolError, VoiceSocketState, _live_event_details, cancel_event, read_event, speech_start_event, start_event
 
 
 def settings() -> Settings:
@@ -53,3 +56,52 @@ def test_speech_start_binds_a_tts_only_session() -> None:
     event = speech_start_event({"type": "voice:speech_start", "session_id": "session-1", "turn_id": "turn-1"}, settings(), state)
     assert event["type"] == "voice_speech_ready"
     assert state.session_id == "session-1"
+
+
+def test_live_speaker_sends_each_narration_as_realtime_text() -> None:
+    class FakeSession:
+        def __init__(self) -> None:
+            self.events = []
+
+        async def send_realtime_input(self, **kwargs) -> None:
+            self.events.append(kwargs)
+
+    async def run() -> None:
+        speaker = GeminiLiveSpeaker(settings(), on_audio=None, on_complete=None)
+        fake_session = FakeSession()
+        speaker._session = fake_session
+        await speaker.speak("Xin chào")
+        assert fake_session.events == [{
+            "text": "Read the following assistant answer aloud in Vietnamese, faithfully and without additions:\n\nXin chào"
+        }]
+        assert speaker._awaiting_completion is True
+
+    asyncio.run(run())
+
+
+def test_live_event_details_reports_audio_and_terminal_events_without_payload() -> None:
+    message = SimpleNamespace(
+        error=None,
+        go_away=None,
+        server_content=SimpleNamespace(
+            model_turn=SimpleNamespace(parts=[
+                SimpleNamespace(inline_data=SimpleNamespace(data=b"abc"), text=None),
+                SimpleNamespace(inline_data=None, text="metadata"),
+            ]),
+            generation_complete=True,
+            turn_complete=True,
+            interrupted=False,
+        ),
+    )
+
+    assert _live_event_details(message) == {
+        "has_server_content": True,
+        "audio_parts": 1,
+        "audio_bytes": 3,
+        "text_parts": 1,
+        "generation_complete": True,
+        "turn_complete": True,
+        "interrupted": False,
+        "error": None,
+        "go_away": None,
+    }

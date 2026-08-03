@@ -1,0 +1,32 @@
+{
+  "schema_version": "lumi.ctc_trial_scenes.v1",
+  "audio_file": "ctc_weather_evaluation.wav",
+  "sample_rate_hz": 24000,
+  "scenes": [
+    {
+      "scene_id": "percent-and-rainfall",
+      "spoken_text": "Khả năng mưa lên tới chín mươi sáu phần trăm, với lượng mưa mười phẩy một mi li mét.",
+      "alignment_text": "kha nang mua len toi chin muoi sau phan tram voi luong mua muoi phay mot mi li met"
+    },
+    {
+      "scene_id": "temperature-unit",
+      "spoken_text": "Nhiệt độ cao nhất là ba mươi phẩy bốn độ C, cảm giác như ba mươi bảy phẩy sáu độ C.",
+      "alignment_text": "nhiet do cao nhat la ba muoi phay bon do xe cam giac nhu ba muoi bay phay sau do xe"
+    },
+    {
+      "scene_id": "date",
+      "spoken_text": "Đỉnh nhiệt sẽ rơi vào ngày ba mươi mốt tháng bảy năm hai nghìn không trăm hai mươi sáu.",
+      "alignment_text": "dinh nhiet se roi vao ngay ba muoi mot thang bay nam hai nghin khong tram hai muoi sau"
+    },
+    {
+      "scene_id": "hourly-time",
+      "spoken_text": "Từ mười bốn giờ đến mười tám giờ ba mươi phút, nhiệt độ tăng dần và mưa giảm.",
+      "alignment_text": "tu muoi bon gio den muoi tam gio ba muoi phut nhiet do tang dan va mua giam"
+    },
+    {
+      "scene_id": "wind-and-pressure",
+      "spoken_text": "Gió đạt một phẩy sáu năm mét trên giây, còn áp suất là một nghìn không trăm năm phẩy sáu năm héc tô Pascal.",
+      "alignment_text": "gio dat mot phay sau nam met tren giay con ap suat la mot nghin khong tram nam phay sau nam hec to pascal"
+    }
+  ]
+}

@@ -42,7 +42,9 @@ def manager_node(state: GraphState, runtime: GeminiFunctionCallingRuntime) -> di
         agent = "error"
         reason = "Manager LLM did not return a valid route."
     else:
-        reason = str(decision.get("reason", "")).strip() or "Manager LLM selected the matching domain."
+        # The model returns only the routing decision.  Keep an audit value
+        # locally so no extra function-call tokens are spent on an explanation.
+        reason = "Manager selected a valid sub-agent."
     return {
         "selected_agent": agent,
         "manager_decision": {

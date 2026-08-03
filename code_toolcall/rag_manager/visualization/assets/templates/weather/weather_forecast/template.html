@@ -164,10 +164,10 @@
     </header>
 
     {% if first_day %}
-      <section class="summary-card" data-slot="hero">
+      <section class="summary-card" data-slot="hero" data-present-id="weather.overview">
         <div class="weather-main">
           <div class="hero-icon">{{ weather_icon(first_condition.main) }}</div>
-          <div class="temperature-line">
+          <div class="temperature-line" data-present-id="weather.day.0.temperature">
             <span class="temperature">{{ value(first_day.temperature.max_celsius) }}</span>
             <span class="temperature-unit">&deg;C</span>
           </div>
@@ -178,9 +178,9 @@
         </div>
 
         <div class="summary-metrics">
-          <div class="summary-metric"><span aria-hidden="true">☔</span><span>Khả năng có mưa: <strong>{{ probability(first_day.max_rain_probability) }}</strong></span></div>
+          <div class="summary-metric" data-present-id="weather.day.0.rain_risk"><span aria-hidden="true">☔</span><span>Khả năng có mưa: <strong>{{ probability(first_day.max_rain_probability) }}</strong></span></div>
           <div class="summary-metric"><span aria-hidden="true">💧</span><span>Độ ẩm: <strong>{{ value(first_day.humidity_percent, '%') }}</strong></span></div>
-          <div class="summary-metric"><span aria-hidden="true">≋</span><span>Gió: <strong>{{ value(first_day.wind_speed_mps, ' m/s') }}</strong></span></div>
+          <div class="summary-metric" data-present-id="weather.day.0.wind"><span aria-hidden="true">≋</span><span>Gió: <strong>{{ value(first_day.wind_speed_mps, ' m/s') }}</strong></span></div>
         </div>
       </section>
 
@@ -191,7 +191,7 @@
           <p class="chart-title">Biến động nhiệt độ cao nhất theo ngày</p>
           <span class="chart-range">{{ value(chart_min, '°') }} – {{ value(chart_max, '°') }}</span>
         </div>
-        <div class="temperature-chart" aria-label="Biểu đồ đường nhiệt độ theo ngày">
+        <div class="temperature-chart" aria-label="Biểu đồ đường nhiệt độ theo ngày" data-present-id="weather.temperature_trend">
           <div class="chart-scale"><span>{{ value(chart_max, '°') }}</span><span>{{ value(chart_min, '°') }}</span></div>
           <svg viewBox="0 0 800 150" preserveAspectRatio="none" role="img">
             <defs><linearGradient id="forecast-area" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#ffc72c" stop-opacity="0.34"/><stop offset="100%" stop-color="#ffc72c" stop-opacity="0.06"/></linearGradient></defs>
@@ -199,27 +199,27 @@
             <line x1="35" y1="76" x2="765" y2="76" stroke="#edf1f6" stroke-width="1" stroke-dasharray="5 7"/>
             <line x1="35" y1="128" x2="765" y2="128" stroke="#e8edf4" stroke-width="1" stroke-dasharray="5 7"/>
             <polygon fill="url(#forecast-area)" points="35,134 {% for day in days %}{% set point_x = 35 + (loop.index0 * 730 / point_denominator) %}{% set point_temp = day.temperature.max_celsius %}{% set point_y = 123 - (((point_temp - chart_min) / chart_spread) * 91) if chart_spread > 0 else 76 %}{{ point_x }},{{ point_y }} {% endfor %}765,134"/>
-            <polyline fill="none" stroke="#ffbd19" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" points="{% for day in days %}{% set point_x = 35 + (loop.index0 * 730 / point_denominator) %}{% set point_temp = day.temperature.max_celsius %}{% set point_y = 123 - (((point_temp - chart_min) / chart_spread) * 91) if chart_spread > 0 else 76 %}{{ point_x }},{{ point_y }} {% endfor %}"/>
+            <polyline data-present-id="weather.temperature_trend.line" fill="none" stroke="#ffbd19" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" points="{% for day in days %}{% set point_x = 35 + (loop.index0 * 730 / point_denominator) %}{% set point_temp = day.temperature.max_celsius %}{% set point_y = 123 - (((point_temp - chart_min) / chart_spread) * 91) if chart_spread > 0 else 76 %}{{ point_x }},{{ point_y }} {% endfor %}"/>
             {% for day in days %}
               {% set point_x = 35 + (loop.index0 * 730 / point_denominator) %}
               {% set point_temp = day.temperature.max_celsius %}
               {% set point_y = 123 - (((point_temp - chart_min) / chart_spread) * 91) if chart_spread > 0 else 76 %}
-              <circle cx="{{ point_x }}" cy="{{ point_y }}" r="4" fill="#fff" stroke="#ffb900" stroke-width="3"/>
+              <circle data-present-id="weather.temperature_trend.point.{{ loop.index0 }}"{% if point_temp == chart_min or point_temp == chart_max %} data-temperature-extreme="true"{% endif %} cx="{{ point_x }}" cy="{{ point_y }}" r="4" fill="#fff" stroke="#ffb900" stroke-width="3"/>
               <text x="{{ point_x }}" y="{{ point_y - 10 }}" text-anchor="middle" fill="#667085" font-size="12" font-weight="700">{{ value(point_temp, '°') }}</text>
             {% endfor %}
           </svg>
         </div>
       </section>
 
-      <section class="daily-strip" style="--day-count: {{ days | length }}" data-slot="metrics">
+      <section class="daily-strip" style="--day-count: {{ days | length }}" data-slot="metrics" data-present-id="weather.week.rain_pattern">
         {% for day in days %}
           {% set intervals = day.intervals | default([], true) %}
           {% set condition = day.condition if day.condition else (intervals[0].condition if intervals else {}) %}
-          <article class="day-card{% if loop.first %} active{% endif %}">
+          <article class="day-card{% if loop.first %} active{% endif %}" data-present-id="weather.day.{{ loop.index0 }}.summary">
             <span class="day-label">{% if loop.first %}Ngày đầu · {% endif %}{{ day.date }}</span>
             <span class="day-icon">{{ weather_icon(condition.main) }}</span>
             <span class="day-temperature">{{ value(day.temperature.max_celsius, '°') }} <span class="low">{{ value(day.temperature.min_celsius, '°') }}</span></span>
-            <span class="day-rain">{{ probability(day.max_rain_probability) }} mưa</span>
+            <span class="day-rain" data-present-id="weather.day.{{ loop.index0 }}.rain_risk">{{ probability(day.max_rain_probability) }} mưa</span>
           </article>
         {% endfor %}
       </section>

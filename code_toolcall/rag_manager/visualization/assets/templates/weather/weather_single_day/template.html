@@ -183,11 +183,11 @@
     </header>
 
     {% if day %}
-      <section class="summary-card" data-slot="hero">
+      <section class="summary-card" data-slot="hero" data-present-id="weather.overview">
         <div class="summary-top">
           <div class="weather-main">
             <div class="hero-icon">{{ weather_icon(day_condition.main) }}</div>
-            <div class="temperature-line">
+            <div class="temperature-line" data-present-id="weather.day.0.temperature">
               <span class="temperature">{{ value(day.temperature.max_celsius) }}</span>
               <span class="temperature-unit">&deg;</span>
             </div>
@@ -198,15 +198,15 @@
           </div>
 
           <div class="summary-metrics">
-            <div class="summary-metric">
+            <div class="summary-metric" data-present-id="weather.day.0.summary">
               <span aria-hidden="true">🌡</span>
               <span>Ngày/Đêm: <strong>{{ value(day.temperature.max_celsius, '°') }}/{{ value(day.temperature.min_celsius, '°') }}</strong></span>
             </div>
-            <div class="summary-metric">
+            <div class="summary-metric" data-present-id="weather.day.0.rain_amount">
               <span aria-hidden="true">💧</span>
               <span>Lượng mưa: <strong>{{ value(day.total_rain_mm, ' mm') }}</strong></span>
             </div>
-            <div class="summary-metric">
+            <div class="summary-metric" data-present-id="weather.day.0.rain_risk">
               <span aria-hidden="true">☔</span>
               <span>Xác suất mưa: <strong>{{ probability(day.max_rain_probability) }}</strong></span>
             </div>
@@ -214,22 +214,22 @@
         </div>
 
         <div class="daily-metrics">
-          <div class="daily-metric">
+          <div class="daily-metric" data-present-id="weather.day.0.temperature_range">
             <span class="daily-metric-icon" aria-hidden="true">🌡</span>
             <strong>Thấp/Cao</strong>
             <span>{{ value(day.temperature.min_celsius, '°') }}/{{ value(day.temperature.max_celsius, '°') }}</span>
           </div>
-          <div class="daily-metric">
+          <div class="daily-metric" data-present-id="weather.day.0.humidity">
             <span class="daily-metric-icon" aria-hidden="true">💧</span>
             <strong>Độ ẩm</strong>
             <span>{{ value(day.humidity_percent, '%') }}</span>
           </div>
-          <div class="daily-metric">
+          <div class="daily-metric" data-present-id="weather.day.0.wind">
             <span class="daily-metric-icon" aria-hidden="true">≋</span>
             <strong>Gió</strong>
             <span>{{ value(day.wind_speed_mps, ' m/s') }}</span>
           </div>
-          <div class="daily-metric">
+          <div class="daily-metric" data-present-id="weather.day.0.pressure">
             <span class="daily-metric-icon" aria-hidden="true">⚒</span>
             <strong>Áp suất</strong>
             <span>{{ value(day.pressure_hpa, ' hPa') }}</span>
@@ -245,11 +245,11 @@
         <div class="hourly-strip">
           {% for interval in intervals %}
             {% set raw_time = interval.time | default(interval.forecast_at_local, true) | default(interval.timestamp, true) %}
-            <div class="hour">
+            <div class="hour" data-present-id="weather.day.0.interval.{{ loop.index0 }}.summary">
               <span class="hour-time">{% if raw_time is string and (raw_time | length) >= 16 %}{{ raw_time[11:16] }}{% else %}{{ raw_time }}{% endif %}</span>
-              <span class="hour-icon">{{ weather_icon(interval.condition.main) }}</span>
-              <span class="hour-temp">{{ value(interval.temperature_celsius, '°') }}</span>
-              <span class="hour-rain">{% if interval.rain_probability is number %}{{ probability(interval.rain_probability) }} mưa{% endif %}</span>
+              <span class="hour-icon" data-present-id="weather.day.0.interval.{{ loop.index0 }}.condition">{{ weather_icon(interval.condition.main) }}</span>
+              <span class="hour-temp" data-present-id="weather.day.0.interval.{{ loop.index0 }}.temperature">{{ value(interval.temperature_celsius, '°') }}</span>
+              <span class="hour-rain" data-present-id="weather.day.0.interval.{{ loop.index0 }}.rain_risk">{% if interval.rain_probability is number %}{{ probability(interval.rain_probability) }} mưa{% endif %}</span>
             </div>
           {% else %}
             <p class="empty-note">Không có dữ liệu dự báo theo giờ.</p>
@@ -261,7 +261,7 @@
             <p class="chart-title">Biểu đồ nhiệt độ theo giờ</p>
             <span class="chart-range">{{ value(chart_min, '°') }} – {{ value(chart_max, '°') }}</span>
           </div>
-          <div class="temperature-chart" aria-hidden="true">
+          <div class="temperature-chart" aria-hidden="true" data-present-id="weather.day.0.temperature_trend">
             <div class="chart-scale"><span>{{ value(chart_max, '°') }}</span><span>{{ value(chart_min, '°') }}</span></div>
             <svg viewBox="0 0 1000 150" preserveAspectRatio="none">
               <defs>

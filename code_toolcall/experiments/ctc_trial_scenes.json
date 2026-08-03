@@ -1,0 +1,17 @@
+{
+  "schema_version": "lumi.ctc_trial_scenes.v1",
+  "audio_file": "gemini_live_trial.wav",
+  "sample_rate_hz": 24000,
+  "scenes": [
+    {
+      "scene_id": "scene-0",
+      "spoken_text": "Khả năng mưa hôm nay lên tới chín mươi sáu phần trăm.",
+      "alignment_text": "kha nang mua hom nay len toi chin muoi sau phan tram"
+    },
+    {
+      "scene_id": "scene-1",
+      "spoken_text": "Nhiệt độ cao nhất là ba mươi phẩy bốn độ C.",
+      "alignment_text": "nhiet do cao nhat la ba muoi phay bon do xe"
+    }
+  ]
+}

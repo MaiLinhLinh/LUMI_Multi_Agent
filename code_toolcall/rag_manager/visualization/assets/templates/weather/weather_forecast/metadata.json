@@ -49,6 +49,23 @@
       "properties": ["background_color"]
     }
   ],
+  "presentation_capabilities": {
+    "overview": {"target_id": "weather.overview", "allowed_effects": ["reveal", "highlight", "pulse", "dim_others"]},
+    "day_summary": {"target_pattern": "weather.day.{day_index}.summary", "entity_fields": ["day_index"], "allowed_effects": ["highlight", "pulse", "draw_circle", "draw_arrow"]},
+    "temperature": {"target_id": "weather.day.0.temperature", "allowed_effects": ["highlight", "pulse", "draw_circle", "draw_arrow"]},
+    "rain_risk": {"target_pattern": "weather.day.{day_index}.rain_risk", "entity_fields": ["day_index"], "allowed_effects": ["highlight", "pulse", "draw_circle", "draw_arrow"]},
+    "wind": {"target_id": "weather.day.0.wind", "allowed_effects": ["highlight", "pulse", "draw_circle"]},
+    "temperature_trend": {"target_id": "weather.temperature_trend", "allowed_effects": ["reveal", "highlight", "pulse", "draw_arrow", "trace_line"]},
+    "weekly_rain_pattern": {"target_id": "weather.week.rain_pattern", "allowed_effects": ["highlight", "pulse", "draw_arrow", "dim_others"]},
+    "temperature_peak": {"target_pattern": "weather.temperature_trend.point.{day_index}", "entity_fields": ["day_index"], "allowed_effects": ["highlight", "pulse", "draw_circle", "draw_arrow"]}
+  },
+  "data_capabilities": {
+    "rain_probability": {"source_field": "rain_max_pct", "unit": "%", "focus": "rain_risk", "effect_hint": "draw_circle", "operations": ["lookup", "argmax", "argmin", "trend", "summary"]},
+    "rain_amount": {"source_field": "rain_total_mm", "unit": "mm", "focus": "day_summary", "effect_hint": "draw_circle", "operations": ["lookup", "argmax", "argmin", "trend", "summary"]},
+    "temperature_max": {"source_field": "max_c", "unit": "°C", "focus": "temperature_peak", "effect_hint": "draw_circle", "operations": ["lookup", "argmax", "argmin", "trend", "summary"]},
+    "temperature_min": {"source_field": "min_c", "unit": "°C", "focus": "temperature_peak", "effect_hint": "draw_circle", "operations": ["lookup", "argmax", "argmin", "trend", "summary"]},
+    "condition": {"focus": "weekly_rain_pattern", "effect_hint": "highlight", "operations": ["summary"]}
+  },
   "extension_points": [
     {
       "slot": "metrics",

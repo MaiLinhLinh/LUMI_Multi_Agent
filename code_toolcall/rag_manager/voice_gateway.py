@@ -7,6 +7,7 @@ transcripts to the existing chat endpoint.
 from __future__ import annotations
 
 import asyncio
+import logging
 from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any
@@ -17,8 +18,42 @@ from google.genai import types
 from rag_manager.config import Settings
 
 
+logger = logging.getLogger("lumi.voice")
+
+
 class VoiceProtocolError(ValueError):
     """Raised when a browser sends an invalid voice gateway event."""
+
+
+def _live_event_details(message: Any) -> dict[str, Any]:
+    """Return a compact, audio-safe diagnostic view of a Live API message."""
+    server_content = getattr(message, "server_content", None)
+    model_turn = getattr(server_content, "model_turn", None) if server_content else None
+    parts = getattr(model_turn, "parts", None) or []
+    audio_parts = 0
+    audio_bytes = 0
+    text_parts = 0
+    for part in parts:
+        inline_data = getattr(part, "inline_data", None)
+        data = getattr(inline_data, "data", None) if inline_data else None
+        if data:
+            audio_parts += 1
+            audio_bytes += len(data)
+        if getattr(part, "text", None):
+            text_parts += 1
+    error = getattr(message, "error", None)
+    go_away = getattr(message, "go_away", None)
+    return {
+        "has_server_content": bool(server_content),
+        "audio_parts": audio_parts,
+        "audio_bytes": audio_bytes,
+        "text_parts": text_parts,
+        "generation_complete": getattr(server_content, "generation_complete", None) if server_content else None,
+        "turn_complete": getattr(server_content, "turn_complete", None) if server_content else None,
+        "interrupted": getattr(server_content, "interrupted", None) if server_content else None,
+        "error": str(error) if error else None,
+        "go_away": str(go_away) if go_away else None,
+    }
 
 
 @dataclass
@@ -28,6 +63,8 @@ class VoiceSocketState:
     cancelled_turns: int = 0
     transcriber: Any = None
     speaker: Any = None
+    speech_audio_chunks: int = 0
+    speech_audio_bytes: int = 0
 
 
 def read_event(raw: Any) -> tuple[str, dict[str, Any]]:
@@ -211,6 +248,7 @@ class GeminiLiveSpeaker:
             config=config,
         )
         self._session = await self._connection.__aenter__()
+        logger.info("[TTS:LIVE_CONNECT] model=%s", self._settings.gemini_live_speech_model)
         self._receive_task = asyncio.create_task(self._receive(), name="gemini-live-speaker")
 
     async def speak(self, text: str) -> None:
@@ -218,11 +256,18 @@ class GeminiLiveSpeaker:
             raise RuntimeError("Gemini Live speech session is not connected.")
         instruction = "Read the following assistant answer aloud in Vietnamese, faithfully and without additions:\n\n" + text
         self._awaiting_completion = True
-        await self._session.send_client_content(turns=[{"role": "user", "parts": [{"text": instruction}]}])
+        # Gemini 3.1 Live accepts sequential text as realtime input.  Manual
+        # activity start/end is intentionally not used here: it caused a
+        # precondition failure for text-only turns on the preview endpoint.
+        logger.info("[TTS:LIVE_SEND] chars=%s", len(text))
+        await self._session.send_realtime_input(text=instruction)
+        logger.info("[TTS:LIVE_SEND_DONE] chars=%s", len(text))
 
     async def _receive(self) -> None:
         assert self._session is not None
         async for message in self._session.receive():
+            details = _live_event_details(message)
+            logger.info("[TTS:LIVE_EVENT] %s", details)
             server_content = message.server_content
             if not server_content:
                 continue

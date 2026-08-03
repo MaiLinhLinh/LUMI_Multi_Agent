@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
+import logging
+import time
 from typing import Any
 
 from rag_manager.config import Settings
@@ -9,11 +11,15 @@ from rag_manager.services.weather_redis import RedisWeatherStore
 from rag_manager.tools.registry import declarations
 
 WEATHER_DECLARATION = declarations("weather")[0]
+logger = logging.getLogger("lumi.weather")
 
 class WeatherTools:
     def __init__(self, settings: Settings) -> None:
         self.store = RedisWeatherStore.from_settings(settings)
         self.resolver = get_weather_location_resolver()
+        self.session_snapshot_ttl_seconds = max(
+            1, int(getattr(settings, "weather_session_snapshot_ttl_seconds", 600))
+        )
 
     def get_weather(self, args: dict[str, Any], *, weather_context: dict[str, Any] | None = None) -> dict[str, Any]:
         location_text = str(args.get("location_text", "")).strip()
@@ -37,13 +43,29 @@ class WeatherTools:
                 "clarification": {"field": "time", "question": "Bạn muốn xem thời tiết vào mấy giờ?"},
                 "data": {},
             }
-        if request_type == "current" and not args.get("date_text"):
+        cached = self._session_snapshot_weather(
+            context.get("session_snapshot"),
+            location_id=resolved["location_id"],
+            request_type=request_type,
+            requested_date=requested,
+            requested_days=requested_days,
+        )
+        if cached is not None:
+            raw = {"ok": True, "data": cached}
+            source = "session_weather_snapshot"
+            logger.info("[WEATHER:CACHE] hit location=%s date=%s days=%s type=%s", resolved["location_id"], requested, requested_days, request_type)
+        elif request_type == "current" and not args.get("date_text"):
             raw = self.store.get_current(resolved["location_id"])
+            source = "redis_weather_snapshot"
+            logger.info("[WEATHER:CACHE] miss location=%s date=%s days=%s type=%s", resolved["location_id"], requested, requested_days, request_type)
         else:
             raw = self.store.get_forecast(resolved["location_id"], days=requested_days, start_date=requested)
+            source = "redis_weather_snapshot"
+            logger.info("[WEATHER:CACHE] miss location=%s date=%s days=%s type=%s", resolved["location_id"], requested, requested_days, request_type)
         if not raw.get("ok"):
             return {"status":"unavailable", "error":{"code":raw.get("code", "weather_unavailable"), "message":raw.get("message", "Không có snapshot thời tiết khả dụng.")}, "data":raw}
         weather_payload = raw.get("data", raw)
+        snapshot_weather = weather_payload
         if request_type == "hourly":
             weather_payload = self._select_hourly_forecast(weather_payload, requested_time)
             if weather_payload is None:
@@ -59,11 +81,77 @@ class WeatherTools:
             "requested_date": requested,
             "requested_days": requested_days,
             "weather": weather_payload,
-            "source": "redis_weather_snapshot",
+            "source": source,
         }
         # `data` remains available to the graph/Visual node.  Gemini receives
         # only daily facts, never the 24 hourly records per day.
-        return {"status": "completed", "data": data, "_llm_response": {"status": "completed", "weather_facts": self._llm_facts(data)}}
+        return {
+            "status": "completed",
+            "data": data,
+            "_llm_response": {"status": "completed", "weather_facts": self._llm_facts(data)},
+            # A follow-up may select one day from a seven-day snapshot. Keep
+            # the original covered range instead of shrinking the session
+            # cache to that selected response.
+            "_session_snapshot": context["session_snapshot"] if cached is not None else self._build_session_snapshot(data, weather=snapshot_weather),
+        }
+
+    def _build_session_snapshot(self, data: dict[str, Any], *, weather: Any) -> dict[str, Any]:
+        """Keep normalized tool data private to the active browser session."""
+        now = time.time()
+        return {
+            "version": 1,
+            "location_id": data.get("location_id"),
+            "location": data.get("location"),
+            "stored_at_epoch": now,
+            "expires_at_epoch": now + self.session_snapshot_ttl_seconds,
+            "weather": weather if isinstance(weather, dict) else {},
+            "source": data.get("source"),
+        }
+
+    @staticmethod
+    def _session_snapshot_weather(
+        snapshot: Any,
+        *,
+        location_id: str,
+        request_type: str,
+        requested_date: str,
+        requested_days: int,
+    ) -> dict[str, Any] | None:
+        """Return a covered contiguous forecast range, otherwise signal a miss."""
+        # An explicit "now" request keeps its existing Redis freshness path.
+        if request_type not in {"forecast", "hourly"} or not isinstance(snapshot, dict):
+            return None
+        if snapshot.get("location_id") != location_id:
+            return None
+        try:
+            if float(snapshot.get("expires_at_epoch", 0)) <= time.time():
+                return None
+        except (TypeError, ValueError):
+            return None
+        weather = snapshot.get("weather")
+        if not isinstance(weather, dict):
+            return None
+        days = weather.get("days")
+        if not isinstance(days, list):
+            return None
+        start = next(
+            (index for index, item in enumerate(days) if isinstance(item, dict) and item.get("date") == requested_date),
+            None,
+        )
+        if start is None:
+            return None
+        selected = days[start:start + requested_days]
+        if len(selected) != requested_days or any(not isinstance(item, dict) for item in selected):
+            return None
+        try:
+            expected = date.fromisoformat(requested_date)
+            if any(item.get("date") != (expected + timedelta(days=index)).isoformat() for index, item in enumerate(selected)):
+                return None
+        except ValueError:
+            return None
+        reused = dict(weather)
+        reused["days"] = selected
+        return reused
 
     @staticmethod
     def _date(value: str) -> str:

@@ -213,6 +213,25 @@ button { -webkit-tap-highlight-color: transparent; }
 .panel-heading h2,
 .chat-heading h2 { margin: 4px 0 0; font-size: 1.08rem; letter-spacing: -0.02em; }
 
+.presentation-controls { display: inline-flex; align-items: center; gap: 10px; }
+.presentation-avatar { width: 58px; height: 58px; flex: 0 0 auto; color: #0f172a; }
+.presentation-avatar svg { width: 100%; height: 100%; overflow: visible; }
+.avatar-face { fill: #fde7d1; stroke: #0f172a; stroke-width: 2.2; }
+.avatar-hair { fill: #172554; }
+.avatar-eye, .avatar-brow, .avatar-mouth { fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; }
+.avatar-eye { fill: currentColor; stroke: none; }
+.avatar-brow { stroke-width: 2.2; }
+.avatar-mouth { stroke-width: 2.4; transform-origin: 48px 52px; }
+.avatar-body { fill: url(#lumiAvatarFill); stroke: #0f172a; stroke-width: 2.2; stroke-linejoin: round; }
+.avatar-arm { fill: none; stroke: #0f172a; stroke-width: 5; stroke-linecap: round; transform-origin: 48px 66px; }
+.presentation-avatar[data-avatar-state="thinking"] .avatar-face { animation: avatar-think 1.2s ease-in-out infinite; }
+.presentation-avatar[data-avatar-state="speaking"] .avatar-mouth { animation: avatar-talk 240ms ease-in-out infinite alternate; }
+.presentation-avatar[data-avatar-state="explain"] .avatar-arm-right { animation: avatar-explain 900ms ease-in-out infinite alternate; }
+.presentation-avatar[data-avatar-state="point_left"] .avatar-arm-left { animation: avatar-point-left 700ms ease-out both; }
+.presentation-avatar[data-avatar-state="point_right"] .avatar-arm-right { animation: avatar-point-right 700ms ease-out both; }
+.presentation-avatar[data-avatar-state="concerned"] .avatar-brow-left { transform: rotate(14deg); transform-origin: 39px 36px; }
+.presentation-avatar[data-avatar-state="concerned"] .avatar-brow-right { transform: rotate(-14deg); transform-origin: 57px 36px; }
+
 .live-badge {
   display: inline-flex;
   align-items: center;
@@ -237,8 +256,18 @@ button { -webkit-tap-highlight-color: transparent; }
   background: white;
 }
 
-.weather-view { width: 100%; height: 100%; min-height: 0; overflow: hidden; }
-#weatherFrame { width: 100%; height: 100%; min-height: 0; border: 0; display: block; background: white; }
+.weather-view { position: relative; width: 100%; height: 100%; min-height: 0; overflow: hidden; background: white; }
+.weather-template-host { width: 100%; height: 100%; min-height: 0; display: block; }
+.presentation-overlay { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; z-index: 2; }
+.presentation-overlay .lumi-overlay-shape { fill: none; stroke: #0ea5e9; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; filter: drop-shadow(0 2px 3px rgba(14, 165, 233, 0.3)); }
+.presentation-overlay .lumi-overlay-arrow-head { fill: #0ea5e9; stroke: none; }
+.presentation-overlay .lumi-overlay-draw-circle { stroke-dasharray: 100; stroke-dashoffset: 100; animation: lumi-overlay-draw-stroke 840ms cubic-bezier(.22, .8, .3, 1) forwards; }
+.presentation-overlay .lumi-overlay-draw-arrow { stroke-dasharray: 100; stroke-dashoffset: 100; animation: lumi-overlay-draw-stroke 760ms cubic-bezier(.22, .8, .3, 1) forwards; }
+.presentation-overlay .lumi-overlay-group-bracket { stroke: #f59e0b; stroke-width: 3.5; stroke-dasharray: 100; stroke-dashoffset: 100; fill: rgba(245, 158, 11, .08); animation: lumi-overlay-draw-stroke 900ms cubic-bezier(.22, .8, .3, 1) forwards; }
+.presentation-overlay .lumi-overlay-temperature-range { fill: rgba(255, 189, 25, .13); stroke: #ffb900; stroke-width: 2.5; stroke-dasharray: 100; stroke-dashoffset: 100; animation: lumi-overlay-draw-stroke 1050ms cubic-bezier(.22, .8, .3, 1) forwards; }
+.presentation-overlay .lumi-overlay-arrow-head { opacity: 0; animation: lumi-overlay-show-arrow-head 140ms ease-out 650ms forwards; }
+.presentation-overlay .lumi-overlay-pointer path:first-child { fill: #f8fafc; stroke: #0369a1; stroke-width: 2; stroke-linejoin: round; filter: drop-shadow(0 2px 2px rgba(14, 165, 233, .3)); }
+.presentation-overlay .lumi-overlay-pointer path:last-child { fill: #0ea5e9; }
 
 .music-view {
   width: 100%;
@@ -519,6 +548,13 @@ button { -webkit-tap-highlight-color: transparent; }
 @keyframes message-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes bounce { 0%, 65%, 100% { transform: translateY(0); } 35% { transform: translateY(-4px); } }
 @keyframes microphone-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.34); } 55% { box-shadow: 0 0 0 9px rgba(220, 38, 38, 0); } }
+@keyframes avatar-think { 50% { transform: translateY(-2px) rotate(-2deg); } }
+@keyframes avatar-talk { to { transform: scaleY(1.65); } }
+@keyframes avatar-explain { to { transform: rotate(-22deg); } }
+@keyframes avatar-point-left { 55%, 100% { transform: rotate(-52deg); } }
+@keyframes avatar-point-right { 55%, 100% { transform: rotate(52deg); } }
+@keyframes lumi-overlay-draw-stroke { to { stroke-dashoffset: 0; } }
+@keyframes lumi-overlay-show-arrow-head { to { opacity: 1; } }
 
 @media (min-width: 981px) {
   html, body {
@@ -585,10 +621,12 @@ button { -webkit-tap-highlight-color: transparent; }
   .surface { border-radius: 19px; }
   .no-dashboard .chat-panel { padding: 11px; }
   .has-dashboard .dashboard-panel { min-height: 540px; padding: 11px; }
-  #weatherFrame, .music-view { min-height: 520px; }
+  .weather-view, .music-view { min-height: 520px; }
   .music-view { padding: 10px; }
   .music-player-card { border-radius: 17px; }
   .has-dashboard .chat-panel { height: 580px; }
+  .presentation-avatar { width: 48px; height: 48px; }
+  .presentation-controls { gap: 6px; }
   .live-badge { display: none; }
   .messages { padding: 14px 12px; }
   .suggestions { justify-content: flex-start; padding-left: 12px; padding-right: 12px; }

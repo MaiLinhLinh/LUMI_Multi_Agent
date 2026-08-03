@@ -67,6 +67,16 @@
       "properties": ["background_color"]
     }
   ],
+  "presentation_capabilities": {
+    "overview": {"target_id": "weather.overview", "allowed_effects": ["reveal", "highlight", "pulse", "dim_others"]},
+    "temperature": {"target_id": "weather.current.temperature", "allowed_effects": ["highlight", "pulse", "draw_circle", "draw_arrow"]},
+    "wind": {"target_id": "weather.current.wind", "allowed_effects": ["highlight", "pulse", "draw_circle"]},
+    "humidity": {"target_id": "weather.current.humidity", "allowed_effects": ["highlight", "pulse", "draw_circle"]},
+    "forecast": {"target_id": "weather.forecast", "allowed_effects": ["reveal", "highlight", "dim_others"]}
+  },
+  "data_capabilities": {
+    "temperature_max": {"source_field": "max_c", "unit": "°C", "focus": "temperature", "effect_hint": "draw_circle", "operations": ["lookup", "argmax", "argmin", "trend", "summary"]}
+  },
   "extension_points": [
     {
       "slot": "hero",

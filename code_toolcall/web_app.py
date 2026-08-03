@@ -18,6 +18,7 @@ from starlette.staticfiles import StaticFiles
 from starlette.websockets import WebSocket, WebSocketDisconnect
 from rag_manager.config import load_settings
 from rag_manager.graph import build_workflow
+from rag_manager.presentation.gemini_live_ctc import PresentationBridgeError, stream_gemini_live_ctc, validate_presentation_scenes
 from rag_manager.voice_gateway import GeminiLiveSpeaker, GeminiLiveTranscriber, VoiceProtocolError, VoiceSocketState, cancel_event, read_event, speech_start_event, start_event
 
 BASE=Path(__file__).resolve().parent; WEB=BASE/"web"
@@ -82,14 +83,19 @@ def get_workflow():
         return workflow
 def payload(key:str,s:Session)->dict[str,Any]:
     return {"ok":True,"session_id":key,"messages":s.messages,"has_active_panel":bool(s.panel),"active_panel":s.panel,"active_panel_revision":len(s.messages),"has_visualization":s.panel.get("ui_type")=="weather","visualization_html":s.panel.get("html","")}
-def execute(key:str,query:str,response_stream_callback:Any=None)->dict[str,Any]:
+def execute(
+    key: str,
+    query: str,
+    response_stream_callback: Any = None,
+    presentation_stream_callback: Any = None,
+) -> dict[str, Any]:
     s=get_session(key)
     with s.lock:
         started=time.perf_counter()
         logger.info("\n========== REQUEST START ==========" "\nsession : %s\nquery   : %s\n===================================", key, query)
         s.messages.append({"role":"user","content":query})
         try:
-            result=get_workflow().invoke({"query":query,"history":s.messages[:-1],"weather_context":s.weather_context,"music_session":s.music_session,"session_id":key,"tool_trace":[],"response_stream_callback":response_stream_callback})
+            result=get_workflow().invoke({"query":query,"history":s.messages[:-1],"weather_context":s.weather_context,"music_session":s.music_session,"session_id":key,"tool_trace":[],"response_stream_callback":response_stream_callback,"presentation_stream_callback":presentation_stream_callback})
         except Exception:
             logger.exception("[REQUEST][ERROR] session=%s workflow failed", key)
             raise
@@ -158,9 +164,27 @@ async def chat_stream(request:Request):
                         first_delta_sent=True
                         loop.call_soon_threadsafe(event_queue.put_nowait,{"type":"timing","marker":"first_text_delta_sent","elapsed_ms":round((time.perf_counter()-stream_started)*1000,2)})
                 loop.call_soon_threadsafe(event_queue.put_nowait,{"type":"text_delta","domain":domain,"delta":text})
+        def publish_presentation(event_type: str, value: dict[str, Any]) -> None:
+            nonlocal first_delta_sent
+            if event_type == "panel_ready":
+                event = {"type": "panel_ready", "panel": value}
+            elif event_type == "presentation_contract":
+                event = {"type": "presentation_contract", "contract": value}
+                with first_delta_lock:
+                    if not first_delta_sent:
+                        first_delta_sent = True
+                        loop.call_soon_threadsafe(event_queue.put_nowait, {
+                            "type": "timing",
+                            "marker": "first_text_delta_sent",
+                            "elapsed_ms": round((time.perf_counter() - stream_started) * 1000, 2),
+                        })
+            else:
+                logger.warning("[STREAM] ignored unknown presentation event: %s", event_type)
+                return
+            loop.call_soon_threadsafe(event_queue.put_nowait, event)
         async def worker()->None:
             try:
-                result=await run_in_threadpool(execute,key,query,publish)
+                result=await run_in_threadpool(execute,key,query,publish,publish_presentation)
                 await event_queue.put({"type":"final","payload":result})
             except Exception as exc:
                 logger.exception("[STREAM][ERROR] session=%s",key)
@@ -175,6 +199,31 @@ async def chat_stream(request:Request):
         finally:
             if not task.done(): task.cancel()
     return StreamingResponse(events(),media_type="application/x-ndjson; charset=utf-8")
+
+async def presentation_debug(request: Request):
+    """Receive small client-side presentation diagnostics for local tracing."""
+    try:
+        raw = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "message": "Invalid diagnostic payload."}, status_code=400)
+    event = raw.get("event")
+    session_id = raw.get("session_id")
+    detail = raw.get("detail", {})
+    if not isinstance(event, str) or not event.strip() or len(event) > 80:
+        return JSONResponse({"ok": False, "message": "Invalid diagnostic event."}, status_code=400)
+    if not isinstance(session_id, str) or len(session_id) > 200:
+        session_id = "unknown"
+    if not isinstance(detail, dict):
+        detail = {}
+    safe_detail = {
+        str(key)[:80]: value
+        for key, value in detail.items()
+        if isinstance(key, str) and isinstance(value, (str, int, float, bool, type(None)))
+    }
+    logger.info("[PRESENTATION:CLIENT] session=%s event=%s detail=%s", session_id, event.strip(), safe_detail)
+    return JSONResponse({"ok": True})
+
+
 async def get_session_route(request:Request): return JSONResponse(payload(request.path_params["session_id"],get_session(request.path_params["session_id"])))
 async def clear(request:Request):
     raw=await request.json(); key=str(raw.get("session_id","") or uuid.uuid4())
@@ -203,10 +252,17 @@ async def voice_socket(websocket: WebSocket) -> None:
             state.transcriber = None
 
     async def publish_speech_audio(audio: bytes, _: str) -> None:
+        state.speech_audio_chunks += 1
+        state.speech_audio_bytes += len(audio)
         await websocket.send_bytes(audio)
 
     async def publish_speech_complete() -> None:
-        logger.info("[TTS:END] turn=%s", state.speech_turn_id)
+        logger.info(
+            "[TTS:END] turn=%s chunks=%s bytes=%s",
+            state.speech_turn_id,
+            state.speech_audio_chunks,
+            state.speech_audio_bytes,
+        )
         await websocket.send_json({"type": "voice_speech_end", "session_id": state.session_id, "turn_id": state.speech_turn_id})
 
     async def close_speaker() -> None:
@@ -253,7 +309,9 @@ async def voice_socket(websocket: WebSocket) -> None:
                         raise VoiceProtocolError("Voice TTS thuộc lượt đã hết hiệu lực.")
                     if state.speaker is None:
                         raise VoiceProtocolError("Voice TTS chưa sẵn sàng.")
-                    logger.info("[TTS:SPEAK] turn=%s text=%r", state.speech_turn_id, text.strip())
+                    state.speech_audio_chunks = 0
+                    state.speech_audio_bytes = 0
+                    logger.info("[TTS:SPEAK] turn=%s chars=%s text=%r", state.speech_turn_id, len(text.strip()), text.strip())
                     await state.speaker.speak(text.strip())
                 elif event_type == "voice:audio_end":
                     if state.transcriber is None:
@@ -278,7 +336,49 @@ async def voice_socket(websocket: WebSocket) -> None:
         await close_transcriber()
         await close_speaker()
 
-routes=[Route("/",home),Route("/assets/app.js",app_js),Route("/api/health",health),Route("/api/chat",chat,methods=["POST"]),Route("/api/chat/stream",chat_stream,methods=["POST"]),Route("/api/session/clear",clear,methods=["POST"]),Route("/api/session/{session_id}",get_session_route),WebSocketRoute("/ws/voice",voice_socket),Mount("/assets",app=StaticFiles(directory=WEB),name="assets")]
+
+async def presentation_socket(websocket: WebSocket) -> None:
+    """Experimental one-turn Gemini Live PCM + CTC presentation channel."""
+    await websocket.accept()
+    settings = load_settings()
+    try:
+        packet = await websocket.receive_json()
+        if not isinstance(packet, dict) or packet.get("type") != "presentation:start":
+            raise PresentationBridgeError("First presentation event must be presentation:start.")
+        presentation_id = packet.get("presentation_id")
+        if not isinstance(presentation_id, str) or not presentation_id.strip() or len(presentation_id) > 200:
+            raise PresentationBridgeError("presentation:start requires a valid presentation_id.")
+        scenes = validate_presentation_scenes(packet.get("scenes"))
+
+        async def publish_audio(pcm: bytes, _: int) -> None:
+            await websocket.send_bytes(pcm)
+
+        async def publish_ctc(event: dict[str, Any]) -> None:
+            await websocket.send_json(event)
+
+        await websocket.send_json({
+            "type": "presentation_ready",
+            "presentation_id": presentation_id,
+            "prebuffer_ms": settings.presentation_ctc_prebuffer_ms,
+        })
+        await stream_gemini_live_ctc(
+            settings,
+            presentation_id=presentation_id,
+            scenes=scenes,
+            on_audio=publish_audio,
+            on_ctc_event=publish_ctc,
+        )
+        await websocket.send_json({"type": "presentation_complete", "presentation_id": presentation_id})
+    except (PresentationBridgeError, ValueError) as exc:
+        logger.exception("[PRESENTATION:LIVE_CTC_ERROR] %s", exc)
+        await websocket.send_json({"type": "presentation_error", "message": str(exc)})
+    except WebSocketDisconnect:
+        logger.info("[PRESENTATION:LIVE_CTC_DISCONNECT]")
+    except Exception:
+        logger.exception("[PRESENTATION:LIVE_CTC_ERROR]")
+        await websocket.send_json({"type": "presentation_error", "message": "Live CTC presentation failed."})
+
+routes=[Route("/",home),Route("/assets/app.js",app_js),Route("/api/health",health),Route("/api/chat",chat,methods=["POST"]),Route("/api/chat/stream",chat_stream,methods=["POST"]),Route("/api/presentation/debug",presentation_debug,methods=["POST"]),Route("/api/session/clear",clear,methods=["POST"]),Route("/api/session/{session_id}",get_session_route),WebSocketRoute("/ws/voice",voice_socket),WebSocketRoute("/ws/presentation",presentation_socket),Mount("/assets",app=StaticFiles(directory=WEB),name="assets")]
 app=Starlette(debug=False,routes=routes)
 if __name__=="__main__":
  import uvicorn; uvicorn.run(app,host="127.0.0.1",port=8000)

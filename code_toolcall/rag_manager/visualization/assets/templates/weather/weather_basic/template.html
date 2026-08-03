@@ -216,8 +216,8 @@
   {%- endmacro %}
 
   <main>
-    <section class="weather-shell">
-      <div class="hero" data-slot="hero">
+    <section class="weather-shell" data-present-id="weather.overview">
+      <div class="hero" data-slot="hero" data-present-id="weather.current.summary">
         <div>
           <h1>{{ data.location.name }}</h1>
           <p class="location-meta">{{ data.location.country }}</p>
@@ -229,7 +229,7 @@
             <p class="location-meta">Source: {{ data.source.provider }}</p>
           {% endif %}
           <p class="condition">{{ data.current.condition.description }}</p>
-          <div class="temp">{{ data.current.temperature.current_celsius }}<span>&deg;C</span></div>
+          <div class="temp" data-present-id="weather.current.temperature">{{ data.current.temperature.current_celsius }}<span>&deg;C</span></div>
         </div>
         <div class="weather-icon" aria-label="Weather condition">
           {{ condition_icon(data.current.condition.main) }}
@@ -237,26 +237,26 @@
       </div>
 
       <div class="metrics" data-slot="metrics">
-        <div class="metric">
+        <div class="metric" data-present-id="weather.current.feels_like">
           <div class="metric-label">Feels Like</div>
           <div class="metric-value">{{ data.current.temperature.feels_like_celsius }}&deg;C</div>
         </div>
-        <div class="metric">
+        <div class="metric" data-present-id="weather.current.humidity">
           <div class="metric-label">Humidity</div>
           <div class="metric-value">{{ data.current.humidity_percent }}%</div>
         </div>
-        <div class="metric">
+        <div class="metric" data-present-id="weather.current.wind">
           <div class="metric-label">Wind</div>
           <div class="metric-value">{{ data.current.wind.speed_mps }} m/s</div>
         </div>
-        <div class="metric">
+        <div class="metric" data-present-id="weather.current.pressure">
           <div class="metric-label">Pressure</div>
           <div class="metric-value">{{ data.current.pressure_hpa }} hPa</div>
         </div>
       </div>
 
       {% if not data.presentation or data.presentation.mode != 'hourly_forecast' %}
-      <section class="forecast" data-slot="chart">
+      <section class="forecast" data-slot="chart" data-present-id="weather.forecast">
         <h2>Forecast</h2>
         <div class="forecast-list">
           {% if data.forecast and data.forecast.days %}

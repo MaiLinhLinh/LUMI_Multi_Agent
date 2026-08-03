@@ -18,11 +18,18 @@ class Settings:
     gemini_live_transcribe_model: str = "gemini-3.1-flash-live-preview"
     gemini_live_speech_model: str = "gemini-3.1-flash-live-preview"
     gemini_live_voice: str = "kore"
+    presentation_enabled: bool = True
+    # Gemini Live speech is synchronized by the external CTC worker before
+    # the browser begins presentation playback.
+    presentation_ctc_worker_url: str = ""
+    presentation_ctc_prebuffer_ms: int = 8000
     redis_url: str = "redis://localhost:6379/0"
     weather_redis_prefix: str = "weather"
     weather_snapshot_max_age_seconds: int = 14400
     weather_snapshot_ttl_seconds: int = 14400
     weather_refresh_interval_seconds: int = 10800
+    # Short-lived normalized weather data, private to one web session.
+    weather_session_snapshot_ttl_seconds: int = 600
     weather_locations_file: str = str(ROOT / "rag_manager" / "services" / "weather_locations_vn.json")
     openweather_api_key: str = ""
     request_timeout_seconds: float = 60.0
@@ -41,6 +48,11 @@ def load_settings() -> Settings:
     def number(name: str, default: int) -> int:
         try: return int(os.getenv(name, str(default)))
         except ValueError: return default
+    def boolean(name: str, default: bool) -> bool:
+        value = os.getenv(name)
+        if value is None:
+            return default
+        return value.strip().casefold() not in {"0", "false", "no", "off"}
     return Settings(
         gemini_api_key=os.getenv("GEMINI_API_KEY", "").strip(),
         gemini_model=os.getenv("GEMINI_MODEL", "gemma-4-26b-a4b-it").strip(),
@@ -54,11 +66,15 @@ def load_settings() -> Settings:
             os.getenv("GEMINI_LIVE_MODEL", "gemini-3.1-flash-live-preview"),
         ).strip(),
         gemini_live_voice=os.getenv("GEMINI_LIVE_VOICE", "kore").strip() or "kore",
+        presentation_enabled=boolean("PRESENTATION_ENABLED", True),
+        presentation_ctc_worker_url=os.getenv("PRESENTATION_CTC_WORKER_URL", "").strip(),
+        presentation_ctc_prebuffer_ms=max(0, min(30_000, number("PRESENTATION_CTC_PREBUFFER_MS", 8000))),
         redis_url=os.getenv("REDIS_URL", "redis://localhost:6379/0"),
         weather_redis_prefix=os.getenv("WEATHER_REDIS_PREFIX", "weather"),
         weather_snapshot_max_age_seconds=number("WEATHER_SNAPSHOT_MAX_AGE_SECONDS", 14400),
         weather_snapshot_ttl_seconds=number("WEATHER_SNAPSHOT_TTL_SECONDS", 14400),
         weather_refresh_interval_seconds=number("WEATHER_REFRESH_INTERVAL_SECONDS", 10800),
+        weather_session_snapshot_ttl_seconds=number("WEATHER_SESSION_SNAPSHOT_TTL_SECONDS", 600),
         weather_locations_file=os.getenv("WEATHER_LOCATIONS_FILE", str(ROOT / "rag_manager" / "services" / "weather_locations_vn.json")),
         openweather_api_key=os.getenv("OPENWEATHER_API_KEY", "").strip(),
         request_timeout_seconds=float(os.getenv("REQUEST_TIMEOUT_SECONDS", "60")),
