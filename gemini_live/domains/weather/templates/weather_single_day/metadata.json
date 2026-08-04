@@ -1,0 +1,91 @@
+{
+  "id": "weather_single_day",
+  "kind": "complete_template",
+  "domain": "weather",
+  "name": "Weather Single Day",
+  "description": "A focused one-day forecast card with a daily summary and hourly timeline.",
+  "template_file": "template.html",
+  "schema_versions": ["weather.forecast.v1"],
+  "required_fields": [
+    "location.name",
+    "forecast.days[].date",
+    "forecast.days[].intervals[].temperature_celsius"
+  ],
+  "optional_fields": [
+    "location.country",
+    "forecast.source_granularity",
+    "forecast.days[].temperature.min_celsius",
+    "forecast.days[].temperature.max_celsius",
+    "forecast.days[].max_rain_probability",
+    "forecast.days[].total_rain_mm",
+    "forecast.days[].condition.main",
+    "forecast.days[].condition.description",
+    "forecast.days[].humidity_percent",
+    "forecast.days[].wind_speed_mps",
+    "forecast.days[].intervals[].time",
+    "forecast.days[].intervals[].condition.main",
+    "forecast.days[].intervals[].condition.description",
+    "forecast.days[].intervals[].rain_probability"
+  ],
+  "tags": ["weather", "forecast", "single-day", "hourly"],
+  "display_scope": "single_day",
+  "fillable": true,
+  "style_targets": [
+    {
+      "id": "page_background",
+      "label": "nền toàn trang",
+      "selector": "body",
+      "properties": ["background_color"]
+    },
+    {
+      "id": "daily_summary",
+      "label": "thẻ tổng quan trong ngày",
+      "selector": ".summary-card",
+      "properties": ["background_color"]
+    },
+    {
+      "id": "hourly_forecast",
+      "label": "dải dự báo theo giờ",
+      "selector": ".hourly-card",
+      "properties": ["background_color"]
+    }
+  ],
+  "presentation_capabilities": {
+    "overview": {"target_id": "weather.overview", "allowed_effects": ["reveal", "highlight", "pulse", "dim_others"]},
+    "day_summary": {"target_id": "weather.day.0.summary", "allowed_effects": ["highlight", "pulse", "draw_circle", "draw_arrow"]},
+    "temperature": {"target_id": "weather.day.0.temperature", "allowed_effects": ["highlight", "pulse", "draw_circle", "draw_arrow"]},
+    "rain_risk": {"target_id": "weather.day.0.rain_risk", "allowed_effects": ["highlight", "pulse", "draw_circle", "draw_arrow"]},
+    "wind": {"target_id": "weather.day.0.wind", "allowed_effects": ["highlight", "pulse", "draw_circle"]},
+    "temperature_trend": {"target_id": "weather.day.0.temperature_trend", "allowed_effects": ["reveal", "highlight", "pulse", "draw_arrow"]},
+    "hourly_summary": {"target_pattern": "weather.day.{day_index}.interval.{interval_index}.summary", "entity_fields": ["day_index", "interval_index"], "fixed_entity": {"day_index": 0}, "allowed_effects": ["highlight", "pulse", "draw_circle", "draw_arrow"]},
+    "hourly_temperature": {"target_pattern": "weather.day.{day_index}.interval.{interval_index}.temperature", "entity_fields": ["day_index", "interval_index"], "fixed_entity": {"day_index": 0}, "allowed_effects": ["highlight", "pulse", "draw_circle", "draw_arrow"]},
+    "hourly_rain_risk": {"target_pattern": "weather.day.{day_index}.interval.{interval_index}.rain_risk", "entity_fields": ["day_index", "interval_index"], "fixed_entity": {"day_index": 0}, "allowed_effects": ["highlight", "pulse", "draw_circle", "draw_arrow"]},
+    "hourly_condition": {"target_pattern": "weather.day.{day_index}.interval.{interval_index}.condition", "entity_fields": ["day_index", "interval_index"], "fixed_entity": {"day_index": 0}, "allowed_effects": ["highlight", "pulse", "draw_circle", "draw_arrow"]}
+  },
+  "data_capabilities": {
+    "rain_probability": {"source_field": "rain_max_pct", "unit": "%", "focus": "rain_risk", "effect_hint": "draw_circle", "operations": ["lookup", "argmax", "argmin", "trend", "summary"]},
+    "rain_amount": {"source_field": "rain_total_mm", "unit": "mm", "focus": "day_summary", "effect_hint": "draw_circle", "operations": ["lookup", "argmax", "argmin", "trend", "summary"]},
+    "temperature_max": {"source_field": "max_c", "unit": "°C", "focus": "temperature", "effect_hint": "draw_circle", "operations": ["lookup", "argmax", "argmin", "trend", "summary"]},
+    "temperature_min": {"source_field": "min_c", "unit": "°C", "focus": "temperature", "effect_hint": "draw_circle", "operations": ["lookup", "argmax", "argmin", "trend", "summary"]}
+  },
+  "extension_points": [
+    {
+      "slot": "hero",
+      "selector": "[data-slot='hero']",
+      "allowed_operations": ["insert_component", "replace_component"],
+      "max_components": 1
+    },
+    {
+      "slot": "chart",
+      "selector": "[data-slot='chart']",
+      "allowed_operations": ["insert_component", "replace_component"],
+      "max_components": 2
+    },
+    {
+      "slot": "footer",
+      "selector": "[data-slot='footer']",
+      "allowed_operations": ["insert_component", "replace_component"],
+      "max_components": 1
+    }
+  ]
+}
