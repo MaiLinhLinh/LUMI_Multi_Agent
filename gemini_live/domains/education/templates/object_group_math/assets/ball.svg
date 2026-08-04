@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-label="Quả bóng">
+  <circle cx="48" cy="48" r="31" fill="#f35e9b" stroke="#91345f" stroke-width="3"/>
+  <path d="M23 32c15 5 31 17 50 38M19 54c18-1 35 5 52 22M43 18c-2 20 3 37 20 58M69 23c-18 6-29 19-36 38" fill="none" stroke="#ffe36a" stroke-width="8" stroke-linecap="round"/>
+  <circle cx="41" cy="35" r="3" fill="#fff6b3" opacity=".8"/>
+</svg>

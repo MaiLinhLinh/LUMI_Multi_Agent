@@ -84,6 +84,18 @@ def spoken_text(narration: str) -> str:
         ),
         text,
     )
+    # Planner narration sometimes uses the compact Vietnamese day/month form
+    # (for example 05/08).  Expand it before generic number replacement so a
+    # speech model never has to infer whether a leading zero is meaningful.
+    text = re.sub(
+        r"\b(\d{1,2})/(\d{1,2})(?:/(\d{4}))?\b",
+        lambda match: (
+            f"ngày {number_to_vietnamese(int(match.group(1)))} "
+            f"tháng {number_to_vietnamese(int(match.group(2)))}"
+            + (f" năm {number_to_vietnamese(int(match.group(3)))}" if match.group(3) else "")
+        ),
+        text,
+    )
     text = re.sub(
         r"\bngày\s+(\d{1,2})\s+tháng\s+(\d{1,2})(?:\s+năm\s+(\d{4}))?",
         lambda match: (

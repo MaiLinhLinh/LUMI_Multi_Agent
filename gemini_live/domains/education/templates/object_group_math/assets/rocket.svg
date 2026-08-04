@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-label="Tên lửa">
+  <path d="M53 13c17 8 23 26 20 48L48 78 31 61c0-22 8-39 22-48Z" fill="#edf3f7" stroke="#55697a" stroke-width="3" stroke-linejoin="round"/>
+  <circle cx="56" cy="37" r="9" fill="#58bce7" stroke="#31647c" stroke-width="3"/>
+  <path d="m38 62-15 4 12-17M58 72l4 14 12-16" fill="#e85858" stroke="#9e3434" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M39 76c-5 7-12 9-20 8 4-8 9-12 17-15Z" fill="#ffb421"/>
+  <path d="M33 80c-7 8-14 7-18 6 3-6 7-10 13-12Z" fill="#f26b38"/>
+</svg>

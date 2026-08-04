@@ -24,10 +24,11 @@ PresentationEffect = Literal[
     "draw_group_bracket",
     "trace_chart_segment",
     "draw_temperature_range",
+    "reveal_items",
 ]
 PresentationActionEffect = Literal[
     "reveal", "highlight", "pulse", "dim_others", "draw_circle", "draw_arrow", "trace_line",
-    "draw_group_bracket", "trace_chart_segment", "draw_temperature_range",
+    "draw_group_bracket", "trace_chart_segment", "draw_temperature_range", "reveal_items",
 ]
 
 PresentationGesture = Literal[

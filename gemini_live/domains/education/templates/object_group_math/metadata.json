@@ -1,0 +1,23 @@
+{
+  "id": "object_group_math",
+  "kind": "complete_template",
+  "domain": "education",
+  "name": "Object Group Arithmetic",
+  "description": "A reusable visual template for addition and subtraction within ten.",
+  "template_file": "template.html",
+  "schema_versions": ["education.math.v1"],
+  "required_fields": ["left_count", "right_count", "operator", "result", "asset_id", "asset_label"],
+  "tags": ["education", "math", "objects", "counting", "within-ten"],
+  "display_scope": "single_exercise",
+  "fillable": true,
+  "presentation_capabilities": {
+    "overview": {"target_id": "math.exercise.overview", "allowed_effects": ["reveal", "highlight", "pulse"]},
+    "group_a": {"target_id": "math.group.a", "allowed_effects": ["highlight", "pulse", "draw_circle", "draw_arrow"]},
+    "operator": {"target_id": "math.operator", "allowed_effects": ["highlight", "pulse", "draw_circle"]},
+    "group_b": {"target_id": "math.group.b", "allowed_effects": ["highlight", "pulse", "draw_circle", "draw_arrow"]},
+    "group_result": {"target_id": "math.group.result", "allowed_effects": ["highlight", "pulse", "draw_circle", "draw_arrow", "reveal"]},
+    "result_items": {"target_id": "math.result.items", "allowed_effects": ["reveal_items", "highlight", "pulse", "draw_circle"]},
+    "expression": {"target_id": "math.expression", "allowed_effects": ["highlight", "pulse", "draw_circle"]},
+    "answer": {"target_id": "math.result.number", "allowed_effects": ["highlight", "pulse", "draw_circle", "reveal"]}
+  }
+}

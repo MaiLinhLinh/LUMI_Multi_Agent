@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from gemini_live.domains import LiveDomainRegistry
+from gemini_live.domains.education import EducationLiveDomain
 from gemini_live.domains.weather import WeatherLiveDomain
 from gemini_live.llm.function_calling_runtime import GeminiFunctionCallingRuntime
 from gemini_live.presentation import PresentationPipeline
@@ -22,4 +23,5 @@ def create_domain_registry(settings: Settings) -> LiveDomainRegistry:
     """Register domains without exposing shared presentation infrastructure."""
     registry = LiveDomainRegistry()
     registry.register(WeatherLiveDomain(settings))
+    registry.register(EducationLiveDomain())
     return registry

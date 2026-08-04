@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lumi · Gemini Live Tool-call Experiment</title>
+  <link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+  <main class="layout">
+    <section class="stage">
+      <header><p>EXPERIMENT</p><h1>Gemini Live tự gọi tool và animation</h1></header>
+      <div id="weatherView" class="weather-view" hidden>
+        <div id="weatherTemplateHost" class="weather-template-host"></div>
+        <svg id="overlay" class="overlay" aria-hidden="true"></svg>
+      </div>
+      <p id="status" class="status">Sẵn sàng thử nghiệm.</p>
+    </section>
+    <section class="chat">
+      <div id="messages" class="messages" aria-live="polite"></div>
+      <form id="form">
+        <textarea id="query" rows="3" placeholder="Ví dụ: Thời tiết Hà Nội ngày mai thế nào?" required></textarea>
+        <div class="actions">
+          <button type="submit">Gửi text tới Gemini Live</button>
+          <button id="microphone" type="button" class="microphone">Bắt đầu nói</button>
+        </div>
+      </form>
+      <p id="voiceStatus" class="voice-status">Microphone sẽ gửi PCM 16 kHz trực tiếp vào Live session.</p>
+      <details><summary>Nhật ký tool</summary><pre id="events"></pre></details>
+    </section>
+  </main>
+  <template id="message"><article><b></b><p></p></article></template>
+  <script src="/assets/app.js" defer></script>
+</body>
+</html>

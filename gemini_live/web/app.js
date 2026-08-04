@@ -1,3 +1,5 @@
+import { AnimationController } from "/assets/presentation/animation_controller.js";
+
 const form = document.querySelector("#chatForm");
 const queryInput = document.querySelector("#queryInput");
 const messages = document.querySelector("#messages");
@@ -19,8 +21,15 @@ const SESSION_KEY = "lumi.gemini-live.session";
 const sessionId = localStorage.getItem(SESSION_KEY) || crypto.randomUUID();
 localStorage.setItem(SESSION_KEY, sessionId);
 
+const animationController = new AnimationController({
+  templateHost,
+  viewport: weatherView,
+  overlay,
+  avatar,
+});
+
 let socket = null, audioContext = null, sampleRate = null, nextAudioAt = 0;
-let sources = new Set(), assistantBubble = null, pendingScene = null, animationTimer = null, activeTarget = null;
+let sources = new Set(), assistantBubble = null;
 let microphoneStream = null, microphoneContext = null, microphoneSource = null, microphoneProcessor = null, muteGain = null, recording = false;
 
 function addMessage(role, text) {
@@ -40,46 +49,13 @@ function resetAudio() {
   for (const item of sources) { try { item.stop(); } catch (_) {} }
   sources = new Set(); sampleRate = null; nextAudioAt = 0;
 }
-function clearAnimation() {
-  if (animationTimer) clearTimeout(animationTimer); animationTimer = null;
-  pendingScene = null; activeTarget?.classList.remove("lumi-highlight"); activeTarget = null; overlay.replaceChildren();
-}
-function svg(tag, attrs) {
-  const node = document.createElementNS("http://www.w3.org/2000/svg", tag);
-  for (const [name, value] of Object.entries(attrs)) node.setAttribute(name, value);
-  return node;
-}
-function rectFor(target) {
-  const root = weatherView.getBoundingClientRect(), box = target.getBoundingClientRect();
-  return { x: box.left - root.left, y: box.top - root.top, width: box.width, height: box.height };
-}
-function runAnimation(command) {
-  const root = templateHost.shadowRoot;
-  const target = root?.querySelector(`[data-present-id="${CSS.escape(command.target_id)}"]`);
-  if (!target) { console.warn("[GEMINI_LIVE:UI_TARGET_MISSING]", command); return; }
-  clearAnimation(); activeTarget = target;
-  if (command.effect === "highlight" || command.effect === "reveal") target.classList.add("lumi-highlight");
-  const rect = rectFor(target);
-  if (command.effect === "draw_circle") overlay.append(svg("ellipse", { class: "lumi-overlay-shape lumi-overlay-draw-circle", pathLength: "100", cx: rect.x + rect.width / 2, cy: rect.y + rect.height / 2, rx: Math.max(14, rect.width / 2 + 8), ry: Math.max(14, rect.height / 2 + 8) }));
-  if (command.effect === "draw_arrow") {
-    const x = rect.x + rect.width / 2, y = rect.y + rect.height / 2;
-    overlay.append(svg("path", { class: "lumi-overlay-shape lumi-overlay-draw-arrow", pathLength: "100", d: `M ${Math.max(8, x - 100)} ${Math.max(10, y - 68)} L ${x} ${y}` }));
-  }
-}
-function armSceneAt(audioStartAt) {
-  if (!pendingScene || !audioContext) return;
-  const scene = pendingScene; pendingScene = null;
-  const delay = Math.max(0, (audioStartAt - audioContext.currentTime) * 1000) + 180;
-  animationTimer = setTimeout(() => { avatar.dataset.avatarState = "speaking"; runAnimation(scene); }, delay);
-  console.info("[GEMINI_LIVE:SCENE_ARMED]", { scene, delay_ms: Math.round(delay) });
-}
 function playPcm(bytes) {
   if (!audioContext || !sampleRate || !bytes.byteLength) return;
   const input = new Int16Array(bytes), buffer = audioContext.createBuffer(1, input.length, sampleRate), output = buffer.getChannelData(0);
   for (let i = 0; i < input.length; i += 1) output[i] = input[i] / 32768;
   const source = audioContext.createBufferSource(); source.buffer = buffer; source.connect(audioContext.destination);
   const start = Math.max(audioContext.currentTime + .025, nextAudioAt); source.start(start); nextAudioAt = start + buffer.duration;
-  armSceneAt(start); sources.add(source); source.addEventListener("ended", () => sources.delete(source), { once: true });
+  animationController.armAtAudioStart(start, audioContext); sources.add(source); source.addEventListener("ended", () => sources.delete(source), { once: true });
 }
 function renderPanel(panel) {
   if (!panel?.html) return;
@@ -94,7 +70,7 @@ function renderPanel(panel) {
   const root = templateHost.shadowRoot || templateHost.attachShadow({ mode: "open" }); root.replaceChildren();
   const style = document.createElement("style");
   style.textContent = `[data-present-id]{transition:outline .18s,box-shadow .18s}.lumi-highlight{outline:3px solid #0ea5e9!important;outline-offset:4px;box-shadow:0 0 0 8px #0ea5e922!important}`;
-  const content = document.createElement("div"); content.innerHTML = panel.html; root.append(style, content); clearAnimation();
+  const content = document.createElement("div"); content.innerHTML = panel.html; root.append(style, content); animationController.clear();
 }
 function showText(text) {
   if (!text) return; if (!assistantBubble) assistantBubble = addMessage("assistant", "");
@@ -108,7 +84,7 @@ function handleMessage(event) {
   if (payload.type === "live:server_audio_received") voiceStatus.textContent = `Đã gửi ${payload.chunks} đoạn audio.`;
   if (payload.type === "input_transcript" && payload.text) voiceStatus.textContent = `Đã nghe: ${payload.text}`;
   if (payload.type === "panel") renderPanel(payload.panel);
-  if (payload.type === "scene") pendingScene = { target_id: payload.scene.target_id, effect: payload.scene.effect };
+  if (payload.type === "scene") animationController.queue({ target_id: payload.scene.target_id, effect: payload.scene.effect });
   if (payload.type === "audio_format") sampleRate = Number(payload.sample_rate_hz);
   if (payload.type === "text") showText(payload.text);
   if (payload.type === "live:complete") { status.textContent = "Hoàn tất trình bày."; avatar.dataset.avatarState = "idle"; stopCapture(); socket?.close(); }
@@ -137,10 +113,10 @@ function stopCapture() {
   recording = false; microphoneProcessor?.disconnect(); microphoneSource?.disconnect(); muteGain?.disconnect(); microphoneContext?.close(); microphoneStream?.getTracks().forEach(track => track.stop());
   microphoneStream = microphoneContext = microphoneSource = microphoneProcessor = muteGain = null; mic.classList.remove("listening"); mic.setAttribute("aria-pressed", "false");
 }
-form.addEventListener("submit", async event => { event.preventDefault(); const query = queryInput.value.trim(); if (!query || socket) return; await armAudio(); resetAudio(); clearAnimation(); assistantBubble = null; addMessage("user", query); queryInput.value = ""; status.textContent = "Đang xử lý…"; openSocket("text", query); });
+form.addEventListener("submit", async event => { event.preventDefault(); const query = queryInput.value.trim(); if (!query || socket) return; await armAudio(); resetAudio(); animationController.clear(); assistantBubble = null; addMessage("user", query); queryInput.value = ""; status.textContent = "Đang xử lý…"; openSocket("text", query); });
 document.querySelectorAll("[data-query]").forEach(button => button.addEventListener("click", () => { queryInput.value = button.dataset.query; form.requestSubmit(); }));
 mic.addEventListener("click", async () => {
   if (recording) { recording = false; mic.setAttribute("aria-pressed", "false"); socket?.send(JSON.stringify({ type: "live:audio_end" })); voiceStatus.textContent = "Đang xử lý yêu cầu giọng nói…"; return; }
   if (socket || !navigator.mediaDevices?.getUserMedia) return;
-  try { await armAudio(); resetAudio(); clearAnimation(); assistantBubble = null; microphoneStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount:1, echoCancellation:true, noiseSuppression:true, autoGainControl:true } }); recording = true; mic.classList.add("listening"); mic.setAttribute("aria-pressed", "true"); status.textContent = "Đang nghe…"; openSocket("audio"); } catch (error) { voiceStatus.textContent = `Không thể mở micro: ${error.message}`; stopCapture(); }
+  try { await armAudio(); resetAudio(); animationController.clear(); assistantBubble = null; microphoneStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount:1, echoCancellation:true, noiseSuppression:true, autoGainControl:true } }); recording = true; mic.classList.add("listening"); mic.setAttribute("aria-pressed", "true"); status.textContent = "Đang nghe…"; openSocket("audio"); } catch (error) { voiceStatus.textContent = `Không thể mở micro: ${error.message}`; stopCapture(); }
 });

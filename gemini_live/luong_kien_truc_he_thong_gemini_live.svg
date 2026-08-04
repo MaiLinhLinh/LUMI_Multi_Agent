@@ -1,0 +1,169 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1390" viewBox="0 0 1920 1390" role="img" aria-labelledby="title desc">
+  <title id="title">Kiến trúc đa domain và luồng runtime Lumi Gemini Live</title>
+  <desc id="desc">Sơ đồ gồm lớp lõi dùng chung, các domain plugin có thể thêm mới, và luồng xử lý một yêu cầu Gemini Live theo scene.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 Z" fill="#66758d"/></marker>
+    <marker id="blueArrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 Z" fill="#167fc3"/></marker>
+    <marker id="greenArrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 Z" fill="#259e68"/></marker>
+    <marker id="purpleArrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 Z" fill="#825bce"/></marker>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#183455" flood-opacity=".10"/></filter>
+    <style>
+      text { font-family: Arial, 'Segoe UI', sans-serif; fill: #16233b; }
+      .title { font-size: 31px; font-weight: 800; letter-spacing: .15px; }
+      .subtitle { font-size: 15px; fill: #687891; }
+      .section { font-size: 18px; font-weight: 800; letter-spacing: .35px; }
+      .head { font-size: 15px; font-weight: 800; }
+      .body { font-size: 12.5px; fill: #53637b; }
+      .small { font-size: 11.5px; fill: #687891; }
+      .box { fill: #fff; stroke: #cbd8e8; stroke-width: 1.5; filter: url(#shadow); }
+      .line { fill:none; stroke:#66758d; stroke-width:2.05; marker-end:url(#arrow); }
+      .blue { fill:none; stroke:#167fc3; stroke-width:2.25; marker-end:url(#blueArrow); }
+      .green { fill:none; stroke:#259e68; stroke-width:2.25; marker-end:url(#greenArrow); }
+      .purple { fill:none; stroke:#825bce; stroke-width:2.25; marker-end:url(#purpleArrow); }
+      .dash { fill:none; stroke:#8b9ab0; stroke-width:1.7; stroke-dasharray:7 5; marker-end:url(#arrow); }
+      .step { font-size: 13px; font-weight: 800; fill:#fff; }
+    </style>
+  </defs>
+
+  <rect width="1920" height="1390" fill="#fbfdff"/>
+  <text x="960" y="45" class="title" text-anchor="middle">LUMI GEMINI LIVE: KIẾN TRÚC ĐA DOMAIN VÀ LUỒNG TRÌNH BÀY</text>
+  <text x="960" y="70" class="subtitle" text-anchor="middle">Domain plug-in độc lập · Shared Presentation Pipeline · Gemini Live Function Calling · HTML/SVG semantic animation</text>
+
+  <!-- Architecture / extension view -->
+  <rect x="28" y="93" width="1864" height="590" rx="20" fill="#f9fbff" stroke="#d4e1ef" stroke-width="1.5"/>
+  <text x="52" y="124" class="section">A. GÓC NHÌN CẤU TRÚC: THÊM DOMAIN MỚI MÀ KHÔNG ĐỔI LÕI</text>
+  <text x="52" y="147" class="subtitle">Khối xanh là infrastructure tái sử dụng; mỗi khối domain là plug-in sở hữu toàn bộ logic nghiệp vụ riêng.</text>
+
+  <!-- Shared core -->
+  <rect x="56" y="177" width="510" height="460" rx="18" fill="#eaf7ff" stroke="#73c5ee" stroke-width="1.8"/>
+  <text x="82" y="209" class="head" fill="#0c78b5">SHARED LIVE CORE - KHÔNG SỬA KHI THÊM DOMAIN</text>
+  <rect x="88" y="235" width="446" height="60" rx="12" class="box" stroke="#73c5ee"/>
+  <text x="311" y="260" class="head" text-anchor="middle">GeminiLiveSession</text><text x="311" y="279" class="body" text-anchor="middle">WebSocket Gemini Live · audio/text input · PCM output</text>
+  <rect x="88" y="315" width="446" height="67" rx="12" class="box" stroke="#73c5ee"/>
+  <text x="311" y="341" class="head" text-anchor="middle">LiveSessionOrchestrator + SessionMemoryStore</text><text x="311" y="361" class="body" text-anchor="middle">history ngắn hạn · domain contexts · active SceneState</text>
+  <rect x="88" y="402" width="216" height="71" rx="12" class="box" stroke="#73c5ee"/>
+  <text x="196" y="430" class="head" text-anchor="middle">LiveDomainRegistry</text><text x="196" y="450" class="body" text-anchor="middle">đăng ký domain</text>
+  <rect x="318" y="402" width="216" height="71" rx="12" class="box" stroke="#73c5ee"/>
+  <text x="426" y="430" class="head" text-anchor="middle">LiveToolDispatcher</text><text x="426" y="450" class="body" text-anchor="middle">tool name → domain</text>
+  <rect x="88" y="493" width="446" height="108" rx="12" fill="#f1fbf5" stroke="#76c998" stroke-width="1.6" filter="url(#shadow)"/>
+  <text x="311" y="521" class="head" text-anchor="middle">Shared PresentationPipeline</text>
+  <text x="311" y="541" class="body" text-anchor="middle">Jinja Renderer · metadata capability · Planner LLM</text>
+  <text x="311" y="560" class="body" text-anchor="middle">Presentation Compiler · compiled scenes · safe contract</text>
+  <text x="311" y="580" class="small" text-anchor="middle">Dùng lại cho Weather, Education, Music, Sales…</text>
+  <path d="M311 295V315 M311 382V402H196 M311 382V402H426 M311 473V493" class="blue"/>
+
+  <!-- Domain plugins -->
+  <rect x="598" y="177" width="1260" height="460" rx="18" fill="#fdfbff" stroke="#ddcff1" stroke-width="1.8"/>
+  <text x="624" y="209" class="head" fill="#7850c4">DOMAIN PLUG-INS - MỖI DOMAIN TỰ SỞ HỮU NGHIỆP VỤ</text>
+  <text x="624" y="230" class="small">Các domain đều implement LiveDomain và trả PresentationRequest cho Shared PresentationPipeline.</text>
+
+  <!-- weather -->
+  <rect x="630" y="258" width="347" height="310" rx="16" fill="#ebf9ff" stroke="#6dc5ef" stroke-width="1.8"/>
+  <text x="655" y="289" class="head" fill="#087db8">☁ WeatherLiveDomain</text>
+  <text x="655" y="311" class="small">domains/weather/</text>
+  <rect x="655" y="336" width="137" height="62" rx="11" class="box" stroke="#6dc5ef"/>
+  <text x="724" y="361" class="head" text-anchor="middle">tools.py</text><text x="724" y="380" class="body" text-anchor="middle">get_weather</text>
+  <rect x="815" y="336" width="137" height="62" rx="11" class="box" stroke="#6dc5ef"/>
+  <text x="884" y="361" class="head" text-anchor="middle">context.py</text><text x="884" y="380" class="body" text-anchor="middle">follow-up</text>
+  <rect x="655" y="421" width="137" height="62" rx="11" class="box" stroke="#6dc5ef"/>
+  <text x="724" y="446" class="head" text-anchor="middle">view_model.py</text><text x="724" y="465" class="body" text-anchor="middle">panel data</text>
+  <rect x="815" y="421" width="137" height="62" rx="11" class="box" stroke="#6dc5ef"/>
+  <text x="884" y="446" class="head" text-anchor="middle">adapter.py</text><text x="884" y="465" class="body" text-anchor="middle">facts + cues</text>
+  <text x="803" y="526" class="body" text-anchor="middle">templates/ + metadata.json</text>
+
+  <!-- education -->
+  <rect x="1015" y="258" width="347" height="310" rx="16" fill="#f0fff3" stroke="#7ccd98" stroke-width="1.8"/>
+  <text x="1040" y="289" class="head" fill="#23794a">✦ EducationLiveDomain</text>
+  <text x="1040" y="311" class="small">domains/education/</text>
+  <rect x="1040" y="336" width="137" height="62" rx="11" class="box" stroke="#7ccd98"/>
+  <text x="1109" y="361" class="head" text-anchor="middle">tools.py</text><text x="1109" y="380" class="body" text-anchor="middle">create exercise</text>
+  <rect x="1200" y="336" width="137" height="62" rx="11" class="box" stroke="#7ccd98"/>
+  <text x="1269" y="361" class="head" text-anchor="middle">models/lessons</text><text x="1269" y="380" class="body" text-anchor="middle">code verify</text>
+  <rect x="1040" y="421" width="137" height="62" rx="11" class="box" stroke="#7ccd98"/>
+  <text x="1109" y="446" class="head" text-anchor="middle">view_model.py</text><text x="1109" y="465" class="body" text-anchor="middle">asset + answer</text>
+  <rect x="1200" y="421" width="137" height="62" rx="11" class="box" stroke="#7ccd98"/>
+  <text x="1269" y="446" class="head" text-anchor="middle">adapter.py</text><text x="1269" y="465" class="body" text-anchor="middle">facts + cues</text>
+  <text x="1188" y="526" class="body" text-anchor="middle">templates/ + metadata.json + assets</text>
+
+  <!-- future domain -->
+  <rect x="1400" y="258" width="420" height="310" rx="16" fill="#fffaf0" stroke="#efc66a" stroke-width="1.8" stroke-dasharray="8 5"/>
+  <text x="1425" y="289" class="head" fill="#9b6c0b">＋ NewDomain (ví dụ Music/Sales)</text>
+  <text x="1425" y="311" class="small">Chỉ thêm folder domain mới và đăng ký trong bootstrap.py</text>
+  <rect x="1425" y="340" width="166" height="57" rx="11" class="box" stroke="#efc66a"/>
+  <text x="1508" y="364" class="head" text-anchor="middle">domain.py</text><text x="1508" y="382" class="body" text-anchor="middle">implements LiveDomain</text>
+  <rect x="1610" y="340" width="166" height="57" rx="11" class="box" stroke="#efc66a"/>
+  <text x="1693" y="364" class="head" text-anchor="middle">tools.py</text><text x="1693" y="382" class="body" text-anchor="middle">validated data</text>
+  <rect x="1425" y="419" width="166" height="57" rx="11" class="box" stroke="#efc66a"/>
+  <text x="1508" y="443" class="head" text-anchor="middle">view_model.py</text><text x="1508" y="461" class="body" text-anchor="middle">template data</text>
+  <rect x="1610" y="419" width="166" height="57" rx="11" class="box" stroke="#efc66a"/>
+  <text x="1693" y="443" class="head" text-anchor="middle">adapter.py</text><text x="1693" y="461" class="body" text-anchor="middle">facts + evidence</text>
+  <text x="1610" y="526" class="body" text-anchor="middle">prompt.py · templates/ · metadata.json</text>
+  <path d="M566 437H598" class="purple"/>
+  <path d="M977 510H1000V547H534" class="green"/>
+  <path d="M1362 510H1384V547H534" class="green"/>
+  <path d="M1400 510H1384" class="dash"/>
+  <text x="1122" y="606" class="small" text-anchor="middle">Không sửa: GeminiLiveSession · Orchestrator · Registry/Dispatcher · Renderer · Planner/Compiler · SceneState · Animation Controller.</text>
+
+  <!-- Runtime -->
+  <rect x="28" y="711" width="1864" height="640" rx="20" fill="#f9fbff" stroke="#d4e1ef" stroke-width="1.5"/>
+  <text x="52" y="742" class="section">B. GÓC NHÌN RUNTIME: MỘT LƯỢT HỎI ĐƯỢC XỬ LÝ NHƯ THẾ NÀO</text>
+  <text x="52" y="765" class="subtitle">Domain chỉ được chọn sau khi Gemini Live gọi tool; sau đó narration và animation chạy theo Presentation Contract đã duyệt.</text>
+
+  <!-- Runtime row 1 -->
+  <circle cx="99" cy="821" r="17" fill="#167fc3"/><text x="99" y="826" class="step" text-anchor="middle">1</text>
+  <rect x="130" y="785" width="220" height="72" rx="13" class="box" stroke="#73c5ee"/>
+  <text x="240" y="815" class="head" text-anchor="middle">User → Web UI</text><text x="240" y="836" class="body" text-anchor="middle">voice PCM hoặc text</text>
+  <circle cx="394" cy="821" r="17" fill="#167fc3"/><text x="394" y="826" class="step" text-anchor="middle">2</text>
+  <rect x="425" y="785" width="255" height="72" rx="13" fill="#f3efff" stroke="#b895ee" stroke-width="1.7" filter="url(#shadow)"/>
+  <text x="553" y="815" class="head" text-anchor="middle">Gemini Live</text><text x="553" y="836" class="body" text-anchor="middle">hiểu ý định và gọi function</text>
+  <circle cx="725" cy="821" r="17" fill="#167fc3"/><text x="725" y="826" class="step" text-anchor="middle">3</text>
+  <rect x="756" y="785" width="284" height="72" rx="13" fill="#eef7ff" stroke="#73c5ee" stroke-width="1.7" filter="url(#shadow)"/>
+  <text x="898" y="815" class="head" text-anchor="middle">Orchestrator → Dispatcher</text><text x="898" y="836" class="body" text-anchor="middle">tool_name → Registry → owner domain</text>
+  <circle cx="1084" cy="821" r="17" fill="#167fc3"/><text x="1084" y="826" class="step" text-anchor="middle">4</text>
+  <rect x="1115" y="785" width="290" height="72" rx="13" fill="#f1fff4" stroke="#7ccd98" stroke-width="1.7" filter="url(#shadow)"/>
+  <text x="1260" y="815" class="head" text-anchor="middle">Selected LiveDomain</text><text x="1260" y="836" class="body" text-anchor="middle">tool + context + data source → result thật</text>
+  <circle cx="1450" cy="821" r="17" fill="#167fc3"/><text x="1450" y="826" class="step" text-anchor="middle">5</text>
+  <rect x="1481" y="785" width="340" height="72" rx="13" fill="#fff8ea" stroke="#efc66a" stroke-width="1.7" filter="url(#shadow)"/>
+  <text x="1651" y="815" class="head" text-anchor="middle">PresentationRequest</text><text x="1651" y="836" class="body" text-anchor="middle">domain_id + template + view model + adapter + data</text>
+  <path d="M350 821H377 M680 821H708 M1040 821H1067 M1405 821H1433" class="blue"/>
+
+  <!-- pipeline subflow -->
+  <rect x="103" y="905" width="1715" height="172" rx="17" fill="#fff" stroke="#e1d6f2" stroke-width="1.6"/>
+  <text x="128" y="935" class="head" fill="#7850c4">6. SHARED PRESENTATION PIPELINE</text>
+  <rect x="135" y="958" width="222" height="76" rx="12" class="box" stroke="#73c5ee"/>
+  <text x="246" y="986" class="head" text-anchor="middle">Renderer + metadata</text><text x="246" y="1007" class="body" text-anchor="middle">render HTML + discover capabilities</text>
+  <rect x="408" y="958" width="234" height="76" rx="12" class="box" stroke="#efc66a"/>
+  <text x="525" y="986" class="head" text-anchor="middle">Domain Adapter</text><text x="525" y="1007" class="body" text-anchor="middle">grounded facts + visual evidence</text>
+  <rect x="693" y="958" width="245" height="76" rx="12" class="box" stroke="#b895ee"/>
+  <text x="816" y="986" class="head" text-anchor="middle">Planner LLM</text><text x="816" y="1007" class="body" text-anchor="middle">fact đã chọn → narration theo scene</text>
+  <rect x="989" y="958" width="257" height="76" rx="12" fill="#fff2f3" stroke="#ec9fa7" stroke-width="1.6" filter="url(#shadow)"/>
+  <text x="1118" y="986" class="head" text-anchor="middle">Presentation Compiler</text><text x="1118" y="1007" class="body" text-anchor="middle">fact ↔ target ↔ effect ↔ DOM</text>
+  <rect x="1297" y="958" width="481" height="76" rx="12" fill="#eaf9ef" stroke="#78ca99" stroke-width="1.6" filter="url(#shadow)"/>
+  <text x="1538" y="986" class="head" text-anchor="middle">Compiled Presentation Contract</text><text x="1538" y="1007" class="body" text-anchor="middle">panel HTML + verified facts + ordered scenes hợp lệ</text>
+  <path d="M357 996H408 M642 996H693 M938 996H989 M1246 996H1297" class="line"/>
+  <path d="M1651 857V885H246V958" class="green"/>
+
+  <!-- Scene loop -->
+  <circle cx="99" cy="1151" r="17" fill="#825bce"/><text x="99" y="1156" class="step" text-anchor="middle">7</text>
+  <rect x="130" y="1115" width="270" height="76" rx="13" fill="#f3efff" stroke="#b895ee" stroke-width="1.7" filter="url(#shadow)"/>
+  <text x="265" y="1144" class="head" text-anchor="middle">Tool response → Gemini Live</text><text x="265" y="1165" class="body" text-anchor="middle">facts + panel + scene hiện tại</text>
+  <circle cx="444" cy="1151" r="17" fill="#825bce"/><text x="444" y="1156" class="step" text-anchor="middle">8</text>
+  <rect x="475" y="1115" width="285" height="76" rx="13" fill="#eef7ff" stroke="#73c5ee" stroke-width="1.7" filter="url(#shadow)"/>
+  <text x="618" y="1144" class="head" text-anchor="middle">trigger_scene(scene_id)</text><text x="618" y="1165" class="body" text-anchor="middle">SceneState chỉ nhận scene kế tiếp</text>
+  <circle cx="804" cy="1151" r="17" fill="#825bce"/><text x="804" y="1156" class="step" text-anchor="middle">9</text>
+  <rect x="835" y="1115" width="294" height="76" rx="13" fill="#fff8ea" stroke="#efc66a" stroke-width="1.7" filter="url(#shadow)"/>
+  <text x="982" y="1144" class="head" text-anchor="middle">Frontend scene marker</text><text x="982" y="1165" class="body" text-anchor="middle">target + effect + avatar gesture</text>
+  <circle cx="1173" cy="1151" r="17" fill="#825bce"/><text x="1173" y="1156" class="step" text-anchor="middle">10</text>
+  <rect x="1204" y="1115" width="279" height="76" rx="13" fill="#f3efff" stroke="#b895ee" stroke-width="1.7" filter="url(#shadow)"/>
+  <text x="1344" y="1144" class="head" text-anchor="middle">Gemini audio PCM</text><text x="1344" y="1165" class="body" text-anchor="middle">đọc đúng narration của scene</text>
+  <circle cx="1527" cy="1151" r="17" fill="#825bce"/><text x="1527" y="1156" class="step" text-anchor="middle">11</text>
+  <rect x="1558" y="1115" width="260" height="76" rx="13" fill="#f1fff4" stroke="#7ccd98" stroke-width="1.7" filter="url(#shadow)"/>
+  <text x="1688" y="1144" class="head" text-anchor="middle">Voice + animation</text><text x="1688" y="1165" class="body" text-anchor="middle">chat · avatar · semantic effect</text>
+  <path d="M400 1151H427 M760 1151H787 M1129 1151H1156 M1483 1151H1510" class="purple"/>
+  <path d="M1538 1034V1080H265V1115" class="purple"/>
+  <path d="M1688 1191V1240H618V1191" class="dash"/>
+  <text x="1153" y="1235" class="small" text-anchor="middle">turn_complete → backend chỉ gửi scene kế tiếp → lặp bước 8 đến hết presentation</text>
+
+  <rect x="155" y="1275" width="1610" height="44" rx="12" fill="#eef7ff" stroke="#90cef0" stroke-width="1.3"/>
+  <text x="960" y="1303" class="body" text-anchor="middle">Ranh giới trách nhiệm: Gemini Live hội thoại/voice; domain sở hữu dữ liệu; Pipeline kiểm chứng plan; frontend chỉ render và thực thi effect đã được duyệt.</text>
+</svg>

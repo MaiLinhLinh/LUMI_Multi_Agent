@@ -6,6 +6,7 @@
 .env
 *.env
 /code_toolcall/.env
+/gemini_live/.env
 /code_toolcall/data
 /code_toolcall/benchmark_results
 /code/data/chroma_music/
