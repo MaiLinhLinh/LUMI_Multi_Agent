@@ -18,6 +18,13 @@ from .planner_schemas import GroundedFact, PresentationPlan, PresentationStep
 logger = logging.getLogger("lumi.presentation")
 
 
+_PLAN_QUALITY_INSTRUCTION = """Plan quality rules:
+- Create only the number of steps needed to explain useful grounded facts; fewer steps are better than filler.
+- Every step must contain one complete, non-empty Vietnamese sentence in narration.
+- Never emit an empty string, a placeholder, or a step with no clear fact to present.
+- If a fact does not need narration, omit that step rather than creating an incomplete one."""
+
+
 def presentation_plan_json_schema(
     capabilities: dict[str, Any],
     grounded_facts: list[GroundedFact] | None = None,
@@ -28,6 +35,14 @@ def presentation_plan_json_schema(
     candidate fact and an allowed effect; it never writes a target or entity.
     """
     schema = deepcopy(PresentationPlan.model_json_schema())
+    # This is a backend contract version, not a creative model decision.  Do
+    # not ask the Planner to produce it; Pydantic supplies the fixed default.
+    properties_root = schema.get("properties")
+    if isinstance(properties_root, dict):
+        properties_root.pop("schema_version", None)
+    required_root = schema.get("required")
+    if isinstance(required_root, list):
+        schema["required"] = [item for item in required_root if item != "schema_version"]
     step_schema = schema["$defs"]["PresentationStep"]
     properties = step_schema["properties"]
     if grounded_facts:
@@ -85,66 +100,6 @@ def validate_plan_capabilities(
     return errors
 
 
-class PresentationStepStreamParser:
-    """Extract complete objects from the `steps` JSON array without trusting them."""
-
-    def __init__(self) -> None:
-        self._buffer = ""
-        self._scan_index = 0
-        self._array_started = False
-        self._object_start: int | None = None
-        self._depth = 0
-        self._in_string = False
-        self._escaped = False
-
-    def feed(self, chunk: str) -> list[dict[str, Any]]:
-        self._buffer += chunk
-        if not self._array_started:
-            marker = '"steps"'
-            marker_index = self._buffer.find(marker)
-            if marker_index < 0:
-                return []
-            array_index = self._buffer.find("[", marker_index + len(marker))
-            if array_index < 0:
-                return []
-            self._array_started = True
-            self._scan_index = array_index + 1
-
-        completed: list[dict[str, Any]] = []
-        for index in range(self._scan_index, len(self._buffer)):
-            char = self._buffer[index]
-            if self._in_string:
-                if self._escaped:
-                    self._escaped = False
-                elif char == "\\":
-                    self._escaped = True
-                elif char == '"':
-                    self._in_string = False
-                continue
-            if char == '"':
-                self._in_string = True
-                continue
-            if self._object_start is None:
-                if char == "{":
-                    self._object_start = index
-                    self._depth = 1
-                continue
-            if char == "{":
-                self._depth += 1
-            elif char == "}":
-                self._depth -= 1
-                if self._depth == 0:
-                    try:
-                        value = json.loads(self._buffer[self._object_start:index + 1])
-                    except json.JSONDecodeError:
-                        value = None
-                    if isinstance(value, dict):
-                        completed.append(value)
-                    self._object_start = None
-        self._scan_index = len(self._buffer)
-        return completed
-
-
 def plan_presentation(
     runtime: GeminiFunctionCallingRuntime,
     *,
@@ -153,50 +108,11 @@ def plan_presentation(
     template_id: str,
     capabilities: dict[str, Any],
     grounded_facts: list[GroundedFact] | None = None,
+    domain_context: dict[str, Any] | None = None,
     system_instruction: str,
     fallback_plan: Callable[[], PresentationPlan],
-    on_valid_step: Callable[[PresentationStep], None] | None = None,
 ) -> dict[str, Any]:
-    """Generate a plan; malformed/model failures become a safe deterministic plan."""
-    parser = PresentationStepStreamParser()
-    streamed_steps: list[PresentationStep] = []
-    def is_allowed_step(step: PresentationStep) -> tuple[bool, str | None]:
-        """Check a streaming object before it reaches the frontend."""
-        if len(streamed_steps) >= 6:
-            return False, "answer_budget_exceeded"
-        reason = fact_error(step, capabilities, grounded_facts or [])
-        if reason:
-            return False, reason
-        return True, None
-
-    def receive_chunk(chunk: str) -> None:
-        for raw_step in parser.feed(chunk):
-            try:
-                step = PresentationStep.model_validate(raw_step)
-            except ValidationError as exc:
-                logger.info(
-                    "[PRESENTATION:STEP_REJECTED] source=stream reason=schema_invalid errors=%s",
-                    exc.errors(include_url=False),
-                )
-                continue
-            allowed, reason = is_allowed_step(step)
-            if not allowed:
-                logger.info(
-                    "[PRESENTATION:STEP_REJECTED] source=stream reason=%s fact_id=%s effect=%s",
-                    reason,
-                    step.fact_id,
-                    step.effect,
-                )
-                continue
-            streamed_steps.append(step)
-            logger.info(
-                "[PRESENTATION:STEP_ACCEPTED] source=stream fact_id=%s effect=%s narration_chars=%s",
-                step.fact_id,
-                step.effect,
-                len(step.narration),
-            )
-            if on_valid_step is not None:
-                on_valid_step(step)
+    """Generate one native structured plan, then validate it before compiling."""
 
     recent_history = [item for item in (history or [])[-6:] if isinstance(item, dict)]
     user_text = json.dumps(
@@ -206,6 +122,7 @@ def plan_presentation(
             "grounded_facts": [fact.model_dump(mode="json") for fact in (grounded_facts or [])],
             "template_id": template_id,
             "template_capabilities": capabilities,
+            "domain_context": domain_context or {},
         },
         ensure_ascii=False,
         separators=(",", ":"),
@@ -223,12 +140,19 @@ def plan_presentation(
     )
 
     def generate(instruction: str) -> dict[str, Any]:
-        return runtime.generate_structured(
-            system_instruction=instruction,
+        result = runtime.generate_structured(
+            system_instruction=f"{instruction}\n\n{_PLAN_QUALITY_INSTRUCTION}",
             user_text=user_text,
             json_schema=runtime_schema,
-            on_json_chunk=receive_chunk,
         )
+        # Ignore a legacy/model-supplied version if one appears. Versioning is
+        # owned by this backend, so the Planner never controls this field.
+        data = result.get("data")
+        if isinstance(data, dict):
+            data = dict(data)
+            data["schema_version"] = "presentation_plan.v1"
+            result = {**result, "data": data}
+        return result
 
     result = generate(system_instruction)
     try:
@@ -249,64 +173,42 @@ def plan_presentation(
         raise ValueError("; ".join(errors))
     except (ValidationError, ValueError) as exc:
         logger.warning("[PRESENTATION:PLAN_REJECTED] reason=%s", exc)
-        # If nothing was emitted, it is safe to ask the model for a corrected
-        # complete plan.  Once a step has reached the browser we never rewrite it.
-        if not streamed_steps:
-            parser = PresentationStepStreamParser()
-            retry_instruction = (
-                system_instruction
-                + "\n\nYour previous draft was rejected by the template validator: "
-                + str(exc)
-                + ". Return a complete replacement plan. Use an exact fact_id from the runtime schema."
+        retry_instruction = (
+            system_instruction
+            + "\n\nYour previous draft was rejected by the template validator: "
+            + str(exc)
+            + ". Return a complete replacement plan. Use an exact fact_id and an allowed effect from the runtime schema."
+        )
+        retry = generate(retry_instruction)
+        try:
+            retry_plan = PresentationPlan.model_validate(retry.get("data"))
+            retry_errors = validate_plan_capabilities(
+                retry_plan,
+                capabilities,
+                grounded_facts,
+                6,
             )
-            retry = generate(retry_instruction)
-            try:
-                retry_plan = PresentationPlan.model_validate(retry.get("data"))
-                retry_errors = validate_plan_capabilities(
-                    retry_plan,
-                    capabilities,
-                    grounded_facts,
-                    6,
+            if not retry_errors:
+                logger.info(
+                    "[PRESENTATION:PLAN_ACCEPTED] source=retry steps=%s fact_ids=%s",
+                    len(retry_plan.steps),
+                    [step.fact_id for step in retry_plan.steps],
                 )
-                if not retry_errors:
-                    logger.info(
-                        "[PRESENTATION:PLAN_ACCEPTED] source=retry steps=%s fact_ids=%s",
-                        len(retry_plan.steps),
-                        [step.fact_id for step in retry_plan.steps],
-                    )
-                    return {"plan": retry_plan, "usage": retry.get("usage", {}), "fallback": False, "retried": True}
-                logger.warning("[PRESENTATION:PLAN_REJECTED] source=retry reason=%s", "; ".join(retry_errors))
-                result = retry
-            except ValidationError as retry_exc:
-                logger.warning("[PRESENTATION:PLAN_REJECTED] source=retry reason=%s", retry_exc)
-                result = retry
-        # Keep already validated streamed steps if a later part of the response
-        # is malformed.  They have individually passed the same Pydantic gate
-        # and therefore match any narration emitted before the final parse.
-        if streamed_steps:
-            logger.warning(
-                "[PRESENTATION:PLAN_FALLBACK] source=partial_stream steps=%s fact_ids=%s error=%s",
-                len(streamed_steps),
-                [step.fact_id for step in streamed_steps],
-                result.get("error"),
-            )
-            return {
-                "plan": PresentationPlan(steps=streamed_steps[:6]),
-                "usage": result.get("usage", {}),
-                "fallback": True,
-                "error": result.get("error") or {"type": "partial_presentation_plan"},
-            }
+                return {"plan": retry_plan, "usage": retry.get("usage", {}), "fallback": False, "retried": True}
+            logger.warning("[PRESENTATION:PLAN_REJECTED] source=retry reason=%s", "; ".join(retry_errors))
+        except ValidationError as retry_exc:
+            logger.warning("[PRESENTATION:PLAN_REJECTED] source=retry reason=%s", retry_exc)
         fallback = fallback_plan()
         logger.warning(
             "[PRESENTATION:PLAN_FALLBACK] source=deterministic fallback_fact_ids=%s error=%s",
             [step.fact_id for step in fallback.steps],
-            result.get("error"),
+            retry.get("error") or result.get("error"),
         )
         return {
             "plan": fallback,
-            "usage": result.get("usage", {}),
+            "usage": retry.get("usage", {}) or result.get("usage", {}),
             "fallback": True,
-            "error": result.get("error") or {"type": "invalid_presentation_plan"},
+            "error": retry.get("error") or result.get("error") or {"type": "invalid_presentation_plan"},
         }
 
 

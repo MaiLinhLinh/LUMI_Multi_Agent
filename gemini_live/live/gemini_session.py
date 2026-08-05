@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import re
@@ -16,7 +15,9 @@ from gemini_live.domains import LiveDomainRegistry
 from gemini_live.settings import Settings
 
 from .orchestrator import LiveSessionOrchestrator
+from .persistent_transport import PersistentLiveTransport
 from .scene_state import ActivePresentationScenes
+from .session_protocol import LiveSessionState
 
 
 logger = logging.getLogger("lumi.gemini_live")
@@ -50,53 +51,6 @@ class GeminiLiveSession:
         self._registry = registry
         self._orchestrator = orchestrator
 
-    async def run_text_turn(
-        self, *, session_id: str, query: str, on_event: EventCallback, on_audio: AudioCallback
-    ) -> dict[str, Any]:
-        query = query.strip()
-        if not query:
-            raise GeminiLiveSessionError("Câu hỏi không được để trống.")
-
-        async def send_input(session: Any) -> None:
-            await session.send_client_content(
-                turns=types.Content(role="user", parts=[types.Part(text=query)]), turn_complete=True
-            )
-
-        return await self._run(
-            session_id=session_id, label=query, send_input=send_input, on_event=on_event, on_audio=on_audio
-        )
-
-    async def run_audio_turn(
-        self,
-        *,
-        session_id: str,
-        audio_chunks: "asyncio.Queue[bytes | None]",
-        on_event: EventCallback,
-        on_audio: AudioCallback,
-    ) -> dict[str, Any]:
-        async def send_input(session: Any) -> None:
-            count = size = 0
-            await on_event({"type": "live:input_ready", "sample_rate_hz": 16_000})
-            while True:
-                chunk = await audio_chunks.get()
-                if chunk is None:
-                    logger.info("[LIVE:MIC_INPUT_END] chunks=%s bytes=%s", count, size)
-                    await session.send_realtime_input(audio_stream_end=True)
-                    await on_event({"type": "live:gemini_audio_closed", "chunks": count, "bytes": size})
-                    return
-                await session.send_realtime_input(
-                    audio=types.Blob(data=chunk, mime_type="audio/pcm;rate=16000")
-                )
-                count += 1
-                size += len(chunk)
-                if count == 1 or count % 25 == 0:
-                    logger.info("[LIVE:MIC_INPUT_SENT] chunks=%s bytes=%s", count, size)
-                    await on_event({"type": "live:gemini_audio_sent", "chunks": count, "bytes": size})
-
-        return await self._run(
-            session_id=session_id, label="<voice>", send_input=send_input, on_event=on_event, on_audio=on_audio
-        )
-
     def _instruction(self, session_id: str) -> str:
         memory = self._orchestrator.session_memory(session_id)
         history = [
@@ -119,17 +73,9 @@ class GeminiLiveSession:
             sections.append("Confirmed server context:\n" + json.dumps(contexts, ensure_ascii=False))
         return "\n\n".join(section for section in sections if section)
 
-    async def _run(
-        self,
-        *,
-        session_id: str,
-        label: str,
-        send_input: Callable[[Any], Awaitable[None]],
-        on_event: EventCallback,
-        on_audio: AudioCallback,
-    ) -> dict[str, Any]:
-        if not self._settings.gemini_live_api_key:
-            raise GeminiLiveSessionError("GEMINI_LIVE_API_KEY chưa được cấu hình.")
+    def _connection_config(self, session_id: str) -> types.LiveConnectConfig:
+        """Build configuration once per Gemini connection, including safe memory."""
+
         declarations = [
             types.FunctionDeclaration(
                 name=item["name"], description=item["description"], parameters_json_schema=item["parameters"]
@@ -143,7 +89,7 @@ class GeminiLiveSession:
                 "type": "object", "properties": {"scene_id": {"type": "string"}}, "required": ["scene_id"]
             },
         ))
-        config = types.LiveConnectConfig(
+        return types.LiveConnectConfig(
             response_modalities=["AUDIO"],
             tools=[types.Tool(function_declarations=declarations)],
             input_audio_transcription=types.AudioTranscriptionConfig(
@@ -158,126 +104,263 @@ class GeminiLiveSession:
             ),
             system_instruction=self._instruction(session_id),
         )
-        active_scenes: ActivePresentationScenes | None = None
-        scene_ids: list[str] = []
-        next_scene = 0
-        active_scene: str | None = None
-        active_query = "" if label == "<voice>" else label
-        transcript: list[str] = []
-        audio_chunks = 0
-        audio_bytes = 0
-        tool_calls = animation_calls = 0
-        sample_rate: int | None = None
 
+    async def open_persistent_conversation(
+        self,
+        *,
+        session_id: str,
+        transport: PersistentLiveTransport,
+        on_event: EventCallback,
+        on_audio: AudioCallback,
+    ) -> "PersistentGeminiLiveConversation":
+        """Open or reuse one Gemini Live connection for a persistent browser session."""
+
+        if not self._settings.gemini_live_api_key:
+            raise GeminiLiveSessionError("GEMINI_LIVE_API_KEY chưa được cấu hình.")
         client = genai.Client(api_key=self._settings.gemini_live_api_key)
-        async with client.aio.live.connect(model=self._settings.gemini_live_model, config=config) as session:
-            logger.info("[LIVE:START] session=%s input=%s model=%s", session_id, label, self._settings.gemini_live_model)
-            input_task = asyncio.create_task(send_input(session), name="gemini-live-input")
-            continue_receive = False
-            try:
-                while True:
-                    async for message in session.receive():
-                        server = getattr(message, "server_content", None)
-                        input_transcript = getattr(server, "input_transcription", None) if server else None
-                        if input_transcript and getattr(input_transcript, "text", None):
-                            active_query = str(input_transcript.text)
-                            await on_event({"type": "input_transcript", "text": active_query, "final": bool(getattr(input_transcript, "finished", False))})
+        if not transport.connected:
+            await transport.connect(client.aio.live.connect(
+                model=self._settings.gemini_live_model,
+                config=self._connection_config(session_id),
+            ))
+        logger.info("[LIVE:PERSISTENT_CONNECTED] session=%s model=%s", session_id, self._settings.gemini_live_model)
+        return PersistentGeminiLiveConversation(
+            session_id=session_id,
+            transport=transport,
+            orchestrator=self._orchestrator,
+            on_event=on_event,
+            on_audio=on_audio,
+        )
 
-                        calls = getattr(getattr(message, "tool_call", None), "function_calls", None) or []
-                        if calls:
-                            responses: list[types.FunctionResponse] = []
-                            for call in calls:
-                                name, call_id = str(call.name), str(call.id)
-                                args = dict(call.args) if isinstance(call.args, dict) else {}
-                                tool_calls += 1
-                                logger.info("[LIVE:TOOL_CALL] name=%s args=%s", name, json.dumps(args, ensure_ascii=False))
-                                if name == "trigger_scene":
-                                    requested = str(args.get("scene_id") or "").strip()
-                                    expected = scene_ids[next_scene] if active_scene is None and next_scene < len(scene_ids) else ""
-                                    scene = active_scenes.resolve(requested) if active_scenes else None
-                                    if scene is None or requested != expected:
-                                        response = {"status": "rejected", "reason": "scene_not_next"}
-                                    else:
-                                        active_scene = requested
-                                        animation_calls += 1
-                                        response = {"status": "completed", "scene_id": requested}
-                                        await on_event({"type": "scene", "scene": scene})
-                                        logger.info("[LIVE:SCENE_ACCEPTED] scene=%s target=%s", requested, scene["target_id"])
-                                else:
-                                    result = await self._orchestrator.execute_tool_call_result(
-                                        session_id=session_id,
-                                        query=active_query or "Yêu cầu hiện tại.",
-                                        tool_name=name,
-                                        arguments=args,
-                                    )
-                                    response = result.tool_response
-                                    presentation = result.presentation
-                                    panel = getattr(presentation, "panel", None)
-                                    scenes = getattr(presentation, "scenes", None)
-                                    if isinstance(panel, dict):
-                                        await on_event({"type": "panel", "panel": panel})
-                                    if isinstance(scenes, ActivePresentationScenes):
-                                        active_scenes, scene_ids, next_scene, active_scene = scenes, list(scenes.scenes), 0, None
-                                        logger.info("[LIVE:PLAN_ACTIVE] scenes=%s ids=%s", len(scene_ids), scene_ids)
-                                responses.append(types.FunctionResponse(id=call_id, name=name, response={"result": response}))
-                                await on_event({"type": "tool_result", "name": name, "response": response})
-                            await session.send_tool_response(function_responses=responses)
+class PersistentGeminiLiveConversation:
+    """Consume one persistent transport while preserving existing tool/scene rules.
 
-                        model_turn = getattr(server, "model_turn", None) if server else None
-                        for part in getattr(model_turn, "parts", None) or []:
-                            inline = getattr(part, "inline_data", None)
-                            pcm = getattr(inline, "data", None) if inline else None
-                            if not pcm:
-                                continue
-                            if active_scenes is not None and active_scene is None:
-                                logger.warning("[LIVE:AUDIO_DROPPED_NO_SCENE] bytes=%s", len(pcm))
-                                continue
-                            rate = _sample_rate(getattr(inline, "mime_type", None))
-                            if sample_rate is None:
-                                sample_rate = rate
-                                await on_event({"type": "audio_format", "sample_rate_hz": rate})
-                            audio_chunks += 1
-                            audio_bytes += len(pcm)
-                            await on_audio(pcm, rate)
-                        output = getattr(server, "output_transcription", None) if server else None
-                        if output and getattr(output, "text", None):
-                            text = str(output.text)
-                            transcript.append(text)
-                            await on_event({"type": "text", "text": text})
-                        if server and bool(getattr(server, "turn_complete", False)):
-                            if active_scene:
-                                logger.info("[LIVE:SCENE_COMPLETE] scene=%s", active_scene)
-                                next_scene += 1
-                                active_scene = None
-                            if active_scenes is not None and next_scene < len(scene_ids):
-                                scene = active_scenes.resolve(scene_ids[next_scene])
-                                if scene is None:
-                                    raise GeminiLiveSessionError("Compiled presentation scene is unavailable.")
-                                await session.send_client_content(
-                                    turns=types.Content(role="user", parts=[types.Part(text=json.dumps({
-                                        "BACKEND_PRESENTATION_SCENE": {
-                                            "scene_id": scene["scene_id"],
-                                            "narration": scene.get("spoken_text") or scene["narration"],
-                                        }
-                                    }, ensure_ascii=False))]), turn_complete=True
-                                )
-                                continue_receive = True
-                            else:
-                                continue_receive = False
-                                break
-                    if continue_receive:
-                        continue_receive = False
-                        continue
-                    break
-            finally:
-                if not input_task.done():
-                    input_task.cancel()
-                try:
-                    await input_task
-                except asyncio.CancelledError:
-                    pass
-        final_text = "".join(transcript).strip()
-        self._orchestrator.remember_turn(session_id=session_id, user_text=active_query or label, assistant_text=final_text)
-        summary = {"tool_calls": tool_calls, "animation_calls": animation_calls, "audio_chunks": audio_chunks, "audio_bytes": audio_bytes, "audio_sample_rate_hz": sample_rate, "transcript": final_text}
-        logger.info("[LIVE:DONE] session=%s tools=%s scenes=%s audio_chunks=%s", session_id, tool_calls, animation_calls, audio_chunks)
+    Tool dispatch and presentation sequencing remain shared concerns rather
+    than Weather/Education responsibilities.
+    """
+
+    def __init__(
+        self,
+        *,
+        session_id: str,
+        transport: PersistentLiveTransport,
+        orchestrator: LiveSessionOrchestrator,
+        on_event: EventCallback,
+        on_audio: AudioCallback,
+    ) -> None:
+        self._session_id = session_id
+        self._transport = transport
+        self._orchestrator = orchestrator
+        self._on_event = on_event
+        self._on_audio = on_audio
+        self._active_scenes: ActivePresentationScenes | None = None
+        self._scene_ids: list[str] = []
+        self._next_scene = 0
+        self._active_scene: str | None = None
+        self._active_query = ""
+        self._transcript: list[str] = []
+        self._tool_calls = 0
+        self._animation_calls = 0
+        self._audio_chunks = 0
+        self._audio_bytes = 0
+        self._sample_rate: int | None = None
+
+    @property
+    def state(self) -> LiveSessionState:
+        return self._orchestrator.session_state(self._session_id)
+
+    async def submit_text(self, query: str) -> dict[str, Any]:
+        query = query.strip()
+        if not query:
+            raise GeminiLiveSessionError("Câu hỏi không được để trống.")
+        await self._set_state(LiveSessionState.LISTENING)
+        self._begin_turn(query)
+        await self._transport.send_text(query)
+        await self._set_state(LiveSessionState.WAITING_FOR_TOOL)
+        return await self._consume_until_settled()
+
+    async def begin_audio(self) -> None:
+        """Enter listening when the persistent browser microphone begins."""
+
+        await self._set_state(LiveSessionState.LISTENING)
+        self._begin_turn("<voice>")
+        await self._on_event({"type": "live:input_ready", "sample_rate_hz": 16_000})
+
+    async def send_audio(self, pcm: bytes) -> None:
+        if self.state != LiveSessionState.LISTENING:
+            raise GeminiLiveSessionError("Microphone audio is accepted only while listening.")
+        await self._transport.send_audio(pcm)
+
+    async def end_audio(self) -> dict[str, Any]:
+        if self.state != LiveSessionState.LISTENING:
+            raise GeminiLiveSessionError("No active microphone turn to end.")
+        await self._transport.end_audio()
+        await self._set_state(LiveSessionState.WAITING_FOR_TOOL)
+        return await self._consume_until_settled()
+
+    async def close(self) -> None:
+        await self._transport.close()
+        self._orchestrator.reset_session_state(self._session_id)
+        await self._on_event({"type": "live:state", "state": LiveSessionState.IDLE})
+
+    def _begin_turn(self, user_text: str) -> None:
+        self._active_query = user_text
+        self._transcript = []
+        self._tool_calls = self._animation_calls = self._audio_chunks = self._audio_bytes = 0
+        self._sample_rate = None
+        self._active_scenes = None
+        self._scene_ids = []
+        self._next_scene = 0
+        self._active_scene = None
+
+    async def _set_state(self, target: LiveSessionState) -> None:
+        current = self.state
+        if current != target:
+            self._orchestrator.transition_session(session_id=self._session_id, target=target)
+        await self._on_event({"type": "live:state", "state": target})
+
+    async def _consume_until_settled(self) -> dict[str, Any]:
+        """Handle messages until this turn safely returns to listening."""
+
+        async for message in self._transport.receive():
+            server = getattr(message, "server_content", None)
+            await self._handle_input_transcript(server)
+            await self._handle_tool_calls(message)
+            await self._handle_model_turn(server)
+            if server and bool(getattr(server, "turn_complete", False)):
+                if await self._handle_turn_complete():
+                    return self._finish_turn()
+        raise GeminiLiveSessionError("Gemini Live connection closed before the turn completed.")
+
+    async def _handle_input_transcript(self, server: Any) -> None:
+        input_transcript = getattr(server, "input_transcription", None) if server else None
+        if input_transcript and getattr(input_transcript, "text", None):
+            self._active_query = str(input_transcript.text)
+            await self._on_event({
+                "type": "input_transcript",
+                "text": self._active_query,
+                "final": bool(getattr(input_transcript, "finished", False)),
+            })
+
+    async def _handle_tool_calls(self, message: Any) -> None:
+        calls = getattr(getattr(message, "tool_call", None), "function_calls", None) or []
+        if not calls:
+            return
+        if any(str(call.name) != "trigger_scene" for call in calls):
+            await self._set_state(LiveSessionState.WAITING_FOR_TOOL)
+        responses: list[types.FunctionResponse] = []
+        for call in calls:
+            name, call_id = str(call.name), str(call.id)
+            args = dict(call.args) if isinstance(call.args, dict) else {}
+            self._tool_calls += 1
+            logger.info("[LIVE:PERSISTENT_TOOL_CALL] session=%s name=%s args=%s", self._session_id, name, json.dumps(args, ensure_ascii=False))
+            if name == "trigger_scene":
+                response = await self._trigger_scene(str(args.get("scene_id") or "").strip())
+            else:
+                result = await self._orchestrator.execute_tool_call_result(
+                    session_id=self._session_id,
+                    query=self._active_query or "Yêu cầu hiện tại.",
+                    tool_name=name,
+                    arguments=args,
+                )
+                response = result.tool_response
+                presentation = result.presentation
+                panel = getattr(presentation, "panel", None)
+                scenes = getattr(presentation, "scenes", None)
+                if isinstance(panel, dict):
+                    await self._on_event({"type": "panel", "panel": panel})
+                if isinstance(scenes, ActivePresentationScenes):
+                    self._active_scenes = scenes
+                    self._scene_ids = list(scenes.scenes)
+                    self._next_scene = 0
+                    self._active_scene = None
+                    logger.info("[LIVE:PERSISTENT_PLAN_ACTIVE] session=%s scenes=%s", self._session_id, len(self._scene_ids))
+            responses.append(types.FunctionResponse(id=call_id, name=name, response={"result": response}))
+            await self._on_event({"type": "tool_result", "name": name, "response": response})
+        await self._transport.send_tool_responses(responses)
+
+    async def _trigger_scene(self, requested: str) -> dict[str, Any]:
+        expected = self._scene_ids[self._next_scene] if self._active_scene is None and self._next_scene < len(self._scene_ids) else ""
+        scene = self._active_scenes.resolve(requested) if self._active_scenes else None
+        if scene is None or requested != expected:
+            return {"status": "rejected", "reason": "scene_not_next"}
+        self._active_scene = requested
+        self._animation_calls += 1
+        await self._set_state(LiveSessionState.SPEAKING)
+        await self._on_event({"type": "scene", "scene": scene})
+        logger.info("[LIVE:PERSISTENT_SCENE_ACCEPTED] session=%s scene=%s", self._session_id, requested)
+        return {"status": "completed", "scene_id": requested}
+
+    async def _handle_model_turn(self, server: Any) -> None:
+        model_turn = getattr(server, "model_turn", None) if server else None
+        for part in getattr(model_turn, "parts", None) or []:
+            inline = getattr(part, "inline_data", None)
+            pcm = getattr(inline, "data", None) if inline else None
+            if not pcm:
+                continue
+            if self._active_scenes is not None and self._active_scene is None:
+                logger.warning("[LIVE:PERSISTENT_AUDIO_DROPPED_NO_SCENE] session=%s bytes=%s", self._session_id, len(pcm))
+                continue
+            if self.state == LiveSessionState.WAITING_FOR_TOOL:
+                await self._set_state(LiveSessionState.SPEAKING)
+            rate = _sample_rate(getattr(inline, "mime_type", None))
+            if self._sample_rate is None:
+                self._sample_rate = rate
+                await self._on_event({"type": "audio_format", "sample_rate_hz": rate})
+            self._audio_chunks += 1
+            self._audio_bytes += len(pcm)
+            await self._on_audio(pcm, rate)
+
+        output = getattr(server, "output_transcription", None) if server else None
+        if output and getattr(output, "text", None):
+            # Keep transcript visible for diagnosis even when pre-scene PCM is
+            # intentionally muted.  This exposes unwanted Gemini generation
+            # and its token cost without letting it disrupt narrated scenes.
+            text = str(output.text)
+            self._transcript.append(text)
+            await self._on_event({
+                "type": "text",
+                "text": text,
+                "presentation_approved": self._active_scenes is None or self._active_scene is not None,
+            })
+
+    async def _handle_turn_complete(self) -> bool:
+        if self._active_scene:
+            logger.info("[LIVE:PERSISTENT_SCENE_COMPLETE] session=%s scene=%s", self._session_id, self._active_scene)
+            self._next_scene += 1
+            self._active_scene = None
+        if self._active_scenes is not None and self._next_scene < len(self._scene_ids):
+            scene = self._active_scenes.resolve(self._scene_ids[self._next_scene])
+            if scene is None:
+                raise GeminiLiveSessionError("Compiled presentation scene is unavailable.")
+            await self._transport.send_text(json.dumps({
+                "BACKEND_PRESENTATION_SCENE": {
+                    "scene_id": scene["scene_id"],
+                    "narration": scene.get("spoken_text") or scene["narration"],
+                }
+            }, ensure_ascii=False))
+            return False
+        self._active_scenes = None
+        self._scene_ids = []
+        self._next_scene = 0
+        self._active_scene = None
+        await self._set_state(LiveSessionState.LISTENING)
+        return True
+
+    def _finish_turn(self) -> dict[str, Any]:
+        final_text = "".join(self._transcript).strip()
+        self._orchestrator.remember_turn(
+            session_id=self._session_id,
+            user_text=self._active_query,
+            assistant_text=final_text,
+        )
+        summary = {
+            "tool_calls": self._tool_calls,
+            "animation_calls": self._animation_calls,
+            "audio_chunks": self._audio_chunks,
+            "audio_bytes": self._audio_bytes,
+            "audio_sample_rate_hz": self._sample_rate,
+            "transcript": final_text,
+        }
+        logger.info("[LIVE:PERSISTENT_TURN_DONE] session=%s tools=%s scenes=%s", self._session_id, self._tool_calls, self._animation_calls)
         return summary

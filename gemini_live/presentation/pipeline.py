@@ -95,6 +95,7 @@ class PresentationPipeline:
             template_id=request.template_id,
             capabilities=declared,
             grounded_facts=facts,
+            domain_context=request.adapter.planner_context(),
             system_instruction=request.adapter.planner_guidance(),
             fallback_plan=lambda: request.adapter.fallback_plan(
                 request.domain_data, declared, facts

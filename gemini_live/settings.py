@@ -25,6 +25,9 @@ class Settings:
     weather_snapshot_ttl_seconds: int
     weather_session_snapshot_ttl_seconds: int
     request_timeout_seconds: float
+    live_turn_timeout_seconds: float
+    live_idle_timeout_seconds: float
+    live_reconnect_grace_seconds: float
 
 
 def load_settings() -> Settings:
@@ -51,4 +54,7 @@ def load_settings() -> Settings:
         weather_snapshot_ttl_seconds=integer("WEATHER_SNAPSHOT_TTL_SECONDS", 14_400),
         weather_session_snapshot_ttl_seconds=integer("WEATHER_SESSION_SNAPSHOT_TTL_SECONDS", 600),
         request_timeout_seconds=float(os.getenv("REQUEST_TIMEOUT_SECONDS", "60")),
+        live_turn_timeout_seconds=float(os.getenv("LIVE_TURN_TIMEOUT_SECONDS", "45")),
+        live_idle_timeout_seconds=float(os.getenv("LIVE_IDLE_TIMEOUT_SECONDS", "900")),
+        live_reconnect_grace_seconds=float(os.getenv("LIVE_RECONNECT_GRACE_SECONDS", "30")),
     )

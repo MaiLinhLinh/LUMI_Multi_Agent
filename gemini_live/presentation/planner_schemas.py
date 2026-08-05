@@ -67,7 +67,14 @@ class PresentationStep(BaseModel):
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
-    narration: str = Field(min_length=1, max_length=800)
+    narration: str = Field(
+        min_length=1,
+        max_length=800,
+        description=(
+            "One complete, non-empty Vietnamese sentence for this scene. "
+            "Never use a placeholder or an empty string."
+        ),
+    )
     # The Planner selects a fact only. Focus, entity and visual evidence are
     # trusted properties of that fact and are hydrated by the Compiler.
     fact_id: str = Field(min_length=1, max_length=80)

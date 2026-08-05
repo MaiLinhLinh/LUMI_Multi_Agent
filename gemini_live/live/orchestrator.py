@@ -10,6 +10,7 @@ from gemini_live.presentation import PresentationPipeline, PresentationRequest
 from .dispatcher import LiveToolDispatcher
 from .memory import SessionMemoryStore
 from .scene_state import LivePresentation, active_scenes_from_compiled_plan, scene_instruction
+from .session_protocol import LiveSessionState, can_transition
 
 
 class LiveSessionOrchestrator:
@@ -24,6 +25,28 @@ class LiveSessionOrchestrator:
         self._dispatcher = dispatcher
         self._presentation_pipeline = presentation_pipeline
         self._memory_store = memory_store or SessionMemoryStore()
+        self._technical_states: dict[str, LiveSessionState] = {}
+
+    def session_state(self, session_id: str) -> LiveSessionState:
+        """Return shared technical state; domain business state is separate."""
+
+        return self._technical_states.setdefault(session_id, LiveSessionState.IDLE)
+
+    def transition_session(self, *, session_id: str, target: LiveSessionState) -> LiveSessionState:
+        """Apply only a CP-01-approved transition for a persistent session."""
+
+        current = self.session_state(session_id)
+        if current == target:
+            return current
+        if not can_transition(current, target):
+            raise RuntimeError(f"Invalid Live session transition: {current} -> {target}")
+        self._technical_states[session_id] = target
+        return target
+
+    def reset_session_state(self, session_id: str) -> None:
+        """Use after a closed/recovered transport; keep domain memory intact."""
+
+        self._technical_states[session_id] = LiveSessionState.IDLE
 
     async def execute_tool_call(
         self,

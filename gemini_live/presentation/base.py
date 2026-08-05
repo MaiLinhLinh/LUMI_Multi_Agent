@@ -43,6 +43,15 @@ class DomainPresentationAdapter(ABC):
     def planner_guidance(self) -> str:
         """Domain-specific presentation guidance for the shared Planner LLM."""
 
+    def planner_context(self) -> dict[str, Any]:
+        """Optional domain-specific context for the shared Planner input.
+
+        Most domains need no additional context, so they inherit an empty
+        object. Domains with an interaction mode can override this without
+        changing the shared Planner envelope.
+        """
+        return {}
+
     @abstractmethod
     def fallback_plan(
         self,

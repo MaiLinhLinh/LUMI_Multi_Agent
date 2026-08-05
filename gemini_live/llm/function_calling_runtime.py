@@ -435,102 +435,40 @@ class GeminiFunctionCallingRuntime:
         system_instruction: str,
         user_text: str,
         json_schema: dict[str, Any],
-        tool_name: str = "create_presentation_plan",
-        on_json_chunk: TextChunkCallback | None = None,
     ) -> dict[str, Any]:
-        """Generate one JSON object, preferring streamable JSON then a tool fallback.
+        """Generate one object through Gemini's native Structured Output API.
 
-        Some Gemini-compatible models accept ``application/json`` but reject
-        ``response_json_schema``.  Keeping the schema in the instruction lets
-        those models stream JSON text, while the caller still validates every
-        completed object with Pydantic before it reaches the client.
+        This method intentionally has no function-call fallback.  A caller
+        either receives one object matching the supplied JSON schema, or a
+        structured error and can choose its own safe deterministic fallback.
         """
         started = time.perf_counter()
-        schema_text = json.dumps(json_schema, ensure_ascii=False, separators=(",", ":"))
-        structured_instruction = (
-            f"{system_instruction}\n\n"
-            "Return exactly one JSON object and no Markdown. Its required schema is:\n"
-            f"{schema_text}"
-        )
         config = types.GenerateContentConfig(
-            system_instruction=structured_instruction,
+            system_instruction=system_instruction,
             response_mime_type="application/json",
+            response_json_schema=json_schema,
             temperature=0.1,
-            max_output_tokens=768,
+            max_output_tokens=1024,
             thinking_config=types.ThinkingConfig(thinking_level="minimal"),
         )
         try:
-            if on_json_chunk is None:
-                response = self.client.models.generate_content(
-                    model=self.model,
-                    contents=[types.Content(role="user", parts=[types.Part(text=user_text)])],
-                    config=config,
-                )
-                text = _visible_text(response)
-            else:
-                response = None
-                parts: list[str] = []
-                for chunk in self.client.models.generate_content_stream(
-                    model=self.model,
-                    contents=[types.Content(role="user", parts=[types.Part(text=user_text)])],
-                    config=config,
-                ):
-                    response = chunk
-                    text_chunk = _visible_text(chunk)
-                    if text_chunk:
-                        parts.append(text_chunk)
-                        on_json_chunk(text_chunk)
-                if response is None:
-                    raise RuntimeError("Gemini structured stream returned no chunks.")
-                text = "".join(parts)
+            response = self.client.models.generate_content(
+                model=self.model,
+                contents=[types.Content(role="user", parts=[types.Part(text=user_text)])],
+                config=config,
+            )
+            text = _visible_text(response)
             payload = json.loads(text)
             if not isinstance(payload, dict):
                 raise ValueError("structured response must be a JSON object")
             return {
                 "data": payload,
-                "usage": {"stage": "presentation_planner", "mode": "json_stream", "inference_ms": round((time.perf_counter() - started) * 1000, 2), **_usage_metrics(response)},
+                "usage": {"stage": "presentation_planner", "mode": "structured_output", "inference_ms": round((time.perf_counter() - started) * 1000, 2), **_usage_metrics(response)},
             }
-        except Exception as schema_error:
-            logger.warning("[PRESENTATION][JSON-STREAM] failed; trying function fallback: %s", schema_error)
-
-        fallback_started = time.perf_counter()
-        try:
-            tool = types.Tool(function_declarations=[
-                types.FunctionDeclaration(
-                    name=tool_name,
-                    description="Return the presentation plan matching the supplied JSON schema.",
-                    parameters_json_schema=json_schema,
-                )
-            ])
-            fallback_config = types.GenerateContentConfig(
-                system_instruction=system_instruction,
-                tools=[tool],
-                automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
-                tool_config=types.ToolConfig(
-                    function_calling_config=types.FunctionCallingConfig(mode="ANY", allowed_function_names=[tool_name]),
-                ),
-                temperature=0.1,
-                max_output_tokens=768,
-                thinking_config=types.ThinkingConfig(thinking_level="minimal"),
-            )
-            response = self.client.models.generate_content(
-                model=self.model,
-                contents=[types.Content(role="user", parts=[types.Part(text=user_text)])],
-                config=fallback_config,
-            )
-            candidate = _candidate_content(response)
-            calls = [part.function_call for part in getattr(candidate, "parts", []) if getattr(part, "function_call", None)]
-            if not calls:
-                raise ValueError("function fallback returned no call")
-            payload = dict(calls[0].args or {})
-            return {
-                "data": payload,
-                "usage": {"stage": "presentation_planner", "mode": "function_call", "inference_ms": round((time.perf_counter() - fallback_started) * 1000, 2), **_usage_metrics(response)},
-            }
-        except Exception as fallback_error:
-            logger.exception("[PRESENTATION][ERROR] structured generation failed")
+        except Exception as error:
+            logger.exception("[PRESENTATION][STRUCTURED_OUTPUT_ERROR] generation failed")
             return {
                 "data": None,
                 "usage": {"stage": "presentation_planner", "mode": "failed", "inference_ms": round((time.perf_counter() - started) * 1000, 2)},
-                "error": {"type": fallback_error.__class__.__name__, "message": str(fallback_error)},
+                "error": {"type": error.__class__.__name__, "message": str(error)},
             }

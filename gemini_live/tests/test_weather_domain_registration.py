@@ -22,6 +22,9 @@ def _settings() -> Settings:
         weather_snapshot_ttl_seconds=14_400,
         weather_session_snapshot_ttl_seconds=600,
         request_timeout_seconds=1.0,
+        live_turn_timeout_seconds=45.0,
+        live_idle_timeout_seconds=900.0,
+        live_reconnect_grace_seconds=30.0,
     )
 
 

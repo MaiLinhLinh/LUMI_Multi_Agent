@@ -140,7 +140,24 @@
     </article>
   </template>
 
+  <script>
+    // This runs before the module so an import/bootstrap failure is visible
+    // in the local server terminal instead of silently disabling the mic.
+    (() => {
+      const report = (payload) => fetch("/api/client-debug", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }).catch(() => {});
+      window.addEventListener("error", (event) => report({
+        phase: "window_error", message: event.message,
+        source: event.filename, line: event.lineno,
+      }));
+      window.addEventListener("unhandledrejection", (event) => report({
+        phase: "unhandled_rejection", message: String(event.reason),
+      }));
+    })();
+  </script>
   <script type="module" src="/assets/app.js?v=presentation-controller-20260804"></script>
 </body>
 </html>
-
