@@ -8,7 +8,7 @@ from typing import Any
 from gemini_live.presentation.base import DomainPresentationAdapter
 from gemini_live.presentation.planner_runtime import fallback_presentation_plan
 from gemini_live.presentation.planner_schemas import GroundedFact, PresentationPlan
-from .prompt import WEATHER_PRESENTATION_SYSTEM
+from .prompt import WEATHER_PRESENTATION_INSTRUCTION, WEATHER_PRESENTATION_SYSTEM
 
 _TARGET_ID_RE = re.compile(r"^[a-z][a-z0-9._-]*$")
 
@@ -20,6 +20,9 @@ class WeatherPresentationAdapter(DomainPresentationAdapter):
 
     def planner_guidance(self) -> str:
         return WEATHER_PRESENTATION_SYSTEM
+
+    def live_presentation_instruction(self) -> str:
+        return WEATHER_PRESENTATION_INSTRUCTION
 
     def build_candidate_facts(
         self,
@@ -49,7 +52,8 @@ class WeatherPresentationAdapter(DomainPresentationAdapter):
                 unit="%", focus="overview", effect_hint="reveal",
             ))
             facts.append(self._day_fact("period_rain_probability_peak", "rain_probability", "argmax", *max(rain, key=lambda item: item[2]), "rain_risk", "draw_circle", "%"))
-            facts.append(self._day_fact("period_rain_probability_low", "rain_probability", "argmin", *min(rain, key=lambda item: item[2]), "rain_risk", "draw_circle", "%"))
+            if len(rain) >= 2:
+                facts.append(self._day_fact("period_rain_probability_low", "rain_probability", "argmin", *min(rain, key=lambda item: item[2]), "rain_risk", "draw_circle", "%"))
         periods = self._condition_periods(days)
         if periods:
             facts.append(GroundedFact(
@@ -62,6 +66,8 @@ class WeatherPresentationAdapter(DomainPresentationAdapter):
             ))
         if rain_amount:
             facts.append(self._day_fact("period_rain_amount_peak", "rain_amount", "argmax", *max(rain_amount, key=lambda item: item[2]), "day_summary", "draw_circle", "mm"))
+            if len(rain_amount) >= 2:
+                facts.append(self._day_fact("period_rain_amount_low", "rain_amount", "argmin", *min(rain_amount, key=lambda item: item[2]), "day_summary", "draw_circle", "mm"))
         if maximums or minimums:
             value: dict[str, Any] = {"total_days": len(days)}
             if maximums:
@@ -82,6 +88,7 @@ class WeatherPresentationAdapter(DomainPresentationAdapter):
                 unit="°C", focus="temperature_trend", effect_hint="trace_line",
                 visual_evidence={"kind": "chart_segment", "point_indices": [index for index, _, _ in maximums]},
             ))
+        if maximums:
             facts.append(self._day_fact("period_temperature_peak", "temperature_max", "argmax", *max(maximums, key=lambda item: item[2]), "temperature_peak", "draw_circle", "°C"))
         if minimums:
             facts.append(self._day_fact("period_temperature_low", "temperature_min", "argmin", *min(minimums, key=lambda item: item[2]), "temperature_peak", "draw_circle", "°C"))
@@ -107,45 +114,29 @@ class WeatherPresentationAdapter(DomainPresentationAdapter):
             focus = self._supported_focus(("rain_risk", "day_summary", "overview"), capabilities)
             if focus:
                 facts.append(GroundedFact(id="day_rain_summary", metric="rain_probability", operation="summary", value=rain, unit="%", entity=entity if focus != "overview" else {}, focus=focus, effect_hint="draw_circle"))
-        for field, metric, focus, unit in (("wind_avg_ms", "wind", "wind", "m/s"), ("humidity_avg_pct", "humidity", "humidity", "%")):
-            if self._is_number(day.get(field)) and focus in capabilities:
-                facts.append(GroundedFact(id=f"day_{metric}", metric=metric, operation="summary", value=day[field], unit=unit, entity=entity, focus=focus, effect_hint="highlight"))
+        for fact_id, metric, field, unit, preferred_focus in (
+            ("day_humidity", "humidity", "humidity_avg_pct", "%", ("humidity", "day_summary", "overview")),
+            ("day_wind", "wind_speed", "wind_avg_ms", "m/s", ("wind", "day_summary", "overview")),
+            ("day_pressure", "pressure", "pressure_avg_hpa", "hPa", ("pressure", "day_summary", "overview")),
+        ):
+            value = day.get(field)
+            focus = self._supported_focus(preferred_focus, capabilities)
+            if self._is_number(value) and focus:
+                facts.append(GroundedFact(
+                    id=fact_id, metric=metric, operation="lookup", value=value, unit=unit,
+                    entity=entity if focus != "overview" else {}, focus=focus, effect_hint="highlight",
+                ))
         intervals = self._intervals(compact_data)
-        facts.extend(self._hourly_extrema(intervals, capabilities))
-        phase = self._daily_phase_fact(day, intervals, capabilities)
-        if phase:
-            facts.append(phase)
+        facts.extend(self._hourly_rain_peak(intervals, capabilities))
         return facts
 
-    def _hourly_extrema(self, intervals: list[dict[str, Any]], capabilities: dict[str, Any]) -> list[GroundedFact]:
+    def _hourly_rain_peak(self, intervals: list[dict[str, Any]], capabilities: dict[str, Any]) -> list[GroundedFact]:
         facts: list[GroundedFact] = []
         rain = [(i, self._percentage(item["rain_probability"])) for i, item in enumerate(intervals) if self._is_number(item.get("rain_probability"))]
-        temp = [(i, float(item["temperature_celsius"])) for i, item in enumerate(intervals) if self._is_number(item.get("temperature_celsius"))]
         if rain and "hourly_rain_risk" in capabilities:
             i, value = max(rain, key=lambda pair: pair[1])
             facts.append(GroundedFact(id="hourly_rain_probability_peak", metric="rain_probability", operation="argmax", value=value, unit="%", entity={"day_index": 0, "interval_index": i, "time": intervals[i].get("time")}, focus="hourly_rain_risk", effect_hint="draw_circle"))
-        if temp and "hourly_temperature" in capabilities:
-            i, value = max(temp, key=lambda pair: pair[1])
-            facts.append(GroundedFact(id="hourly_temperature_peak", metric="temperature_max", operation="argmax", value=value, unit="°C", entity={"day_index": 0, "interval_index": i, "time": intervals[i].get("time")}, focus="hourly_temperature", effect_hint="draw_circle"))
-            i, value = min(temp, key=lambda pair: pair[1])
-            facts.append(GroundedFact(id="hourly_temperature_low", metric="temperature_min", operation="argmin", value=value, unit="°C", entity={"day_index": 0, "interval_index": i, "time": intervals[i].get("time")}, focus="hourly_temperature", effect_hint="draw_circle"))
         return facts
-
-    def _daily_phase_fact(self, day: dict[str, Any], intervals: list[dict[str, Any]], capabilities: dict[str, Any]) -> GroundedFact | None:
-        focus = self._supported_focus(("temperature_trend",), capabilities)
-        if not focus:
-            return None
-        phases = []
-        for name, start, end in (("morning", 5, 10), ("noon", 11, 14), ("afternoon", 15, 18), ("evening", 19, 23)):
-            selected = [item for item in intervals if (hour := self._hour(item.get("time"))) is not None and start <= hour <= end]
-            temps = [float(item["temperature_celsius"]) for item in selected if self._is_number(item.get("temperature_celsius"))]
-            rain = [self._percentage(item["rain_probability"]) for item in selected if self._is_number(item.get("rain_probability"))]
-            if temps or rain:
-                value = {"period": name, "start_hour": start, "end_hour": end}
-                if temps: value["temperature_range_c"] = [min(temps), max(temps)]
-                if rain: value["max_rain_probability_pct"] = max(rain)
-                phases.append(value)
-        return GroundedFact(id="day_time_phases", metric="condition", operation="summary", value={"date": day.get("date"), "phases": phases}, focus=focus, effect_hint="draw_arrow") if len(phases) >= 2 else None
 
     def fallback_plan(self, domain_data: dict[str, Any], capabilities: dict[str, Any], grounded_facts: list[GroundedFact]) -> PresentationPlan:
         return fallback_presentation_plan(capabilities=capabilities, grounded_facts=grounded_facts, fallback_narration="Dữ liệu thời tiết đã sẵn sàng. Tôi sẽ tóm tắt các chỉ số chính trên bảng.")
@@ -181,11 +172,6 @@ class WeatherPresentationAdapter(DomainPresentationAdapter):
     def _is_number(value: Any) -> bool: return isinstance(value, (int, float)) and not isinstance(value, bool)
     @staticmethod
     def _percentage(value: int | float) -> float: return round(float(value) * 100 if 0 <= value <= 1 else float(value), 1)
-    @staticmethod
-    def _hour(value: Any) -> int | None:
-        try: hour = int(value[:2]) if isinstance(value, str) else -1
-        except ValueError: return None
-        return hour if 0 <= hour <= 23 else None
     @staticmethod
     def _supported_focus(preferred: tuple[str, ...], capabilities: dict[str, Any]) -> str | None:
         return next((focus for focus in preferred if isinstance(capabilities.get(focus), dict)), None)

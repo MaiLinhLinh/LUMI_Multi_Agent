@@ -9,8 +9,9 @@ from gemini_live.presentation import PresentationPipeline, PresentationRequest
 
 from .dispatcher import LiveToolDispatcher
 from .memory import SessionMemoryStore
-from .scene_state import LivePresentation, active_scenes_from_compiled_plan, scene_instruction
+from .visual_presentation import FactPresentationState, RenderedPresentation
 from .session_protocol import LiveSessionState, can_transition
+from gemini_live.trace import trace, warning
 
 
 class LiveSessionOrchestrator:
@@ -26,6 +27,7 @@ class LiveSessionOrchestrator:
         self._presentation_pipeline = presentation_pipeline
         self._memory_store = memory_store or SessionMemoryStore()
         self._technical_states: dict[str, LiveSessionState] = {}
+        self._fact_presentations: dict[str, FactPresentationState] = {}
 
     def session_state(self, session_id: str) -> LiveSessionState:
         """Return shared technical state; domain business state is separate."""
@@ -74,6 +76,8 @@ class LiveSessionOrchestrator:
     ) -> Any:
         """Execute a domain tool and retain its server-only presentation result."""
         memory = self._memory_store.get(session_id)
+        domain = self._dispatcher._registry.domain_for_tool(tool_name)
+        trace("TOOL_DISPATCH_START domain=%s tool=%s", getattr(domain, "domain_id", "unknown"), tool_name)
         request = DomainRequest(query=query, history=tuple(memory.history))
         result = await self._dispatcher.execute(
             tool_name=tool_name,
@@ -81,15 +85,22 @@ class LiveSessionOrchestrator:
             request=request,
             domain_contexts=memory.domain_contexts,
         )
+        response = result.tool_response if isinstance(result.tool_response, dict) else {}
+        trace(
+            "TOOL_DISPATCH_DONE status=%s correct=%s attempts=%s",
+            response.get("status", "completed"),
+            response.get("status") == "correct",
+            response.get("attempt_count", 0),
+        )
         presentation_request = result.presentation
         if isinstance(presentation_request, PresentationRequest):
             try:
+                trace("PRESENTATION_PIPELINE_START domain=%s", presentation_request.domain_id)
                 prepared = self._presentation_pipeline.prepare(
                     request=presentation_request,
-                    query=query,
-                    history=list(memory.history),
                 )
             except Exception as exc:
+                warning("PRESENTATION_PIPELINE_FAILED reason=%s", exc)
                 return type(result)(
                     tool_response={
                         "status": "error",
@@ -97,34 +108,59 @@ class LiveSessionOrchestrator:
                     },
                     context=result.context,
                 )
-            scenes = active_scenes_from_compiled_plan(
-                domain_id=presentation_request.domain_id,
-                template_id=presentation_request.template_id,
-                compiled_plan=prepared.compiled_plan,
-            )
             response = dict(result.tool_response)
-            response["facts"] = self._presentation_pipeline.live_fact_pack(
+            live_fact_pack = self._presentation_pipeline.build_live_fact_pack(
                 presentation_request,
                 prepared,
             )
+            # The alias-to-target map is intentionally not included in the
+            # Gemini tool response. CP-04 will retain it per Live session.
+            response["facts"] = live_fact_pack.facts_for_live
+            response["visual_effects"] = live_fact_pack.supported_effects
+            if prepared.visual_stage_map:
+                response["visual_stage_map"] = prepared.visual_stage_map
+            presentation_instruction = presentation_request.adapter.live_presentation_instruction()
+            if presentation_instruction:
+                response["presentation_instruction"] = presentation_instruction
+            presentation_context = presentation_request.adapter.live_presentation_context()
+            if presentation_context:
+                response.update(presentation_context)
+            self._fact_presentations[session_id] = FactPresentationState.from_fact_pack(
+                template_id=presentation_request.template_id,
+                pack=live_fact_pack,
+            )
             response["presentation"] = {
                 "template_id": presentation_request.template_id,
-                "presentation_plan": {
-                    "schema_version": "lumi.live_scene_plan.v1",
-                    "scene_count": len(scenes.scenes),
-                    "current_scene": scene_instruction(scenes),
-                },
+                "mode": "fact_pack",
             }
+            trace(
+                "LIVE_PRESENTATION_INSTRUCTION_READY domain=%s chars=%s",
+                presentation_request.domain_id,
+                len(presentation_instruction),
+            )
             result.tool_response = response
-            result.presentation = LivePresentation(
+            result.presentation = RenderedPresentation(
                 panel={
                     "ui_type": presentation_request.domain_id,
                     "template_id": presentation_request.template_id,
                     "html": prepared.panel.html,
                 },
-                scenes=scenes,
             )
         return result
+
+    def present_visual(
+        self,
+        *,
+        session_id: str,
+        anchor_id: str,
+        effect_id: str,
+    ) -> dict[str, str]:
+        """Resolve one Gemini Live visual call without exposing DOM IDs to it."""
+
+        presentation = self._fact_presentations.get(session_id)
+        if presentation is None:
+            raise ValueError("no active presentation is available")
+        return presentation.resolve(anchor_id=anchor_id, effect_id=effect_id)
 
     def session_memory(self, session_id: str) -> Any:
         """Return the server-owned memory used by a reconnect-safe Live turn."""

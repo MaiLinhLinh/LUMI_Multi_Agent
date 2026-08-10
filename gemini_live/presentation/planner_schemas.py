@@ -57,6 +57,11 @@ class GroundedFact(BaseModel):
     entity: dict[str, Any] = Field(default_factory=dict)
     focus: str = Field(min_length=1, max_length=100)
     effect_hint: PresentationEffect = "highlight"
+    # A compact, template-level visual anchor. Domains may provide a stable
+    # anchor such as ``a`` or ``e``; the shared pipeline derives one when a
+    # visualizable fact has no explicit anchor.
+    anchor_id: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_-]{0,31}$")
+    visualizable: bool = True
     # Deterministic evidence calculated by the domain adapter. The planner may
     # see it, but never writes or changes it.
     visual_evidence: dict[str, Any] = Field(default_factory=dict)

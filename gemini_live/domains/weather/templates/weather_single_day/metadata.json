@@ -51,16 +51,18 @@
     }
   ],
   "presentation_capabilities": {
-    "overview": {"target_id": "weather.overview", "allowed_effects": ["reveal", "highlight", "pulse", "dim_others"]},
-    "day_summary": {"target_id": "weather.day.0.summary", "allowed_effects": ["highlight", "pulse", "draw_circle", "draw_arrow"]},
-    "temperature": {"target_id": "weather.day.0.temperature", "allowed_effects": ["highlight", "pulse", "draw_circle", "draw_arrow"]},
-    "rain_risk": {"target_id": "weather.day.0.rain_risk", "allowed_effects": ["highlight", "pulse", "draw_circle", "draw_arrow"]},
-    "wind": {"target_id": "weather.day.0.wind", "allowed_effects": ["highlight", "pulse", "draw_circle"]},
-    "temperature_trend": {"target_id": "weather.day.0.temperature_trend", "allowed_effects": ["reveal", "highlight", "pulse", "draw_arrow"]},
-    "hourly_summary": {"target_pattern": "weather.day.{day_index}.interval.{interval_index}.summary", "entity_fields": ["day_index", "interval_index"], "fixed_entity": {"day_index": 0}, "allowed_effects": ["highlight", "pulse", "draw_circle", "draw_arrow"]},
-    "hourly_temperature": {"target_pattern": "weather.day.{day_index}.interval.{interval_index}.temperature", "entity_fields": ["day_index", "interval_index"], "fixed_entity": {"day_index": 0}, "allowed_effects": ["highlight", "pulse", "draw_circle", "draw_arrow"]},
-    "hourly_rain_risk": {"target_pattern": "weather.day.{day_index}.interval.{interval_index}.rain_risk", "entity_fields": ["day_index", "interval_index"], "fixed_entity": {"day_index": 0}, "allowed_effects": ["highlight", "pulse", "draw_circle", "draw_arrow"]},
-    "hourly_condition": {"target_pattern": "weather.day.{day_index}.interval.{interval_index}.condition", "entity_fields": ["day_index", "interval_index"], "fixed_entity": {"day_index": 0}, "allowed_effects": ["highlight", "pulse", "draw_circle", "draw_arrow"]}
+    "overview": {"target_id": "weather.overview", "allowed_effects": ["highlight", "draw_circle"]},
+    "day_summary": {"target_id": "weather.day.0.summary", "allowed_effects": ["highlight", "draw_circle"]},
+    "temperature": {"target_id": "weather.day.0.temperature", "allowed_effects": ["highlight", "draw_circle"]},
+    "rain_risk": {"target_id": "weather.day.0.rain_risk", "allowed_effects": ["highlight", "draw_circle"]},
+    "humidity": {"target_id": "weather.day.0.humidity", "allowed_effects": ["highlight", "draw_circle"]},
+    "wind": {"target_id": "weather.day.0.wind", "allowed_effects": ["highlight", "draw_circle"]},
+    "pressure": {"target_id": "weather.day.0.pressure", "allowed_effects": ["highlight", "draw_circle"]},
+    "temperature_trend": {"target_id": "weather.day.0.temperature_trend", "allowed_effects": ["highlight", "draw_circle"]},
+    "hourly_summary": {"target_pattern": "weather.day.{day_index}.interval.{interval_index}.summary", "entity_fields": ["day_index", "interval_index"], "fixed_entity": {"day_index": 0}, "allowed_effects": ["highlight", "draw_circle"]},
+    "hourly_temperature": {"target_pattern": "weather.day.{day_index}.interval.{interval_index}.temperature", "entity_fields": ["day_index", "interval_index"], "fixed_entity": {"day_index": 0}, "allowed_effects": ["highlight", "draw_circle"]},
+    "hourly_rain_risk": {"target_pattern": "weather.day.{day_index}.interval.{interval_index}.rain_risk", "entity_fields": ["day_index", "interval_index"], "fixed_entity": {"day_index": 0}, "allowed_effects": ["highlight", "draw_circle"]},
+    "hourly_condition": {"target_pattern": "weather.day.{day_index}.interval.{interval_index}.condition", "entity_fields": ["day_index", "interval_index"], "fixed_entity": {"day_index": 0}, "allowed_effects": ["highlight", "draw_circle"]}
   },
   "data_capabilities": {
     "rain_probability": {"source_field": "rain_max_pct", "unit": "%", "focus": "rain_risk", "effect_hint": "draw_circle", "operations": ["lookup", "argmax", "argmin", "trend", "summary"]},

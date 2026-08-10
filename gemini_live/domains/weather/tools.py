@@ -12,20 +12,68 @@ from gemini_live.domains.weather.services.redis_store import RedisWeatherStore
 WEATHER_DECLARATION: dict[str, Any] = {
     "name": "get_weather",
     "description": (
-        "Read verified weather data from the Redis snapshot for Vietnamese provinces and cities. "
-        "Never invent weather values."
+        "Get verified weather data for a Vietnamese location. "
+        "Call this tool whenever answering a weather question that needs real data. "
+        "Use only the returned data in your answer. "
+        "For a multi-day outlook, you must set both date_text and days. "
+        "Examples: 'thời tiết Hà Nội một tuần tới' -> "
+        "location_text='Hà Nội', date_text='tomorrow', days=7, request_type='forecast'; "
+        "'Đà Nẵng 3 ngày tới' -> "
+        "location_text='Đà Nẵng', date_text='tomorrow', days=3, request_type='forecast'; "
+        "'Hà Nội ngày mai' -> "
+        "location_text='Hà Nội', date_text='tomorrow', days=1, request_type='forecast'."
     ),
     "parameters": {
         "type": "object",
         "additionalProperties": False,
         "properties": {
-            "location_text": {"type": "string"},
-            "date_text": {"type": "string"},
-            "time_text": {"type": "string"},
-            "days": {"type": "integer", "minimum": 1, "maximum": 8},
+            "location_text": {
+                "type": "string",
+                "description": (
+                    "Vietnamese province or city name, for example 'Hà Nội', "
+                    "'Đà Nẵng', or 'Thành phố Hồ Chí Minh'. Include it unless "
+                    "the user clearly refers to the location in recent context."
+                ),
+            },
+            "date_text": {
+                "type": "string",
+                "description": (
+                    "The start date only. Use exactly 'today', 'tomorrow', or "
+                    "an ISO date in YYYY-MM-DD format. Do not put ranges here: "
+                    "use days for a range. For example, do not use 'next 7 days'."
+                ),
+            },
+            "time_text": {
+                "type": "string",
+                "description": (
+                    "Required only for request_type='hourly'. Use exact HH:MM "
+                    "24-hour format, for example '14:00'. Normalize expressions "
+                    "such as '3 giờ chiều' to '15:00'."
+                ),
+            },
+            "days": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 8,
+                "description": (
+                    "Number of consecutive forecast days starting at date_text. "
+                    "Use 1 for one named day or tomorrow; 3 for '3 ngày tới'; "
+                    "7 for 'một tuần tới' or '7 ngày tới'. "
+                    "Always provide days for request_type forecast, rain, or temperature."
+                ),
+            },
             "request_type": {
                 "type": "string",
                 "enum": ["current", "forecast", "rain", "temperature", "hourly"],
+                "description": (
+                    "Use 'current' only for explicitly present-time requests such "
+                    "as 'bây giờ' or 'hiện tại'. Use 'forecast' for a named day, "
+                    "tomorrow, a multi-day outlook, a comparison, or questions "
+                    "such as which day or hour has the highest rain. Use 'hourly' "
+                    "only for one exact clock time. Use 'rain' or 'temperature' "
+                    "when the user explicitly focuses on that metric; still provide "
+                    "date_text and days for their forecast range."
+                ),
             },
         },
         "required": ["request_type"],

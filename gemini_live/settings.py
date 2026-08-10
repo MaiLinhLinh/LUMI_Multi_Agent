@@ -16,6 +16,9 @@ APP_ROOT = Path(__file__).resolve().parent
 class Settings:
     gemini_api_key: str
     gemini_model: str
+    planner_provider: str
+    cerebras_api_key: str
+    cerebras_planner_model: str
     gemini_live_api_key: str
     gemini_live_model: str
     gemini_live_voice: str
@@ -28,6 +31,7 @@ class Settings:
     live_turn_timeout_seconds: float
     live_idle_timeout_seconds: float
     live_reconnect_grace_seconds: float
+    presentation_animation_delay_ms: int = 300
 
 
 def load_settings() -> Settings:
@@ -43,6 +47,9 @@ def load_settings() -> Settings:
     return Settings(
         gemini_api_key=os.getenv("GEMINI_API_KEY", "").strip(),
         gemini_model=os.getenv("GEMINI_MODEL", "gemma-4-26b-a4b-it").strip(),
+        planner_provider=os.getenv("PLANNER_PROVIDER", "gemini").strip().lower() or "gemini",
+        cerebras_api_key=os.getenv("CEREBRAS_API_KEY", "").strip(),
+        cerebras_planner_model=os.getenv("CEREBRAS_PLANNER_MODEL", "gpt-oss-120b").strip(),
         gemini_live_api_key=os.getenv("GEMINI_LIVE_API_KEY", "").strip(),
         gemini_live_model=os.getenv("GEMINI_LIVE_SPEECH_MODEL", os.getenv(
             "GEMINI_LIVE_MODEL", "gemini-3.1-flash-live-preview"
@@ -57,4 +64,5 @@ def load_settings() -> Settings:
         live_turn_timeout_seconds=float(os.getenv("LIVE_TURN_TIMEOUT_SECONDS", "45")),
         live_idle_timeout_seconds=float(os.getenv("LIVE_IDLE_TIMEOUT_SECONDS", "900")),
         live_reconnect_grace_seconds=float(os.getenv("LIVE_RECONNECT_GRACE_SECONDS", "30")),
+        presentation_animation_delay_ms=max(0, integer("PRESENTATION_ANIMATION_DELAY_MS", 300)),
     )

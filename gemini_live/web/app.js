@@ -20,19 +20,35 @@ const SESSION_KEY = "lumi.gemini-live.session";
 const sessionId = localStorage.getItem(SESSION_KEY) || crypto.randomUUID();
 localStorage.setItem(SESSION_KEY, sessionId);
 
-const animationController = new AnimationController({ templateHost, viewport: weatherView, overlay, avatar });
+const animationController = new AnimationController({
+  templateHost,
+  viewport: weatherView,
+  overlay,
+  avatar,
+  onDiagnostic: reportVisualDiagnostic,
+});
 
 let socket = null;
 let socketReady = false;
 let liveState = "idle";
 let readyWaiters = [];
-let audioContext = null, sampleRate = null, nextAudioAt = 0;
+let audioContext = null, sampleRate = null, nextAudioAt = 0, pendingAudioMarker = null;
 let sources = new Set(), assistantBubble = null, inputTranscriptBubble = null;
 let microphoneStream = null, microphoneContext = null, microphoneSource = null, microphoneProcessor = null, muteGain = null;
 let recording = false, openingMicrophone = false, speechDetected = false, lastSpeechAt = 0;
 
 const SPEECH_RMS_THRESHOLD = 0.012;
 const SILENCE_END_MS = 1300;
+
+function reportVisualDiagnostic(phase, details = {}) {
+  const message = JSON.stringify(details);
+  console.info(`[GEMINI_LIVE:VISUAL_${phase}]`, details);
+  fetch("/api/client-debug", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ phase: `visual_${phase}`, message }),
+  }).catch(() => {});
+}
 
 function addMessage(role, text) {
   const node = messageTemplate.content.firstElementChild.cloneNode(true);
@@ -49,7 +65,7 @@ async function armAudio() {
 }
 function resetAudio() {
   for (const item of sources) { try { item.stop(); } catch (_) {} }
-  sources = new Set(); sampleRate = null; nextAudioAt = 0;
+  sources = new Set(); sampleRate = null; nextAudioAt = 0; pendingAudioMarker = null;
 }
 function playPcm(bytes) {
   if (!audioContext || !sampleRate || !bytes.byteLength) return;
@@ -62,6 +78,15 @@ function playPcm(bytes) {
   source.buffer = buffer; source.connect(audioContext.destination);
   const start = Math.max(audioContext.currentTime + 0.025, nextAudioAt);
   source.start(start); nextAudioAt = start + buffer.duration;
+  if (pendingAudioMarker) {
+    animationController.queue(pendingAudioMarker);
+    reportVisualDiagnostic("marker_attached_to_pcm", {
+      anchor_id: pendingAudioMarker.anchor_id,
+      effect: pendingAudioMarker.effect,
+      audio_start_at: start,
+    });
+    pendingAudioMarker = null;
+  }
   animationController.armAtAudioStart(start, audioContext);
   sources.add(source);
   source.addEventListener("ended", () => sources.delete(source), { once: true });
@@ -74,7 +99,7 @@ function renderPanel(panel) {
   const root = templateHost.shadowRoot || templateHost.attachShadow({ mode: "open" });
   root.replaceChildren();
   const style = document.createElement("style");
-  style.textContent = `[data-present-id]{transition:outline .18s,box-shadow .18s}.lumi-highlight{outline:3px solid #0ea5e9!important;outline-offset:4px;box-shadow:0 0 0 8px #0ea5e922!important}`;
+  style.textContent = `[data-present-id]{transition:outline .18s,box-shadow .18s,transform .18s}.lumi-highlight{outline:3px solid #0ea5e9!important;outline-offset:4px;box-shadow:0 0 0 8px #0ea5e922!important}.lumi-pulse{animation:lumi-pulse 720ms cubic-bezier(.2,.8,.3,1) 2}@keyframes lumi-pulse{0%,100%{transform:scale(1);filter:none}50%{transform:scale(1.035);filter:drop-shadow(0 0 8px rgba(14,165,233,.7))}}`;
   const content = document.createElement("div"); content.innerHTML = panel.html;
   root.append(style, content); animationController.clear();
 }
@@ -152,7 +177,22 @@ function handleMessage(event) {
     showInputTranscript(payload.text, Boolean(payload.final));
   }
   if (payload.type === "panel") renderPanel(payload.panel);
-  if (payload.type === "scene") animationController.queue({ target_id: payload.scene.target_id, effect: payload.scene.effect });
+  if (payload.type === "scene") animationController.queue({
+    target_id: payload.scene.target_id,
+    effect: payload.scene.effect,
+    actions: payload.scene.actions || [],
+    animation_delay_ms: Number(payload.animation_delay_ms) || 0,
+  });
+  if (payload.type === "audio_marker") {
+    pendingAudioMarker = {
+      ...payload.cue,
+      animation_delay_ms: Number(payload.animation_delay_ms) || 0,
+    };
+    reportVisualDiagnostic("marker_received", {
+      anchor_id: pendingAudioMarker.anchor_id,
+      effect: pendingAudioMarker.effect,
+    });
+  }
   if (payload.type === "audio_format") sampleRate = Number(payload.sample_rate_hz);
   if (payload.type === "text") showText(payload.text);
   if (payload.type === "live:turn_complete") {
@@ -203,7 +243,6 @@ function startCapture() {
     let energy = 0; for (const sample of samples) energy += sample * sample;
     const rms = Math.sqrt(energy / samples.length), now = performance.now();
     if (rms >= SPEECH_RMS_THRESHOLD) { speechDetected = true; lastSpeechAt = now; }
-    else if (speechDetected && now - lastSpeechAt >= SILENCE_END_MS) { endVoiceInput("silence"); return; }
     socket.send(pcm16k(samples, event.inputBuffer.sampleRate));
   });
   microphoneSource.connect(microphoneProcessor); microphoneProcessor.connect(muteGain); muteGain.connect(microphoneContext.destination);
@@ -265,17 +304,16 @@ async function beginVoiceInput() {
     voiceStatus.textContent = `Không thể mở micro: ${error.message}`; stopCapture();
   } finally { openingMicrophone = false; }
 }
-mic.addEventListener("pointerdown", event => { event.preventDefault(); mic.setPointerCapture?.(event.pointerId); beginVoiceInput(); });
-for (const eventName of ["pointerup", "pointercancel"]) {
-  mic.addEventListener(eventName, event => { event.preventDefault(); if (recording || microphoneStream) endVoiceInput("button_release"); });
-}
+mic.addEventListener("click", event => {
+  event.preventDefault();
+  if (recording || microphoneStream) endVoiceInput("button_toggle");
+  else beginVoiceInput();
+});
 mic.addEventListener("keydown", event => {
   if (event.repeat || (event.key !== "Enter" && event.key !== " ")) return;
-  event.preventDefault(); beginVoiceInput();
-});
-mic.addEventListener("keyup", event => {
-  if (event.key !== "Enter" && event.key !== " ") return;
-  event.preventDefault(); if (recording || microphoneStream) endVoiceInput("key_release");
+  event.preventDefault();
+  if (recording || microphoneStream) endVoiceInput("key_toggle");
+  else beginVoiceInput();
 });
 
 fetch("/api/client-debug", {

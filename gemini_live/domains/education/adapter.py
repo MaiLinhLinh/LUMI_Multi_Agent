@@ -8,7 +8,7 @@ from gemini_live.presentation.base import DomainPresentationAdapter
 from gemini_live.presentation.planner_schemas import GroundedFact, PresentationPlan
 
 from .lessons import ObjectGroupMathAdapter
-from .prompt import EDUCATION_PRESENTATION_SYSTEM
+from .prompt import EDUCATION_PRESENTATION_INSTRUCTION, EDUCATION_PRESENTATION_SYSTEM
 
 
 _INTERACTION_INSTRUCTIONS = {
@@ -18,8 +18,12 @@ _INTERACTION_INSTRUCTIONS = {
         "reveal the result."
     ),
     "incorrect_hint": (
-        "Give one short visual hint using only the available facts, then ask "
-        "the same question again. Do not reveal or imply the result."
+        """
+        Guide the child to re-observe the available visual facts in sequence.
+        For each fact you use, call present_visual before speaking about it.
+        Use at least two available visual facts, then repeat the same question.
+        Do not reveal or imply the result.
+        """
     ),
     "correct": (
         "Praise the verified correct answer, then show the verified result "
@@ -43,6 +47,38 @@ class EducationPresentationAdapter(DomainPresentationAdapter):
 
     def planner_guidance(self) -> str:
         return EDUCATION_PRESENTATION_SYSTEM
+
+    def live_presentation_instruction(self) -> str:
+        return EDUCATION_PRESENTATION_INSTRUCTION
+
+    def live_presentation_context(self) -> dict[str, Any]:
+        return self.planner_context()
+
+    def live_visual_stage_context(
+        self,
+        *,
+        domain_data: dict[str, Any],
+        compact_data: dict[str, Any],
+        view_model: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Expose only the stage state that this lesson phase permits."""
+
+        result = domain_data.get("result")
+        asset_label = domain_data.get("asset_label")
+        can_reveal = self._presentation_phase in {"correct", "reveal_answer"}
+        if can_reveal and isinstance(result, int) and isinstance(asset_label, str):
+            return {
+                "result_items_text": f"{result} {asset_label}",
+                "result_items_state": "đang ẩn; hiện khi gọi anchor c",
+                "result_text": str(result),
+                "answer_state": "đang ẩn; hiện khi gọi anchor e",
+            }
+        return {
+            "result_items_text": "?",
+            "result_items_state": "đang ẩn",
+            "result_text": "?",
+            "answer_state": "đang ẩn",
+        }
 
     def planner_context(self) -> dict[str, Any]:
         mode = self._presentation_phase

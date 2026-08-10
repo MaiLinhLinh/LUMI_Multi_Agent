@@ -3,7 +3,6 @@
 from .dispatcher import LiveToolDispatcher
 from .memory import SessionMemory, SessionMemoryStore
 from .orchestrator import LiveSessionOrchestrator
-from .scene_state import ActiveAnimationCapabilities, ActivePresentationScenes
 from .gemini_session import GeminiLiveSession, GeminiLiveSessionError, PersistentGeminiLiveConversation
 from .session_protocol import LiveSessionState, can_transition
 from .persistent_transport import (
@@ -13,8 +12,6 @@ from .persistent_transport import (
 )
 
 __all__ = [
-    "ActiveAnimationCapabilities",
-    "ActivePresentationScenes",
     "LiveSessionOrchestrator",
     "LiveToolDispatcher",
     "GeminiLiveSession",

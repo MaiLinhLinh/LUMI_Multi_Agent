@@ -13,13 +13,14 @@ from pydantic import ValidationError
 from gemini_live.llm.function_calling_runtime import GeminiFunctionCallingRuntime
 
 from .planner_schemas import GroundedFact, PresentationPlan, PresentationStep
+from gemini_live.trace import trace, warning
 
 
 logger = logging.getLogger("lumi.presentation")
 
 
 _PLAN_QUALITY_INSTRUCTION = """Plan quality rules:
-- Create only the number of steps needed to explain useful grounded facts; fewer steps are better than filler.
+- Create from 3 to 6 steps, choosing the exact number needed to explain useful grounded facts without filler.
 - Every step must contain one complete, non-empty Vietnamese sentence in narration.
 - Never emit an empty string, a placeholder, or a step with no clear fact to present.
 - If a fact does not need narration, omit that step rather than creating an incomplete one."""
@@ -128,18 +129,10 @@ def plan_presentation(
         separators=(",", ":"),
     )
     runtime_schema = presentation_plan_json_schema(capabilities, grounded_facts)
-    logger.info(
-        "[PRESENTATION:PLANNER_INPUT] template=%s query_chars=%s history_items=%s facts=%s fact_ids=%s capabilities=%s payload_chars=%s",
-        template_id,
-        len(query),
-        len(recent_history),
-        len(grounded_facts or []),
-        [fact.id for fact in grounded_facts or []],
-        sorted(capabilities),
-        len(user_text),
-    )
+    trace("PLANNER_INPUT_READY payload_chars=%s facts=%s", len(user_text), len(grounded_facts or []))
 
     def generate(instruction: str) -> dict[str, Any]:
+        trace("PLANNER_REQUEST_SENT provider=%s model=%s", getattr(runtime, "provider", "gemini"), getattr(runtime, "model", "unknown"))
         result = runtime.generate_structured(
             system_instruction=f"{instruction}\n\n{_PLAN_QUALITY_INSTRUCTION}",
             user_text=user_text,
@@ -152,6 +145,8 @@ def plan_presentation(
             data = dict(data)
             data["schema_version"] = "presentation_plan.v1"
             result = {**result, "data": data}
+        usage = result.get("usage") if isinstance(result, dict) else {}
+        trace("PLANNER_RESPONSE_RECEIVED input_tokens=%s output_tokens=%s", (usage or {}).get("input_tokens"), (usage or {}).get("output_tokens"))
         return result
 
     result = generate(system_instruction)
@@ -164,15 +159,11 @@ def plan_presentation(
             6,
         )
         if not errors:
-            logger.info(
-                "[PRESENTATION:PLAN_ACCEPTED] source=initial steps=%s fact_ids=%s",
-                len(plan.steps),
-                [step.fact_id for step in plan.steps],
-            )
+            trace("PLANNER_PYDANTIC_VALIDATED steps=%s", len(plan.steps))
             return {"plan": plan, "usage": result.get("usage", {}), "fallback": False}
         raise ValueError("; ".join(errors))
     except (ValidationError, ValueError) as exc:
-        logger.warning("[PRESENTATION:PLAN_REJECTED] reason=%s", exc)
+        warning("PLANNER_SCHEMA_REJECTED reason=%s", exc)
         retry_instruction = (
             system_instruction
             + "\n\nYour previous draft was rejected by the template validator: "
@@ -189,21 +180,13 @@ def plan_presentation(
                 6,
             )
             if not retry_errors:
-                logger.info(
-                    "[PRESENTATION:PLAN_ACCEPTED] source=retry steps=%s fact_ids=%s",
-                    len(retry_plan.steps),
-                    [step.fact_id for step in retry_plan.steps],
-                )
+                trace("PLANNER_PYDANTIC_VALIDATED source=retry steps=%s", len(retry_plan.steps))
                 return {"plan": retry_plan, "usage": retry.get("usage", {}), "fallback": False, "retried": True}
-            logger.warning("[PRESENTATION:PLAN_REJECTED] source=retry reason=%s", "; ".join(retry_errors))
+            warning("PLANNER_SCHEMA_REJECTED source=retry reason=%s", "; ".join(retry_errors))
         except ValidationError as retry_exc:
-            logger.warning("[PRESENTATION:PLAN_REJECTED] source=retry reason=%s", retry_exc)
+            warning("PLANNER_SCHEMA_REJECTED source=retry reason=%s", retry_exc)
         fallback = fallback_plan()
-        logger.warning(
-            "[PRESENTATION:PLAN_FALLBACK] source=deterministic fallback_fact_ids=%s error=%s",
-            [step.fact_id for step in fallback.steps],
-            retry.get("error") or result.get("error"),
-        )
+        warning("PLANNER_FALLBACK fact_ids=%s error=%s", [step.fact_id for step in fallback.steps], retry.get("error") or result.get("error"))
         return {
             "plan": fallback,
             "usage": retry.get("usage", {}) or result.get("usage", {}),

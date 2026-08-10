@@ -52,6 +52,38 @@ class DomainPresentationAdapter(ABC):
         """
         return {}
 
+    def live_presentation_instruction(self) -> str:
+        """Return optional guidance sent with this domain's verified fact pack.
+
+        This is deliberately separate from the connection-level Live guidance.
+        A domain can describe how Gemini should turn its facts into narration at
+        the moment a tool response makes a rendered presentation available.
+        Domains that do not need extra presentation guidance keep the shared
+        behavior by returning an empty string.
+        """
+
+        return ""
+
+    def live_presentation_context(self) -> dict[str, Any]:
+        """Return optional domain context that accompanies a Live fact pack."""
+
+        return {}
+
+    def live_visual_stage_context(
+        self,
+        *,
+        domain_data: dict[str, Any],
+        compact_data: dict[str, Any],
+        view_model: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Return trusted state used to render an optional template stage map.
+
+        The default is intentionally empty: templates without a visual stage
+        map continue to use the shared Live fact-pack contract unchanged.
+        """
+
+        return {}
+
     @abstractmethod
     def fallback_plan(
         self,

@@ -5,18 +5,18 @@ from __future__ import annotations
 from gemini_live.domains import LiveDomainRegistry
 from gemini_live.domains.education import EducationLiveDomain
 from gemini_live.domains.weather import WeatherLiveDomain
-from gemini_live.llm.function_calling_runtime import GeminiFunctionCallingRuntime
 from gemini_live.presentation import PresentationPipeline
 from gemini_live.settings import Settings
 
 
 def create_presentation_pipeline(settings: Settings) -> PresentationPipeline:
-    """Create the one shared Planner/render/compiler pipeline for the app."""
-    planner_runtime = GeminiFunctionCallingRuntime(
-        api_key=settings.gemini_api_key,
-        model=settings.gemini_model,
-    )
-    return PresentationPipeline(planner_runtime=planner_runtime)
+    """Create the shared render-and-fact-preparation pipeline.
+
+    ``settings`` remains an argument so the composition-root interface stays
+    stable while narration moves from the Planner to Gemini Live.
+    """
+    del settings
+    return PresentationPipeline()
 
 
 def create_domain_registry(settings: Settings) -> LiveDomainRegistry:

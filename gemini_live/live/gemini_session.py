@@ -13,19 +13,22 @@ from google.genai import types
 
 from gemini_live.domains import LiveDomainRegistry
 from gemini_live.settings import Settings
+from gemini_live.trace import begin_turn, trace, turn_id, warning
 
 from .orchestrator import LiveSessionOrchestrator
 from .persistent_transport import PersistentLiveTransport
-from .scene_state import ActivePresentationScenes
 from .session_protocol import LiveSessionState
+from .visual_presentation import PRESENT_VISUAL_TOOL
 
 
 logger = logging.getLogger("lumi.gemini_live")
 EventCallback = Callable[[dict[str, Any]], Awaitable[None]]
-AudioCallback = Callable[[bytes, int], Awaitable[None]]
+# ``marker`` is emitted immediately before its PCM packet.  The browser uses
+# that packet's AudioContext start time as the visual cue's clock.
+AudioCallback = Callable[[bytes, int, dict[str, Any] | None], Awaitable[None]]
 _RATE = re.compile(r"rate=(\d+)")
 
-_CORE_INSTRUCTION = """You are Lumi, a Vietnamese voice assistant. Use registered tools for real-world facts; never invent tool data. After a completed data tool response supplies a presentation plan, present one supplied scene at a time. For each scene, call trigger_scene with its exact scene_id before speaking its exact narration. Wait for the backend to provide the next scene. Keep clarification questions concise."""
+_CORE_INSTRUCTION = """You are Lumi, a Vietnamese voice assistant. Use registered domain tools for real-world facts and never invent tool data. After a successful domain tool response, present only its verified facts naturally in Vietnamese. If that response includes `presentation_instruction`, follow it for that presentation. Its `facts` entries describe verified data; visualizable entries provide a short `anchor_id`. If `visual_stage_map` is supplied, use it to understand the rendered screen. Its `visual_effects` entries are the only visual effects available. When a fact would benefit from a visual, call present_visual with that fact's anchor_id and an allowed effect_id immediately before discussing that fact. Never invent facts, anchors, DOM targets, effects, or visual IDs. A visual tool response only confirms the animation; continue the explanation naturally after it. Keep clarification questions concise."""
 
 
 class GeminiLiveSessionError(RuntimeError):
@@ -80,15 +83,8 @@ class GeminiLiveSession:
             types.FunctionDeclaration(
                 name=item["name"], description=item["description"], parameters_json_schema=item["parameters"]
             )
-            for item in self._registry.tool_declarations()
+            for item in [*self._registry.tool_declarations(), PRESENT_VISUAL_TOOL]
         ]
-        declarations.append(types.FunctionDeclaration(
-            name="trigger_scene",
-            description="Trigger the exact next backend presentation scene immediately before speaking it.",
-            parameters_json_schema={
-                "type": "object", "properties": {"scene_id": {"type": "string"}}, "required": ["scene_id"]
-            },
-        ))
         return types.LiveConnectConfig(
             response_modalities=["AUDIO"],
             tools=[types.Tool(function_declarations=declarations)],
@@ -126,6 +122,7 @@ class GeminiLiveSession:
         logger.info("[LIVE:PERSISTENT_CONNECTED] session=%s model=%s", session_id, self._settings.gemini_live_model)
         return PersistentGeminiLiveConversation(
             session_id=session_id,
+            settings=self._settings,
             transport=transport,
             orchestrator=self._orchestrator,
             on_event=on_event,
@@ -133,30 +130,24 @@ class GeminiLiveSession:
         )
 
 class PersistentGeminiLiveConversation:
-    """Consume one persistent transport while preserving existing tool/scene rules.
-
-    Tool dispatch and presentation sequencing remain shared concerns rather
-    than Weather/Education responsibilities.
-    """
+    """Consume one persistent transport using verified fact-driven presentation."""
 
     def __init__(
         self,
         *,
         session_id: str,
+        settings: Settings,
         transport: PersistentLiveTransport,
         orchestrator: LiveSessionOrchestrator,
         on_event: EventCallback,
         on_audio: AudioCallback,
     ) -> None:
         self._session_id = session_id
+        self._settings = settings
         self._transport = transport
         self._orchestrator = orchestrator
         self._on_event = on_event
         self._on_audio = on_audio
-        self._active_scenes: ActivePresentationScenes | None = None
-        self._scene_ids: list[str] = []
-        self._next_scene = 0
-        self._active_scene: str | None = None
         self._active_query = ""
         self._transcript: list[str] = []
         self._tool_calls = 0
@@ -164,6 +155,12 @@ class PersistentGeminiLiveConversation:
         self._audio_chunks = 0
         self._audio_bytes = 0
         self._sample_rate: int | None = None
+        self._audio_started = False
+        self._pending_visual_marker: dict[str, Any] | None = None
+
+    @property
+    def turn_id(self) -> str:
+        return turn_id()
 
     @property
     def state(self) -> LiveSessionState:
@@ -195,6 +192,7 @@ class PersistentGeminiLiveConversation:
         if self.state != LiveSessionState.LISTENING:
             raise GeminiLiveSessionError("No active microphone turn to end.")
         await self._transport.end_audio()
+        trace("GEMINI_INPUT_END_SENT")
         await self._set_state(LiveSessionState.WAITING_FOR_TOOL)
         return await self._consume_until_settled()
 
@@ -204,14 +202,17 @@ class PersistentGeminiLiveConversation:
         await self._on_event({"type": "live:state", "state": LiveSessionState.IDLE})
 
     def _begin_turn(self, user_text: str) -> None:
+        begin_turn()
         self._active_query = user_text
         self._transcript = []
         self._tool_calls = self._animation_calls = self._audio_chunks = self._audio_bytes = 0
         self._sample_rate = None
-        self._active_scenes = None
-        self._scene_ids = []
-        self._next_scene = 0
-        self._active_scene = None
+        self._audio_started = False
+        self._pending_visual_marker = None
+        if user_text == "<voice>":
+            trace("MIC_BEGIN")
+        else:
+            trace("TEXT_BEGIN chars=%s", len(user_text))
 
     async def _set_state(self, target: LiveSessionState) -> None:
         current = self.state
@@ -246,50 +247,79 @@ class PersistentGeminiLiveConversation:
         calls = getattr(getattr(message, "tool_call", None), "function_calls", None) or []
         if not calls:
             return
-        if any(str(call.name) != "trigger_scene" for call in calls):
-            await self._set_state(LiveSessionState.WAITING_FOR_TOOL)
         responses: list[types.FunctionResponse] = []
+        fact_count = 0
+        effect_count = 0
         for call in calls:
             name, call_id = str(call.name), str(call.id)
             args = dict(call.args) if isinstance(call.args, dict) else {}
             self._tool_calls += 1
-            logger.info("[LIVE:PERSISTENT_TOOL_CALL] session=%s name=%s args=%s", self._session_id, name, json.dumps(args, ensure_ascii=False))
-            if name == "trigger_scene":
-                response = await self._trigger_scene(str(args.get("scene_id") or "").strip())
-            else:
-                result = await self._orchestrator.execute_tool_call_result(
-                    session_id=self._session_id,
-                    query=self._active_query or "Yêu cầu hiện tại.",
-                    tool_name=name,
-                    arguments=args,
-                )
-                response = result.tool_response
-                presentation = result.presentation
-                panel = getattr(presentation, "panel", None)
-                scenes = getattr(presentation, "scenes", None)
-                if isinstance(panel, dict):
-                    await self._on_event({"type": "panel", "panel": panel})
-                if isinstance(scenes, ActivePresentationScenes):
-                    self._active_scenes = scenes
-                    self._scene_ids = list(scenes.scenes)
-                    self._next_scene = 0
-                    self._active_scene = None
-                    logger.info("[LIVE:PERSISTENT_PLAN_ACTIVE] session=%s scenes=%s", self._session_id, len(self._scene_ids))
+            trace("GEMINI_TOOL_CALL_RECEIVED name=%s args=%s", name, json.dumps(args, ensure_ascii=False))
+            if name == "present_visual":
+                # A visual marker is allowed while Gemini is already speaking.
+                # Do not move to WAITING_FOR_TOOL: that transition used to reject
+                # speaking -> waiting_for_tool and discarded the animation call.
+                response = await self._handle_present_visual(args)
+                responses.append(types.FunctionResponse(id=call_id, name=name, response={"result": response}))
+                await self._on_event({"type": "tool_result", "name": name, "response": response})
+                continue
+            await self._set_state(LiveSessionState.WAITING_FOR_TOOL)
+            result = await self._orchestrator.execute_tool_call_result(
+                session_id=self._session_id,
+                query=self._active_query or "Yêu cầu hiện tại.",
+                tool_name=name,
+                arguments=args,
+            )
+            response = result.tool_response
+            if isinstance(response, dict):
+                fact_count = len(response.get("facts", []))
+                effect_count = len(response.get("visual_effects", []))
+            presentation = result.presentation
+            panel = getattr(presentation, "panel", None)
+            if isinstance(panel, dict):
+                await self._on_event({"type": "panel", "panel": panel})
             responses.append(types.FunctionResponse(id=call_id, name=name, response={"result": response}))
             await self._on_event({"type": "tool_result", "name": name, "response": response})
         await self._transport.send_tool_responses(responses)
+        trace(
+            "TOOL_RESPONSE_SENT_TO_GEMINI facts=%s effects=%s",
+            fact_count,
+            effect_count,
+        )
 
-    async def _trigger_scene(self, requested: str) -> dict[str, Any]:
-        expected = self._scene_ids[self._next_scene] if self._active_scene is None and self._next_scene < len(self._scene_ids) else ""
-        scene = self._active_scenes.resolve(requested) if self._active_scenes else None
-        if scene is None or requested != expected:
-            return {"status": "rejected", "reason": "scene_not_next"}
-        self._active_scene = requested
+    async def _handle_present_visual(self, args: dict[str, Any]) -> dict[str, Any]:
+        anchor_id = args.get("anchor_id")
+        effect_id = args.get("effect_id")
+        if not isinstance(anchor_id, str) or not isinstance(effect_id, str):
+            return {"status": "rejected", "message": "anchor_id and effect_id must be strings"}
+        try:
+            cue = self._orchestrator.present_visual(
+                session_id=self._session_id,
+                anchor_id=anchor_id,
+                effect_id=effect_id,
+            )
+        except ValueError as exc:
+            warning("PRESENT_VISUAL_REJECTED reason=%s", exc)
+            return {"status": "rejected", "message": str(exc)}
         self._animation_calls += 1
-        await self._set_state(LiveSessionState.SPEAKING)
-        await self._on_event({"type": "scene", "scene": scene})
-        logger.info("[LIVE:PERSISTENT_SCENE_ACCEPTED] session=%s scene=%s", self._session_id, requested)
-        return {"status": "completed", "scene_id": requested}
+        trace(
+            "PRESENT_VISUAL_ACCEPTED anchor=%s effect=%s target=%s",
+            anchor_id,
+            effect_id,
+            cue["target_id"],
+        )
+        if self._pending_visual_marker is not None:
+            warning(
+                "VISUAL_MARKER_REPLACED previous_anchor=%s next_anchor=%s",
+                self._pending_visual_marker["cue"].get("anchor_id"),
+                anchor_id,
+            )
+        self._pending_visual_marker = {
+            "cue": cue,
+            "animation_delay_ms": self._settings.presentation_animation_delay_ms,
+        }
+        trace("VISUAL_MARKER_PENDING anchor=%s effect=%s", anchor_id, effect_id)
+        return {"status": "completed", "anchor_id": anchor_id, "effect_id": effect_id}
 
     async def _handle_model_turn(self, server: Any) -> None:
         model_turn = getattr(server, "model_turn", None) if server else None
@@ -297,9 +327,6 @@ class PersistentGeminiLiveConversation:
             inline = getattr(part, "inline_data", None)
             pcm = getattr(inline, "data", None) if inline else None
             if not pcm:
-                continue
-            if self._active_scenes is not None and self._active_scene is None:
-                logger.warning("[LIVE:PERSISTENT_AUDIO_DROPPED_NO_SCENE] session=%s bytes=%s", self._session_id, len(pcm))
                 continue
             if self.state == LiveSessionState.WAITING_FOR_TOOL:
                 await self._set_state(LiveSessionState.SPEAKING)
@@ -309,41 +336,41 @@ class PersistentGeminiLiveConversation:
                 await self._on_event({"type": "audio_format", "sample_rate_hz": rate})
             self._audio_chunks += 1
             self._audio_bytes += len(pcm)
-            await self._on_audio(pcm, rate)
+            if not self._audio_started:
+                self._audio_started = True
+                trace("GEMINI_AUDIO_FIRST_PCM")
+            marker = self._pending_visual_marker
+            self._pending_visual_marker = None
+            if marker is not None:
+                cue = marker["cue"]
+                trace(
+                    "VISUAL_MARKER_ATTACHED_TO_PCM anchor=%s effect=%s chunk=%s",
+                    cue.get("anchor_id"),
+                    cue.get("effect"),
+                    self._audio_chunks,
+                )
+            await self._on_audio(pcm, rate, marker)
 
         output = getattr(server, "output_transcription", None) if server else None
         if output and getattr(output, "text", None):
-            # Keep transcript visible for diagnosis even when pre-scene PCM is
-            # intentionally muted.  This exposes unwanted Gemini generation
-            # and its token cost without letting it disrupt narrated scenes.
             text = str(output.text)
             self._transcript.append(text)
             await self._on_event({
                 "type": "text",
                 "text": text,
-                "presentation_approved": self._active_scenes is None or self._active_scene is not None,
+                "presentation_approved": True,
             })
 
     async def _handle_turn_complete(self) -> bool:
-        if self._active_scene:
-            logger.info("[LIVE:PERSISTENT_SCENE_COMPLETE] session=%s scene=%s", self._session_id, self._active_scene)
-            self._next_scene += 1
-            self._active_scene = None
-        if self._active_scenes is not None and self._next_scene < len(self._scene_ids):
-            scene = self._active_scenes.resolve(self._scene_ids[self._next_scene])
-            if scene is None:
-                raise GeminiLiveSessionError("Compiled presentation scene is unavailable.")
-            await self._transport.send_text(json.dumps({
-                "BACKEND_PRESENTATION_SCENE": {
-                    "scene_id": scene["scene_id"],
-                    "narration": scene.get("spoken_text") or scene["narration"],
-                }
-            }, ensure_ascii=False))
-            return False
-        self._active_scenes = None
-        self._scene_ids = []
-        self._next_scene = 0
-        self._active_scene = None
+        if self._pending_visual_marker is not None:
+            warning(
+                "VISUAL_MARKER_UNATTACHED anchor=%s",
+                self._pending_visual_marker["cue"].get("anchor_id"),
+            )
+            self._pending_visual_marker = None
+        if self._tool_calls == 0:
+            warning("GEMINI_TURN_COMPLETE_WITHOUT_TOOL")
+        trace("GEMINI_TURN_COMPLETE")
         await self._set_state(LiveSessionState.LISTENING)
         return True
 
@@ -362,5 +389,5 @@ class PersistentGeminiLiveConversation:
             "audio_sample_rate_hz": self._sample_rate,
             "transcript": final_text,
         }
-        logger.info("[LIVE:PERSISTENT_TURN_DONE] session=%s tools=%s scenes=%s", self._session_id, self._tool_calls, self._animation_calls)
+        trace("PRESENTATION_COMPLETE visual_calls=%s", self._animation_calls)
         return summary

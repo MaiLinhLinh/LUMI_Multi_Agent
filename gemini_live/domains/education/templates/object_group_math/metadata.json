@@ -5,6 +5,7 @@
   "name": "Object Group Arithmetic",
   "description": "A reusable visual template for addition and subtraction within ten.",
   "template_file": "template.html",
+  "visual_stage_map_file": "visual_stage_map.txt",
   "schema_versions": ["education.math.v1"],
   "required_fields": ["left_count", "right_count", "operator", "result", "asset_id", "asset_label"],
   "tags": ["education", "math", "objects", "counting", "within-ten"],

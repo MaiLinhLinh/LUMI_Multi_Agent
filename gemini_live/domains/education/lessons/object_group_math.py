@@ -35,47 +35,47 @@ class ObjectGroupMathAdapter:
             return []
 
         facts = [
-            self._fact(
-                "exercise_overview", "arithmetic_exercise", "summary",
-                {"left_operand": left, "operator": operator, "right_operand": right, "result": result, "asset_label": asset_label},
-                "overview", "reveal", presentation_capabilities,
-            ),
+            # self._fact(
+            #     "exercise_overview", "arithmetic_exercise", "summary",
+            #     {"left_operand": left, "operator": operator, "right_operand": right, "result": result, "asset_label": asset_label},
+            #     "overview", "reveal", presentation_capabilities, visualizable=False,
+            # ),
             self._fact(
                 "left_group", "object_count", "lookup",
                 {"count": left, "asset_label": asset_label},
-                "group_a", "draw_circle", presentation_capabilities,
+                "group_a", "draw_circle", presentation_capabilities, anchor_id="a",
             ),
             self._fact(
                 "operator", "arithmetic_operation", "lookup",
                 {"operator": operator},
-                "operator", "highlight", presentation_capabilities,
+                "operator", "highlight", presentation_capabilities, visualizable=False,
             ),
             self._fact(
                 "right_group", "object_count", "lookup",
                 {"count": right, "asset_label": asset_label},
-                "group_b", "draw_circle", presentation_capabilities,
+                "group_b", "draw_circle", presentation_capabilities, anchor_id="b",
             ),
             self._fact(
                 "expression", "arithmetic_expression", "summary",
                 {"left_operand": left, "operator": operator, "right_operand": right, "result": result},
-                "expression", "highlight", presentation_capabilities,
+                "expression", "highlight", presentation_capabilities, anchor_id="d",
             ),
             self._fact(
                 "result_items", "object_count", "lookup",
                 {"count": result, "asset_label": asset_label},
-                "result_items", "reveal_items", presentation_capabilities,
+                "result_items", "reveal_items", presentation_capabilities, anchor_id="c",
             ),
             self._fact(
                 "answer", "arithmetic_result", "lookup",
                 {"result": result, "asset_label": asset_label},
-                "answer", "reveal", presentation_capabilities,
+                "answer", "reveal", presentation_capabilities, anchor_id="e",
             ),
         ]
         allowed_fact_ids = {
-            "opening": {"exercise_overview", "left_group", "operator", "right_group", "expression"},
+            "opening": {"left_group", "operator", "right_group", "expression"},
             "incorrect_hint": {"left_group", "right_group", "expression"},
             "correct": {"result_items", "answer"},
-            "reveal_answer": {"result_items", "answer"},
+            "reveal_answer": {"result_items", "answer"}
         }.get(presentation_phase, set())
         return [fact for fact in facts if fact is not None and fact.id in allowed_fact_ids]
 
@@ -167,6 +167,9 @@ class ObjectGroupMathAdapter:
         focus: str,
         effect_hint: str,
         capabilities: dict[str, Any],
+        *,
+        anchor_id: str | None = None,
+        visualizable: bool = True,
     ) -> GroundedFact | None:
         capability = capabilities.get(focus)
         if not isinstance(capability, dict):
@@ -184,6 +187,8 @@ class ObjectGroupMathAdapter:
             value=value,
             focus=focus,
             effect_hint=effect_hint,  # type: ignore[arg-type]
+            anchor_id=anchor_id,
+            visualizable=visualizable,
             visual_evidence={"kind": "static_target", "target_id": target},
         )
 

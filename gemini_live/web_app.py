@@ -31,6 +31,7 @@ from gemini_live.live import (
     PersistentLiveTransportStore,
 )
 from gemini_live.settings import load_settings
+from gemini_live.trace import TRACE_LEVEL, trace
 
 
 BASE = Path(__file__).resolve().parent
@@ -42,14 +43,14 @@ _cleanup_tasks: dict[str, asyncio.Task[None]] = {}
 
 
 def configure_logging() -> None:
-    for name in ("lumi.gemini_live", "lumi.gemini_live.web"):
+    for name in ("lumi.trace", "lumi.gemini_live", "lumi.gemini_live.web", "lumi.presentation"):
         current = logging.getLogger(name)
-        current.setLevel(logging.INFO)
+        current.setLevel(TRACE_LEVEL if name == "lumi.trace" else logging.INFO)
         current.propagate = False
         if not current.handlers:
             handler = logging.StreamHandler()
             handler.setFormatter(logging.Formatter(
-                "%(asctime)s | %(levelname)-7s | %(name)s | %(message)s", datefmt="%H:%M:%S"
+                "%(asctime)s.%(msecs)03d | %(levelname)-7s | %(message)s", datefmt="%H:%M:%S"
             ))
             current.addHandler(handler)
 
@@ -165,9 +166,11 @@ async def live_socket(websocket: WebSocket) -> None:
                 async with send_lock:
                     await websocket.send_json(payload)
 
-            async def audio(pcm: bytes, _: int) -> None:
+            async def audio(pcm: bytes, _: int, marker: dict[str, Any] | None = None) -> None:
                 touch()
                 async with send_lock:
+                    if marker is not None:
+                        await websocket.send_json({"type": "audio_marker", **marker})
                     await websocket.send_bytes(pcm)
 
             async def reconnect(reason: str) -> None:
@@ -243,8 +246,11 @@ async def live_socket(websocket: WebSocket) -> None:
                     chunks += 1
                     size += len(chunk)
                     await conversation.send_audio(chunk)
+                    if chunks == 1:
+                        trace("PCM_SENT first_chunk bytes=%s", len(chunk))
+                    elif chunks % 25 == 0:
+                        trace("PCM_SENT chunks=%s total_bytes=%s", chunks, size)
                     if chunks == 1 or chunks % 25 == 0:
-                        logger.info("[WEB:PERSISTENT_MIC_RECEIVED] session=%s chunks=%s bytes=%s", session_id, chunks, size)
                         await event({"type": "live:server_audio_received", "chunks": chunks, "bytes": size})
                     continue
 
@@ -277,6 +283,7 @@ async def live_socket(websocket: WebSocket) -> None:
                     if turn_task is not None and not turn_task.done():
                         await event({"type": "live:error", "message": "Không có lượt microphone đang chờ."})
                     else:
+                        trace("MIC_END chunks=%s total_bytes=%s", chunks, size)
                         await event({"type": "live:server_audio_closed", "chunks": chunks, "bytes": size})
                         turn_task = asyncio.create_task(finish_turn(conversation.end_audio()), name=f"live-audio:{session_id}")
                 elif command_type == "live:close":

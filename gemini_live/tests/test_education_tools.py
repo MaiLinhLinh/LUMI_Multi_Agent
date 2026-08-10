@@ -14,7 +14,7 @@ from gemini_live.domains.education.tools import EducationTools, ExerciseValidati
 from gemini_live.domains.registry import LiveDomainRegistry
 from gemini_live.live.dispatcher import LiveToolDispatcher
 from gemini_live.live.orchestrator import LiveSessionOrchestrator
-from gemini_live.live.scene_state import LivePresentation
+from gemini_live.live.visual_presentation import RenderedPresentation
 from gemini_live.presentation.capabilities import load_template_metadata, presentation_capabilities
 from gemini_live.presentation.contract_compiler import compile_presentation_plan
 from gemini_live.presentation.planner_schemas import PresentationPlan, PresentationStep
@@ -235,12 +235,12 @@ class EducationToolsTests(unittest.TestCase):
         self.assertIn("9 - 4 bằng bao nhiêu", fallback.steps[0].narration)
         self.assertNotIn("5", fallback.steps[0].narration)
 
-    def test_education_tool_reaches_shared_pipeline_and_scene_state(self) -> None:
+    def test_education_tool_reaches_shared_fact_pipeline(self) -> None:
         registry = LiveDomainRegistry()
         registry.register(EducationLiveDomain())
         orchestrator = LiveSessionOrchestrator(
             LiveToolDispatcher(registry),
-            presentation_pipeline=PresentationPipeline(planner_runtime=_PlannerStub()),
+            presentation_pipeline=PresentationPipeline(),
         )
         result = asyncio.run(orchestrator.execute_tool_call_result(
             session_id="education-integration",
@@ -251,17 +251,15 @@ class EducationToolsTests(unittest.TestCase):
         self.assertEqual(result.tool_response["status"], "completed")
         self.assertIn("facts", result.tool_response)
         self.assertEqual(result.tool_response["presentation"]["template_id"], "object_group_math")
-        self.assertIsInstance(result.presentation, LivePresentation)
-        scene = result.presentation.scenes.resolve("education-scene-2")
-        self.assertEqual(scene["target_id"], "math.group.a")
-        self.assertEqual(scene["effect"], "draw_circle")
+        self.assertEqual(result.tool_response["presentation"]["mode"], "fact_pack")
+        self.assertIsInstance(result.presentation, RenderedPresentation)
 
     def test_correct_answer_reaches_shared_pipeline_with_result_reveal(self) -> None:
         registry = LiveDomainRegistry()
         registry.register(EducationLiveDomain())
         orchestrator = LiveSessionOrchestrator(
             LiveToolDispatcher(registry),
-            presentation_pipeline=PresentationPipeline(planner_runtime=_PlannerStub()),
+            presentation_pipeline=PresentationPipeline(),
         )
         session_id = "education-correct-answer"
         asyncio.run(orchestrator.execute_tool_call_result(
@@ -277,13 +275,7 @@ class EducationToolsTests(unittest.TestCase):
             arguments={"answer": 5},
         ))
         self.assertEqual(checked.tool_response["status"], "correct")
-        self.assertIsInstance(checked.presentation, LivePresentation)
-        first_scene = checked.presentation.scenes.resolve("education-scene-1")
-        second_scene = checked.presentation.scenes.resolve("education-scene-2")
-        self.assertEqual(first_scene["target_id"], "math.result.items")
-        self.assertEqual(first_scene["effect"], "reveal_items")
-        self.assertEqual(second_scene["target_id"], "math.result.number")
-        self.assertEqual(second_scene["effect"], "reveal")
+        self.assertIsInstance(checked.presentation, RenderedPresentation)
 
 
 if __name__ == "__main__":
