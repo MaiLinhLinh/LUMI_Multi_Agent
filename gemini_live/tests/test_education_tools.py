@@ -87,7 +87,7 @@ class EducationToolsTests(unittest.TestCase):
         self.tools = EducationTools(choice_source=_FixedChoice())
 
     def test_addition_is_computed_by_code(self) -> None:
-        exercise = self.tools.create_math_exercise(
+        exercise = self.tools.create_arithmetic_exercise(
             {"operation": "+", "left_operand": 3, "right_operand": 2}
         )
         self.assertEqual(exercise.result, 5)
@@ -95,40 +95,64 @@ class EducationToolsTests(unittest.TestCase):
         self.assertEqual(exercise.to_view_data()["left_count"], 3)
 
     def test_subtraction_is_computed_by_code(self) -> None:
-        exercise = self.tools.create_math_exercise(
+        exercise = self.tools.create_arithmetic_exercise(
             {"operation": "-", "left_operand": 8, "right_operand": 3}
         )
         self.assertEqual(exercise.result, 5)
 
+    def test_multiplication_is_computed_by_code(self) -> None:
+        exercise = self.tools.create_arithmetic_exercise(
+            {"operation": "*", "left_operand": 3, "right_operand": 4}
+        )
+        self.assertEqual(exercise.result, 12)
+
+    def test_exact_division_is_computed_by_code(self) -> None:
+        exercise = self.tools.create_arithmetic_exercise(
+            {"operation": "/", "left_operand": 12, "right_operand": 3}
+        )
+        self.assertEqual(exercise.result, 4)
+
+    def test_rejects_division_by_zero(self) -> None:
+        with self.assertRaises(ExerciseValidationError):
+            self.tools.create_arithmetic_exercise(
+                {"operation": "/", "left_operand": 12, "right_operand": 0}
+            )
+
+    def test_rejects_non_exact_division(self) -> None:
+        with self.assertRaises(ExerciseValidationError):
+            self.tools.create_arithmetic_exercise(
+                {"operation": "/", "left_operand": 10, "right_operand": 3}
+            )
+
     def test_supports_a_larger_number_range(self) -> None:
-        exercise = self.tools.create_math_exercise(
+        exercise = self.tools.create_arithmetic_exercise(
             {"operation": "+", "left_operand": 58, "right_operand": 42}
         )
         self.assertEqual(exercise.result, 100)
 
     def test_rejects_negative_operand(self) -> None:
         with self.assertRaises(ExerciseValidationError):
-            self.tools.create_math_exercise(
+            self.tools.create_arithmetic_exercise(
                 {"operation": "+", "left_operand": -1, "right_operand": 2}
             )
 
     def test_rejects_negative_subtraction(self) -> None:
         with self.assertRaises(ExerciseValidationError):
-            self.tools.create_math_exercise(
+            self.tools.create_arithmetic_exercise(
                 {"operation": "-", "left_operand": 2, "right_operand": 7}
             )
 
     def test_live_domain_exposes_the_tool_and_verified_result(self) -> None:
         domain = EducationLiveDomain()
-        self.assertEqual(domain.tool_declarations[0]["name"], "create_math_exercise")
+        self.assertEqual(domain.tool_declarations[0]["name"], "create_arithmetic_exercise")
         self.assertEqual(domain.tool_declarations[1]["name"], "check_child_answer")
         result = asyncio.run(domain.execute_tool(
-            "create_math_exercise",
+            "create_arithmetic_exercise",
             {"operation": "+", "left_operand": 7, "right_operand": 3},
             request=DomainRequest(query="Dạy bé cộng"),
             context={},
         ))
-        self.assertEqual(result.tool_response["exercise"]["result"], 10)
+        self.assertEqual(result.status, "completed")
         self.assertEqual(result.context["last_exercise"]["left_count"], 7)
         state = EducationContextResolver.lesson_state(result.context)
         self.assertIsNotNone(state)
@@ -141,7 +165,7 @@ class EducationToolsTests(unittest.TestCase):
     def test_check_child_answer_is_code_verified_and_reveals_after_two_mistakes(self) -> None:
         domain = EducationLiveDomain()
         created = asyncio.run(domain.execute_tool(
-            "create_math_exercise",
+            "create_arithmetic_exercise",
             {"operation": "-", "left_operand": 9, "right_operand": 4},
             request=DomainRequest(query="Dạy bé phép trừ"),
             context={},
@@ -152,9 +176,7 @@ class EducationToolsTests(unittest.TestCase):
             request=DomainRequest(query="Bằng hai"),
             context=created.context,
         ))
-        self.assertEqual(first_wrong.tool_response["status"], "incorrect_hint")
-        self.assertEqual(first_wrong.tool_response["attempt_count"], 1)
-        self.assertNotIn("correct_answer", first_wrong.tool_response)
+        self.assertEqual(first_wrong.status, "incorrect_hint")
 
         reveal = asyncio.run(domain.execute_tool(
             "check_child_answer",
@@ -162,15 +184,13 @@ class EducationToolsTests(unittest.TestCase):
             request=DomainRequest(query="Con đoán hai"),
             context=first_wrong.context,
         ))
-        self.assertEqual(reveal.tool_response["status"], "reveal_answer")
-        self.assertEqual(reveal.tool_response["correct_answer"], 5)
-        self.assertEqual(reveal.tool_response["phase"], "completed")
+        self.assertEqual(reveal.status, "reveal_answer")
         self.assertIsNotNone(reveal.presentation)
 
     def test_check_child_answer_accepts_the_verified_answer(self) -> None:
         domain = EducationLiveDomain()
         created = asyncio.run(domain.execute_tool(
-            "create_math_exercise",
+            "create_arithmetic_exercise",
             {"operation": "+", "left_operand": 3, "right_operand": 2},
             request=DomainRequest(query="Dạy bé phép cộng"),
             context={},
@@ -181,8 +201,7 @@ class EducationToolsTests(unittest.TestCase):
             request=DomainRequest(query="Bằng năm"),
             context=created.context,
         ))
-        self.assertEqual(checked.tool_response["status"], "correct")
-        self.assertEqual(checked.tool_response["correct_answer"], 5)
+        self.assertEqual(checked.status, "correct")
         self.assertIsNotNone(checked.presentation)
 
     def test_object_group_facts_compile_only_to_template_targets(self) -> None:
@@ -202,7 +221,7 @@ class EducationToolsTests(unittest.TestCase):
         )
         self.assertEqual(
             [fact.id for fact in facts],
-            ["exercise_overview", "left_group", "operator", "right_group", "expression"],
+            ["left_group", "operator", "right_group", "expression"],
         )
         compiled = compile_presentation_plan(
             PresentationPlan(steps=[PresentationStep(
@@ -245,13 +264,13 @@ class EducationToolsTests(unittest.TestCase):
         result = asyncio.run(orchestrator.execute_tool_call_result(
             session_id="education-integration",
             query="Dạy bé phép cộng",
-            tool_name="create_math_exercise",
+            tool_name="create_arithmetic_exercise",
             arguments={"operation": "+", "left_operand": 3, "right_operand": 2},
         ))
-        self.assertEqual(result.tool_response["status"], "completed")
-        self.assertIn("facts", result.tool_response)
-        self.assertEqual(result.tool_response["presentation"]["template_id"], "object_group_math")
-        self.assertEqual(result.tool_response["presentation"]["mode"], "fact_pack")
+        self.assertEqual(result.response["status"], "completed")
+        self.assertIn("facts", result.response)
+        self.assertEqual(result.response["presentation"]["template_id"], "object_group_math")
+        self.assertEqual(result.response["presentation"]["mode"], "fact_pack")
         self.assertIsInstance(result.presentation, RenderedPresentation)
 
     def test_correct_answer_reaches_shared_pipeline_with_result_reveal(self) -> None:
@@ -265,7 +284,7 @@ class EducationToolsTests(unittest.TestCase):
         asyncio.run(orchestrator.execute_tool_call_result(
             session_id=session_id,
             query="Dạy bé phép trừ",
-            tool_name="create_math_exercise",
+            tool_name="create_arithmetic_exercise",
             arguments={"operation": "-", "left_operand": 9, "right_operand": 4},
         ))
         checked = asyncio.run(orchestrator.execute_tool_call_result(
@@ -274,7 +293,7 @@ class EducationToolsTests(unittest.TestCase):
             tool_name="check_child_answer",
             arguments={"answer": 5},
         ))
-        self.assertEqual(checked.tool_response["status"], "correct")
+        self.assertEqual(checked.response["status"], "correct")
         self.assertIsInstance(checked.presentation, RenderedPresentation)
 
 

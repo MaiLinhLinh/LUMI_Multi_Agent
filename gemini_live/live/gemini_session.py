@@ -270,7 +270,7 @@ class PersistentGeminiLiveConversation:
                 tool_name=name,
                 arguments=args,
             )
-            response = result.tool_response
+            response = result.response
             if isinstance(response, dict):
                 fact_count = len(response.get("facts", []))
                 effect_count = len(response.get("visual_effects", []))

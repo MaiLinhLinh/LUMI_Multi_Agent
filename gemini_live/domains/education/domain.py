@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from gemini_live.domains.base import DomainRequest, DomainToolResult, LiveDomain
+from gemini_live.domains.base import DomainRequest, DomainResult, LiveDomain
 from gemini_live.presentation import PresentationRequest
 
 from .adapter import EducationPresentationAdapter
@@ -12,7 +12,7 @@ from .context import EducationContextResolver
 from .prompt import EDUCATION_LIVE_GUIDANCE
 from .tools import (
     CHECK_CHILD_ANSWER_DECLARATION,
-    CREATE_MATH_EXERCISE_DECLARATION,
+    CREATE_ARITHMETIC_EXERCISE_DECLARATION,
     EducationTools,
     ExerciseValidationError,
 )
@@ -37,7 +37,7 @@ class EducationLiveDomain(LiveDomain):
 
     @property
     def tool_declarations(self) -> tuple[dict[str, Any], ...]:
-        return (CREATE_MATH_EXERCISE_DECLARATION, CHECK_CHILD_ANSWER_DECLARATION)
+        return (CREATE_ARITHMETIC_EXERCISE_DECLARATION, CHECK_CHILD_ANSWER_DECLARATION)
 
     @property
     def prompt_guidance(self) -> str:
@@ -50,36 +50,31 @@ class EducationLiveDomain(LiveDomain):
         *,
         request: DomainRequest,
         context: dict[str, Any],
-    ) -> DomainToolResult:
+    ) -> DomainResult:
         if tool_name == "check_child_answer":
-            return self._check_child_answer(arguments, context)
-        if tool_name != "create_math_exercise":
+            return self._execute_check_child_answer(arguments, context)
+        if tool_name != "create_arithmetic_exercise":
             raise ValueError(f"Education does not own tool {tool_name!r}.")
+        return self._execute_create_arithmetic_exercise(arguments, context)
+
+    def _execute_create_arithmetic_exercise(
+        self,
+        arguments: dict[str, Any],
+        context: dict[str, Any],
+    ) -> DomainResult:
         try:
-            exercise = self._tools.create_math_exercise(arguments)
+            exercise = self._tools.create_arithmetic_exercise(arguments)
         except ExerciseValidationError as exc:
-            return DomainToolResult(
-                tool_response={
-                    "status": "invalid_arguments",
-                    "message": str(exc),
-                },
+            return DomainResult(
+                status="invalid_arguments",
                 context=dict(context),
+                detail=str(exc),
             )
 
         view_model = object_group_math_view_model(exercise)
         compact_data = {"template_id": "object_group_math", **view_model}
-        return DomainToolResult(
-            tool_response={
-                "status": "completed",
-                "domain_id": self.domain_id,
-                "exercise": {
-                    "operation": exercise.operation,
-                    "left_operand": exercise.left_operand,
-                    "right_operand": exercise.right_operand,
-                    "result": exercise.result,
-                    "asset_label": exercise.asset_label,
-                },
-            },
+        return DomainResult(
+            status="completed",
             context=self._context.start_exercise(exercise, view_model),
             presentation=PresentationRequest(
                 domain_id=self.domain_id,
@@ -91,37 +86,27 @@ class EducationLiveDomain(LiveDomain):
             ),
         )
 
-    def _check_child_answer(
+    def _execute_check_child_answer(
         self,
         arguments: dict[str, Any],
         context: dict[str, Any],
-    ) -> DomainToolResult:
+    ) -> DomainResult:
         state = self._context.lesson_state(context)
         if state is None:
-            return DomainToolResult(
-                tool_response={
-                    "status": "no_pending_exercise",
-                    "message": "There is no active math exercise to check.",
-                },
+            return DomainResult(
+                status="no_pending_exercise",
                 context=dict(context),
+                detail="There is no active math exercise to check.",
             )
         try:
             checked = self._tools.check_child_answer(arguments, state)
         except ExerciseValidationError as exc:
-            return DomainToolResult(
-                tool_response={"status": "invalid_arguments", "message": str(exc)},
+            return DomainResult(
+                status="invalid_arguments",
                 context=dict(context),
+                detail=str(exc),
             )
 
-        response: dict[str, Any] = {
-            "status": checked.status,
-            "attempt_count": checked.state.attempt_count,
-            "phase": checked.state.phase,
-        }
-        if checked.status in {"correct", "reveal_answer"}:
-            response["correct_answer"] = checked.state.correct_answer
-            response["asset_label"] = checked.state.asset_label
-            response["remaining_count"] = checked.state.correct_answer
         presentation = None
         if checked.status in {"incorrect_hint", "correct", "reveal_answer"}:
             view_model = object_group_math_view_model(checked.state.to_exercise())
@@ -133,8 +118,8 @@ class EducationLiveDomain(LiveDomain):
                 domain_data=view_model,
                 compact_data={"template_id": "object_group_math", **view_model},
             )
-        return DomainToolResult(
-            tool_response=response,
+        return DomainResult(
+            status=checked.status,
             context=self._context.save_lesson_state(context, checked.state),
             presentation=presentation,
         )

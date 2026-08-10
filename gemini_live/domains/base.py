@@ -20,17 +20,18 @@ class DomainRequest:
 
 
 @dataclass
-class DomainToolResult:
-    """A safe result returned by a domain after one Live tool call.
+class DomainResult:
+    """Server-owned result returned by a domain after one Live tool call.
 
-    `tool_response` goes back to Gemini Live.  `context` is saved by the
-    server for a later user turn.  Presentation data stays server-side and is
-    intentionally typed as an opaque value at this shared boundary.
+    Domains report only their verified outcome and state.  The shared
+    orchestrator is the single place that turns this result into the final
+    JSON function response sent to Gemini Live.
     """
 
-    tool_response: dict[str, Any]
+    status: str
     context: dict[str, Any] = field(default_factory=dict)
     presentation: Any | None = None
+    detail: str | None = None
 
 
 class LiveDomain(ABC):
@@ -59,5 +60,5 @@ class LiveDomain(ABC):
         *,
         request: DomainRequest,
         context: dict[str, Any],
-    ) -> DomainToolResult:
+    ) -> DomainResult:
         """Validate and execute one tool call owned by this domain."""

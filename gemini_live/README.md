@@ -9,13 +9,13 @@ LiveSessionOrchestrator
   -> LiveDomainRegistry
        -> WeatherLiveDomain
        -> MusicLiveDomain (future)
-  -> Presentation Compiler / frontend events
+  -> PresentationPipeline / verified Fact Pack / frontend events
 ```
 
 Each domain owns its tool declarations, compact context resolution, factual
 adapter, template capabilities, and domain prompt guidance.  The shared Live
 core only owns the Gemini Live session, tool dispatch, bounded session memory,
-and safe delivery of approved presentation scenes.
+the final Gemini function response, and safe delivery of verified visual cues.
 
 ## Migration checkpoints
 

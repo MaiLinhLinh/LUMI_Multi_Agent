@@ -1,4 +1,4 @@
-"""Trusted exercise construction for the Education domain.
+"""Trusted arithmetic-exercise construction for the Education domain.
 
 Gemini may suggest operands to make lessons varied. This module is the
 authority for validation and arithmetic; a lesson/template policy decides
@@ -15,17 +15,20 @@ from .models import MathExercise
 from .context import LessonState
 
 
-CREATE_MATH_EXERCISE_DECLARATION: dict[str, Any] = {
-    "name": "create_math_exercise",
-        "description": (
-            "Create one addition or subtraction exercise for a child. "
-            "For subtraction, choose the left operand at least as large as the right operand."
+CREATE_ARITHMETIC_EXERCISE_DECLARATION: dict[str, Any] = {
+    "name": "create_arithmetic_exercise",
+    "description": (
+        "Create one arithmetic exercise for a child from proposed integer operands. "
+        "Supported operations are addition (+), subtraction (-), multiplication (*), "
+        "and exact division (/). For subtraction, left_operand must be at least "
+        "right_operand. For division, right_operand must be non-zero and left_operand "
+        "must be exactly divisible by right_operand."
     ),
     "parameters": {
         "type": "object",
         "additionalProperties": False,
         "properties": {
-            "operation": {"type": "string", "enum": ["+", "-"]},
+            "operation": {"type": "string", "enum": ["+", "-", "*", "/"]},
             "left_operand": {"type": "integer", "minimum": 0},
             "right_operand": {"type": "integer", "minimum": 0},
         },
@@ -74,19 +77,27 @@ class EducationTools:
     def __init__(self, *, choice_source: ChoiceSource | None = None) -> None:
         self._choice_source = choice_source or random.SystemRandom()
 
-    def create_math_exercise(self, arguments: dict[str, Any]) -> MathExercise:
+    def create_arithmetic_exercise(self, arguments: dict[str, Any]) -> MathExercise:
         operation = str(arguments.get("operation", "")).strip()
         left = self._operand(arguments.get("left_operand"), "left_operand")
         right = self._operand(arguments.get("right_operand"), "right_operand")
-        if operation not in {"+", "-"}:
-            raise ExerciseValidationError("operation must be '+' or '-'.")
+        if operation not in {"+", "-", "*", "/"}:
+            raise ExerciseValidationError("operation must be '+', '-', '*', or '/'.")
 
         if operation == "+":
             result = left + right
-        else:
+        elif operation == "-":
             if left < right:
                 raise ExerciseValidationError("subtraction cannot produce a negative result.")
             result = left - right
+        elif operation == "*":
+            result = left * right
+        else:
+            if right == 0:
+                raise ExerciseValidationError("division cannot use zero as the right operand.")
+            if left % right != 0:
+                raise ExerciseValidationError("division must produce an integer result.")
+            result = left // right
 
         asset_id, asset_label = self._choice_source.choice(ASSETS)
         return MathExercise(

@@ -4,6 +4,12 @@ Scope: refactor only the shared Live session layer. Weather, Education and
 future domains retain ownership of their tools, business context, view model,
 adapter and prompt guidance.
 
+> Historical checkpoint record. The current runtime no longer uses Planner,
+> Compiler, approved scenes, or `trigger_scene`. After a domain returns a
+> `DomainResult`, the shared Pipeline produces a Fact Pack; Gemini Live calls
+> `present_visual(anchor_id, effect_id)` and the server attaches the verified
+> cue to the next PCM packet.
+
 ## CP-01 — Shared state machine and event contract
 
 - [x] Define shared technical states: `idle`, `listening`,

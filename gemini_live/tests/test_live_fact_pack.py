@@ -31,7 +31,7 @@ class LiveFactPackTests(unittest.TestCase):
         self.assertIn("present_visual", adapter.live_presentation_instruction())
         context = adapter.live_presentation_context()
         self.assertEqual(context["interaction_mode"], "incorrect_hint")
-        self.assertIn("hint", context["interaction_instruction"])
+        self.assertIn("re-observe", context["interaction_instruction"])
 
     def test_facts_expose_short_anchors_but_dom_targets_stay_server_only(self) -> None:
         template_id = "object_group_math"
@@ -77,11 +77,11 @@ class LiveFactPackTests(unittest.TestCase):
         result = asyncio.run(orchestrator.execute_tool_call_result(
             session_id="fact-pack-presentation",
             query="Cho tôi phép cộng.",
-            tool_name="create_math_exercise",
+            tool_name="create_arithmetic_exercise",
             arguments={"operation": "+", "left_operand": 3, "right_operand": 2},
         ))
-        self.assertIn("visual_stage_map", result.tool_response)
-        self.assertIn("[anchor: a]", result.tool_response["visual_stage_map"])
+        self.assertIn("visual_stage_map", result.response)
+        self.assertIn("[anchor: a]", result.response["visual_stage_map"])
         cue = orchestrator.present_visual(
             session_id="fact-pack-presentation", anchor_id="a", effect_id="highlight"
         )

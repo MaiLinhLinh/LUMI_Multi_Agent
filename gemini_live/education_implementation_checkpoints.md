@@ -2,6 +2,10 @@
 
 Phạm vi đợt này: chỉ thêm mới `domains/education/` và đăng ký domain sau khi các checkpoint domain đã sẵn sàng. Không sửa class, pipeline, renderer, compiler hoặc frontend dùng chung nếu chưa được phê duyệt riêng.
 
+> Historical checkpoint record. Runtime hiện tại không còn dùng Planner,
+> Compiler, scene contract hay `trigger_scene`; Education tạo Fact Pack,
+> visual stage map và dùng `present_visual(anchor_id, effect_id)` của Gemini Live.
+
 ## CP-EDU-01 — Template Object Group và metadata
 
 - [x] Tạo ba SVG asset thử nghiệm: flower, ball, rocket.
@@ -10,12 +14,12 @@ Phạm vi đợt này: chỉ thêm mới `domains/education/` và đăng ký dom
 - [x] Bảo đảm mỗi semantic target chính có một phần tử DOM xác định.
 - [x] Render kiểm tra trong môi trường `LumiMultiAgent`.
 
-Checkpoint tiếp theo: **CP-EDU-02 — model dữ liệu và tool `create_math_exercise`**, chỉ nằm trong `domains/education/`. Tool nhận đề nghị bài toán từ Gemini, còn code kiểm tra tính hợp lệ và tự tính kết quả chính xác. Phạm vi số là chính sách của bài học/template, không phải giới hạn chung của tool.
+Checkpoint tiếp theo: **CP-EDU-02 — model dữ liệu và tool `create_arithmetic_exercise`**, chỉ nằm trong `domains/education/`. Tool nhận đề nghị bài toán từ Gemini, còn code kiểm tra tính hợp lệ và tự tính kết quả chính xác. Phạm vi số là chính sách của bài học/template, không phải giới hạn chung của tool.
 
 ## CP-EDU-02 — Math exercise data & tool
 
 - [x] Tạo model bài toán được validate; không khoá phạm vi số vào tool chung.
-- [x] Tạo tool `create_math_exercise`.
+- [x] Tạo tool `create_arithmetic_exercise`.
 - [x] Code chọn asset ngẫu nhiên trong danh sách được phép.
 - [x] Viết test cộng/trừ hợp lệ và từ chối dữ liệu sai.
 
@@ -31,7 +35,7 @@ Checkpoint tiếp theo: **CP-EDU-02 — model dữ liệu và tool `create_math_
 
 ## CP-EDU-05 — Gemini Live end-to-end
 
-- [x] Tool `create_math_exercise` đi qua registry, shared Pipeline và scene state trong integration test.
+- [x] Tool `create_arithmetic_exercise` đi qua registry, shared Pipeline và scene state trong integration test.
 - [x] Render panel, nhận presentation contract trong integration test.
 - [x] Frontend hiện có nhận panel/scene theo contract tổng quát; cần kiểm thử Gemini Live thật trên trình duyệt trước khi coi là nghiệm thu trải nghiệm.
 

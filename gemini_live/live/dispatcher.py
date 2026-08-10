@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from gemini_live.domains import DomainRequest, DomainToolResult, LiveDomainRegistry
+from gemini_live.domains import DomainRequest, DomainResult, LiveDomainRegistry
 
 
 class UnknownLiveToolError(ValueError):
@@ -22,7 +22,7 @@ class LiveToolDispatcher:
         arguments: dict[str, Any],
         request: DomainRequest,
         domain_contexts: dict[str, dict[str, Any]],
-    ) -> DomainToolResult:
+    ) -> DomainResult:
         domain = self._registry.domain_for_tool(tool_name)
         if domain is None:
             raise UnknownLiveToolError(f"No registered domain owns tool {tool_name!r}.")

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class MathExercise:
-    """One addition or subtraction exercise whose answer is computed by code."""
+    """One arithmetic exercise whose answer is computed by code."""
 
     operation: str
     left_operand: int
@@ -27,4 +27,3 @@ class MathExercise:
             "operator": self.operation,
             "result": self.result,
         }
-

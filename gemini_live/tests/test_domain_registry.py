@@ -5,7 +5,7 @@ from __future__ import annotations
 import unittest
 from typing import Any
 
-from gemini_live.domains.base import DomainRequest, DomainToolResult, LiveDomain
+from gemini_live.domains.base import DomainRequest, DomainResult, LiveDomain
 from gemini_live.domains.registry import LiveDomainRegistry
 
 
@@ -28,8 +28,8 @@ class _DemoDomain(LiveDomain):
 
     async def execute_tool(
         self, tool_name: str, arguments: dict[str, Any], *, request: DomainRequest, context: dict[str, Any]
-    ) -> DomainToolResult:
-        return DomainToolResult(tool_response={"tool": tool_name})
+    ) -> DomainResult:
+        return DomainResult(status="completed")
 
 
 class LiveDomainRegistryTests(unittest.TestCase):

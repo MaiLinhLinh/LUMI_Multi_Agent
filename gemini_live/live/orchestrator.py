@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from gemini_live.domains import DomainRequest
@@ -12,6 +13,14 @@ from .memory import SessionMemoryStore
 from .visual_presentation import FactPresentationState, RenderedPresentation
 from .session_protocol import LiveSessionState, can_transition
 from gemini_live.trace import trace, warning
+
+
+@dataclass
+class OrchestratedToolResult:
+    """Final result of one tool call after shared presentation processing."""
+
+    response: dict[str, Any]
+    presentation: RenderedPresentation | None = None
 
 
 class LiveSessionOrchestrator:
@@ -64,7 +73,7 @@ class LiveSessionOrchestrator:
             tool_name=tool_name,
             arguments=arguments,
         )
-        return result.tool_response
+        return result.response
 
     async def execute_tool_call_result(
         self,
@@ -73,8 +82,8 @@ class LiveSessionOrchestrator:
         query: str,
         tool_name: str,
         arguments: dict[str, Any],
-    ) -> Any:
-        """Execute a domain tool and retain its server-only presentation result."""
+    ) -> OrchestratedToolResult:
+        """Execute a domain tool and build its sole Gemini function response."""
         memory = self._memory_store.get(session_id)
         domain = self._dispatcher._registry.domain_for_tool(tool_name)
         trace("TOOL_DISPATCH_START domain=%s tool=%s", getattr(domain, "domain_id", "unknown"), tool_name)
@@ -85,13 +94,18 @@ class LiveSessionOrchestrator:
             request=request,
             domain_contexts=memory.domain_contexts,
         )
-        response = result.tool_response if isinstance(result.tool_response, dict) else {}
         trace(
             "TOOL_DISPATCH_DONE status=%s correct=%s attempts=%s",
-            response.get("status", "completed"),
-            response.get("status") == "correct",
-            response.get("attempt_count", 0),
+            result.status,
+            result.status == "correct",
+            0,
         )
+        response: dict[str, Any] = {
+            "status": result.status,
+            "domain_id": domain.domain_id,
+        }
+        if result.detail:
+            response["detail"] = result.detail
         presentation_request = result.presentation
         if isinstance(presentation_request, PresentationRequest):
             try:
@@ -101,14 +115,13 @@ class LiveSessionOrchestrator:
                 )
             except Exception as exc:
                 warning("PRESENTATION_PIPELINE_FAILED reason=%s", exc)
-                return type(result)(
-                    tool_response={
+                return OrchestratedToolResult(
+                    response={
                         "status": "error",
-                        "message": f"Presentation could not be prepared: {exc}",
+                        "domain_id": domain.domain_id,
+                        "detail": f"Presentation could not be prepared: {exc}",
                     },
-                    context=result.context,
                 )
-            response = dict(result.tool_response)
             live_fact_pack = self._presentation_pipeline.build_live_fact_pack(
                 presentation_request,
                 prepared,
@@ -138,15 +151,18 @@ class LiveSessionOrchestrator:
                 presentation_request.domain_id,
                 len(presentation_instruction),
             )
-            result.tool_response = response
-            result.presentation = RenderedPresentation(
+            rendered_presentation = RenderedPresentation(
                 panel={
                     "ui_type": presentation_request.domain_id,
                     "template_id": presentation_request.template_id,
                     "html": prepared.panel.html,
                 },
             )
-        return result
+            return OrchestratedToolResult(
+                response=response,
+                presentation=rendered_presentation,
+            )
+        return OrchestratedToolResult(response=response)
 
     def present_visual(
         self,
