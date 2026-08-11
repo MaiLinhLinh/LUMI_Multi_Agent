@@ -65,6 +65,8 @@ class LiveFactPackTests(unittest.TestCase):
         self.assertFalse(any("target_id" in item for item in pack.facts_for_live))
         self.assertTrue(any(item["visualizable"] for item in pack.facts_for_live))
         self.assertIn("a", pack.anchor_target_map)
+        self.assertIn("e", pack.panel_anchor_map)
+        self.assertEqual(pack.panel_anchor_map["e"]["target_id"], "math.result.number")
         self.assertTrue(prepared.visual_stage_map.startswith("VISUAL STAGE MAP"))
         self.assertTrue(any(effect["id"] == "circle" for effect in pack.supported_effects))
 

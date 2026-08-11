@@ -134,6 +134,7 @@ class RepeatedGroupsArithmeticTests(unittest.TestCase):
         )
         self.assertEqual(pack.anchor_target_map["d"]["target_id"], "math.repeated.expression")
         self.assertNotIn("e", pack.anchor_target_map)
+        self.assertEqual(pack.panel_anchor_map["e"]["target_id"], "math.repeated.answer")
 
 
 if __name__ == "__main__":

@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from gemini_live.presentation.base import DomainPresentationAdapter
-from gemini_live.presentation.planner_schemas import GroundedFact, PresentationPlan
+from gemini_live.presentation.planner_schemas import GroundedFact
 
 from .lessons import ObjectGroupMathAdapter, RepeatedGroupsArithmeticAdapter
-from .prompt import EDUCATION_PRESENTATION_INSTRUCTION, EDUCATION_PRESENTATION_SYSTEM
+from .prompt import EDUCATION_PRESENTATION_INSTRUCTION
 
 
 _INTERACTION_INSTRUCTIONS = {
@@ -36,9 +35,6 @@ _INTERACTION_INSTRUCTIONS = {
     ),
 }
 
-_DYNAMIC_TARGET_ID = re.compile(r"^math\.[a-z][a-z0-9._-]*$")
-
-
 class EducationPresentationAdapter(DomainPresentationAdapter):
     def __init__(self, *, presentation_phase: str = "opening") -> None:
         self._lessons = {
@@ -51,14 +47,11 @@ class EducationPresentationAdapter(DomainPresentationAdapter):
     def domain_id(self) -> str:
         return "education"
 
-    def planner_guidance(self) -> str:
-        return EDUCATION_PRESENTATION_SYSTEM
-
     def live_presentation_instruction(self) -> str:
         return EDUCATION_PRESENTATION_INSTRUCTION
 
     def live_presentation_context(self) -> dict[str, Any]:
-        return self.planner_context()
+        return self._interaction_context()
 
     def live_visual_stage_context(
         self,
@@ -93,7 +86,7 @@ class EducationPresentationAdapter(DomainPresentationAdapter):
             "answer_state": "đang ẩn",
         }
 
-    def planner_context(self) -> dict[str, Any]:
+    def _interaction_context(self) -> dict[str, Any]:
         mode = self._presentation_phase
         return {
             "interaction_mode": mode,
@@ -119,52 +112,8 @@ class EducationPresentationAdapter(DomainPresentationAdapter):
             presentation_phase=self._presentation_phase,
         )
 
-    def fallback_plan(
-        self,
-        domain_data: dict[str, Any],
-        capabilities: dict[str, Any],
-        grounded_facts: list[GroundedFact],
-    ) -> PresentationPlan:
-        lesson = self._lesson_from_template(capabilities, domain_data)
-        if lesson is None:
-            raise ValueError("education template has no registered lesson adapter")
-        return lesson.fallback_plan(
-            capabilities,
-            grounded_facts,
-            presentation_phase=self._presentation_phase,
-        )
-
-    def resolve_target(
-        self,
-        capability: dict[str, Any] | None,
-        entity: dict[str, Any],
-        compact_data: dict[str, Any],
-    ) -> str | None:
-        target = ObjectGroupMathAdapter.resolve_target(capability)
-        if target is not None:
-            return target
-        if not isinstance(capability, dict):
-            return None
-        pattern = capability.get("target_pattern")
-        group_index = entity.get("group_index") if isinstance(entity, dict) else None
-        if not isinstance(pattern, str) or not isinstance(group_index, int) or group_index < 1:
-            return None
-        target = pattern.replace("{index}", str(group_index))
-        if "{" in target or "}" in target:
-            return None
-        return target if _DYNAMIC_TARGET_ID.fullmatch(target) else None
-
     def _lesson(
         self, compact_data: dict[str, Any]
     ) -> ObjectGroupMathAdapter | RepeatedGroupsArithmeticAdapter | None:
         template_id = compact_data.get("template_id") if isinstance(compact_data, dict) else None
         return self._lessons.get(template_id) if isinstance(template_id, str) else None
-
-    def _lesson_from_template(
-        self, capabilities: dict[str, Any], domain_data: dict[str, Any]
-    ) -> ObjectGroupMathAdapter | RepeatedGroupsArithmeticAdapter | None:
-        if "group" in capabilities:
-            return self._lessons[RepeatedGroupsArithmeticAdapter.template_id]
-        if "overview" in capabilities:
-            return self._lessons[ObjectGroupMathAdapter.template_id]
-        return None

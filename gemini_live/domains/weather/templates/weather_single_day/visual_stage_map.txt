@@ -1,0 +1,66 @@
+{% macro value(number, suffix='') -%}
+  {%- if number is number -%}{{ number }}{{ suffix }}{%- else -%}&mdash;{%- endif -%}
+{%- endmacro %}
+
+{% macro probability(number) -%}
+  {%- if number is number -%}
+    {%- if number <= 1 -%}{{ (number * 100) | round | int }}%{%- else -%}{{ number | round | int }}%{%- endif -%}
+  {%- else -%}&mdash;{%- endif -%}
+{%- endmacro %}
+
+{% set days = data.forecast.days | default([], true) %}
+{% set day = days[0] if days else {} %}
+{% set intervals = day.intervals | default([], true) %}
+{% set day_condition = day.condition if day.condition else (intervals[0].condition if intervals else {}) %}
+
+VISUAL STAGE MAP — DỰ BÁO TRONG NGÀY
+
+Địa điểm: {{ data.location.name }} · {{ day.date | default('—', true) }}{% if data.location.country %} · {{ data.location.country }}{% endif %}
+
+┌────────────────────────────── THẺ TỔNG QUAN TRONG NGÀY [anchor: a] ──────────────────────────────┐
+│                                                                                                      │
+│  [Biểu tượng]     {{ value(day.temperature.max_celsius, '°') }} [anchor: c]    {{ day_condition.description | default('—', true) | capitalize }} │
+│                  Cảm giác như {{ value(day.temperature_feels_like_celsius, '°') }}                  │
+│                                                                                                      │
+│                                      Ngày/Đêm: {{ value(day.temperature.max_celsius, '°') }}/{{ value(day.temperature.min_celsius, '°') }} [anchor: b] │
+│                                      Lượng mưa: {{ value(day.total_rain_mm, ' mm') }}                │
+│                                      Xác suất mưa: {{ probability(day.max_rain_probability) }} [anchor: d] │
+│                                                                                                      │
+├──────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│  Thấp/Cao: {{ value(day.temperature.min_celsius, '°') }}/{{ value(day.temperature.max_celsius, '°') }} │
+│  Độ ẩm: {{ value(day.humidity_percent, '%') }} [anchor: g]                                           │
+│  Gió: {{ value(day.wind_speed_mps, ' m/s') }} [anchor: h]                                            │
+│  Áp suất: {{ value(day.pressure_hpa, ' hPa') }} [anchor: i]                                          │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+DỰ BÁO THEO GIỜ
+
+{% for interval in intervals %}
+{% set raw_time = interval.time | default(interval.forecast_at_local, true) | default(interval.timestamp, true) %}
+┌──────── Giờ {% if raw_time is string and (raw_time | length) >= 16 %}{{ raw_time[11:16] }}{% else %}{{ raw_time }}{% endif %} [anchor: l{{ loop.index }}] ────────┐
+│  {{ interval.condition.description | default('—', true) | capitalize }}                              │
+│  Nhiệt độ: {{ value(interval.temperature_celsius, '°') }} [anchor: n{{ loop.index }}]                │
+│  Xác suất mưa: {{ probability(interval.rain_probability) }} [anchor: m{{ loop.index }}]              │
+└────────────────────────────────────────────────────────────────┘
+{% else %}
+Không có dữ liệu dự báo theo giờ.
+{% endfor %}
+
+BIỂU ĐỒ NHIỆT ĐỘ THEO GIỜ [anchor: j]
+{{ value(day.temperature.min_celsius, '°') }} ─── ● ─── ● ─── ● ─── ● ─── {{ value(day.temperature.max_celsius, '°') }}
+                       Dữ liệu nhiệt độ của các giờ phía trên
+
+Nguồn: {{ data.source.provider | default('—', true) }}{% if data.forecast.source_granularity %} · {{ data.forecast.source_granularity }}{% endif %}
+
+ANCHOR LEGEND
+a = toàn bộ thẻ tổng quan ngày
+b = chỉ số Ngày/Đêm
+c = nhiệt độ cao nhất hiển thị lớn
+d = xác suất mưa của ngày
+g = độ ẩm
+h = gió
+i = áp suất
+j = biểu đồ xu hướng nhiệt độ theo giờ
+l1…lN = thẻ giờ tương ứng, gồm biểu tượng/trạng thái thời tiết
+n1…nN = nhiệt độ của giờ tương ứng
+m1…mN = xác suất mưa của giờ tương ứng

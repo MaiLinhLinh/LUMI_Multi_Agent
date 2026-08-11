@@ -12,13 +12,11 @@
   "display_scope": "single_exercise",
   "fillable": true,
   "presentation_capabilities": {
-    "overview": {"target_id": "math.exercise.overview", "allowed_effects": ["reveal", "highlight", "pulse"]},
-    "group_a": {"target_id": "math.group.a", "allowed_effects": ["highlight", "pulse", "draw_circle", "draw_arrow"]},
-    "operator": {"target_id": "math.operator", "allowed_effects": ["highlight", "pulse", "draw_circle"]},
-    "group_b": {"target_id": "math.group.b", "allowed_effects": ["highlight", "pulse", "draw_circle", "draw_arrow"]},
-    "group_result": {"target_id": "math.group.result", "allowed_effects": ["highlight", "pulse", "draw_circle", "draw_arrow", "reveal"]},
-    "result_items": {"target_id": "math.result.items", "allowed_effects": ["reveal_items", "highlight", "pulse", "draw_circle"]},
-    "expression": {"target_id": "math.expression", "allowed_effects": ["highlight", "pulse", "draw_circle"]},
-    "answer": {"target_id": "math.result.number", "allowed_effects": ["highlight", "pulse", "draw_circle", "reveal"]}
+    "overview": {"target_id": "math.exercise.overview", "anchor_id": "o", "allowed_effects": ["reveal", "highlight", "pulse"]},
+    "group_a": {"target_id": "math.group.a", "anchor_id": "a", "allowed_effects": ["highlight", "pulse", "draw_circle", "draw_arrow"]},
+    "group_b": {"target_id": "math.group.b", "anchor_id": "b", "allowed_effects": ["highlight", "pulse", "draw_circle", "draw_arrow"]},
+    "result_items": {"target_id": "math.result.items", "anchor_id": "c", "allowed_effects": ["reveal_items", "highlight", "pulse", "draw_circle"]},
+    "expression": {"target_id": "math.expression", "anchor_id": "d", "allowed_effects": ["highlight", "pulse", "draw_circle"]},
+    "answer": {"target_id": "math.result.number", "anchor_id": "e", "allowed_effects": ["highlight", "pulse", "draw_circle", "reveal"]}
   }
 }

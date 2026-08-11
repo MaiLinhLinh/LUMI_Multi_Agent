@@ -34,7 +34,7 @@ let liveState = "idle";
 let readyWaiters = [];
 let presentationFitObserver = null;
 let audioContext = null, sampleRate = null, nextAudioAt = 0, pendingAudioMarker = null;
-let sources = new Set(), assistantBubble = null, inputTranscriptBubble = null;
+let sources = new Set(), inputTranscriptBubble = null, traceBubble = null;
 let microphoneStream = null, microphoneContext = null, microphoneSource = null, microphoneProcessor = null, muteGain = null;
 let recording = false, openingMicrophone = false, speechDetected = false, lastSpeechAt = 0;
 
@@ -129,9 +129,25 @@ function renderPanel(panel) {
   animationController.clear();
 }
 function showText(text) {
-  if (!text) return;
-  if (!assistantBubble) assistantBubble = addMessage("assistant", "");
-  assistantBubble.textContent += text; messages.scrollTop = messages.scrollHeight;
+  // The trace bubble is the single visible assistant output for this mode.
+  // It receives the same transcript in grouped `text:` entries.
+}
+function addTraceBubble() {
+  const node = messageTemplate.content.firstElementChild.cloneNode(true);
+  node.classList.add("debug-trace");
+  node.querySelector(".avatar").remove();
+  const bubble = node.querySelector(".bubble");
+  messages.append(node); messages.scrollTop = messages.scrollHeight;
+  return bubble;
+}
+function showLiveTrace(payload) {
+  const timestamp = String(payload.timestamp || "").trim();
+  const eventType = String(payload.event || "").trim();
+  const content = String(payload.content || "").trim();
+  if (!timestamp || !eventType || !content) return;
+  if (!traceBubble) traceBubble = addTraceBubble();
+  traceBubble.textContent += `${timestamp} | ${eventType}: ${content}\n`;
+  messages.scrollTop = messages.scrollHeight;
 }
 function showInputTranscript(text, final = false) {
   if (!text) return;
@@ -219,6 +235,7 @@ function handleMessage(event) {
     });
   }
   if (payload.type === "audio_format") sampleRate = Number(payload.sample_rate_hz);
+  if (payload.type === "live:debug_trace") showLiveTrace(payload);
   if (payload.type === "text") showText(payload.text);
   if (payload.type === "live:turn_complete") {
     avatar.dataset.avatarState = "idle";
@@ -295,7 +312,7 @@ form.addEventListener("submit", async event => {
   try {
     await ensureSocket();
     if (!canStartUserTurn()) { voiceStatus.textContent = "Lumi đang xử lý lượt trước."; return; }
-    await armAudio(); resetAudio(); animationController.clear(); assistantBubble = null; inputTranscriptBubble = null;
+    await armAudio(); resetAudio(); animationController.clear(); inputTranscriptBubble = null; traceBubble = null;
     addMessage("user", query); queryInput.value = ""; voiceStatus.textContent = "Đang xử lý…";
     socket.send(JSON.stringify({ type: "live:text", query }));
   } catch (error) { voiceStatus.textContent = `Không thể kết nối: ${error.message}`; }
@@ -315,7 +332,7 @@ async function beginVoiceInput() {
       return;
     }
     openingMicrophone = true;
-    await armAudio(); resetAudio(); animationController.clear(); assistantBubble = null; inputTranscriptBubble = null;
+    await armAudio(); resetAudio(); animationController.clear(); inputTranscriptBubble = null; traceBubble = null;
     microphoneStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
     recording = true; speechDetected = false; lastSpeechAt = performance.now();
     mic.classList.add("listening"); mic.setAttribute("aria-pressed", "true");

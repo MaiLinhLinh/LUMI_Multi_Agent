@@ -1,0 +1,44 @@
+VISUAL STAGE MAP — DỰ BÁO THỜI TIẾT NHIỀU NGÀY
+
+📍 {{ data.location.name }}
+Dự báo {{ data.forecast.days | length }} ngày{% if data.location.country %} · {{ data.location.country }}{% endif %}
+
+┌──────────────────────────── KHỐI TỔNG QUAN NGÀY ĐẦU ────────────────────────────┐
+│ [anchor: a — toàn bộ khối tổng quan]                                               │
+│ [Biểu tượng thời tiết]  [anchor: b — {{ data.forecast.days[0].temperature.max_celsius | default('—') }}°C]  {{ data.forecast.days[0].condition.description | default('—') }}
+│                                      Ngày bắt đầu: {{ data.forecast.days[0].date | default('—') }}
+│
+│ [anchor: c — Khả năng có mưa: {{ data.forecast.days[0].max_rain_probability | default('—') }}%]   Độ ẩm: {{ data.forecast.days[0].humidity_percent | default('—') }}%
+│ [anchor: d — Gió: {{ data.forecast.days[0].wind_speed_mps | default('—') }} m/s]              Áp suất: {{ data.forecast.days[0].pressure_hpa | default('—') }} hPa
+└────────────────────────────────────────────────────────────────────────────────────┘
+
+NHIỆT ĐỘ
+
+┌────────────────── BIỂU ĐỒ NHIỆT ĐỘ CAO NHẤT THEO NGÀY ──────────────────┐
+│ [anchor: e — toàn bộ biểu đồ và đường xu hướng nhiệt độ]                 │
+│                                                                            │
+│ {% for day in data.forecast.days %}[anchor: f{{ loop.index }} — {{ day.date }}: {{ day.temperature.max_celsius | default('—') }}°C]{% if not loop.last %} ── {% endif %}{% endfor %}
+│ {% for day in data.forecast.days %}              ●{% if not loop.last %}                 {% endif %}{% endfor %}
+└────────────────────────────────────────────────────────────────────────────┘
+
+[anchor: g — toàn bộ hàng thẻ dự báo theo ngày, từ trái sang phải]
+{% for day in data.forecast.days %}┌────────────────────── Ngày {{ loop.index }} ──────────────────────┐ {% endfor %}
+{% for day in data.forecast.days %}│ [anchor: h{{ loop.index }} — thẻ ngày {{ day.date }}]{% if not loop.last %} │ {% endif %}{% endfor %}
+{% for day in data.forecast.days %}│ {% if loop.first %}Ngày đầu · {% endif %}{{ day.date | default('—') }}{% if not loop.last %} │ {% endif %}{% endfor %}
+{% for day in data.forecast.days %}│ {{ day.condition.description | default('—') }}{% if not loop.last %} │ {% endif %}{% endfor %}
+{% for day in data.forecast.days %}│ {{ day.temperature.max_celsius | default('—') }}° / {{ day.temperature.min_celsius | default('—') }}°{% if not loop.last %} │ {% endif %}{% endfor %}
+{% for day in data.forecast.days %}│ [anchor: i{{ loop.index }} — {{ day.max_rain_probability | default('—') }}% mưa]{% if not loop.last %} │ {% endif %}{% endfor %}
+{% for day in data.forecast.days %}└───────────────────────────────────────────────────┘{% if not loop.last %} {% endif %}{% endfor %}
+
+Nguồn: {{ data.source.provider | default('—') }}{% if data.forecast.source_granularity %} · {{ data.forecast.source_granularity }}{% endif %}
+
+ANCHOR LEGEND
+a = toàn bộ khối tổng quan ngày đầu
+b = nhiệt độ ngày đầu
+c = xác suất mưa ngày đầu trong khối tổng quan
+d = gió ngày đầu
+e = biểu đồ xu hướng nhiệt độ
+f1…fN = từng điểm nhiệt độ trên biểu đồ, theo thứ tự ngày
+g = toàn bộ hàng thẻ dự báo
+h1…hN = từng thẻ ngày, theo thứ tự từ trái sang phải
+i1…iN = xác suất mưa trong từng thẻ ngày

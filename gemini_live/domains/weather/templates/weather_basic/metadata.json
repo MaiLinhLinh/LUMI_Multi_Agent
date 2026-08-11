@@ -68,14 +68,14 @@
     }
   ],
   "presentation_capabilities": {
-    "overview": {"target_id": "weather.overview", "allowed_effects": ["highlight", "draw_circle"]},
-    "temperature": {"target_id": "weather.current.temperature", "allowed_effects": ["highlight", "draw_circle"]},
-    "wind": {"target_id": "weather.current.wind", "allowed_effects": ["highlight", "draw_circle"]},
-    "humidity": {"target_id": "weather.current.humidity", "allowed_effects": ["highlight", "draw_circle"]},
-    "forecast": {"target_id": "weather.forecast", "allowed_effects": ["highlight", "draw_circle"]}
+    "overview": {"target_id": "weather.overview", "anchor_id": "a", "allowed_effects": ["highlight", "draw_circle"]},
+    "temperature": {"target_id": "weather.current.temperature", "anchor_id": "b", "allowed_effects": ["highlight", "draw_circle"]},
+    "wind": {"target_id": "weather.current.wind", "anchor_id": "c", "allowed_effects": ["highlight", "draw_circle"]},
+    "humidity": {"target_id": "weather.current.humidity", "anchor_id": "d", "allowed_effects": ["highlight", "draw_circle"]},
+    "forecast": {"target_id": "weather.forecast", "anchor_id": "e", "allowed_effects": ["highlight", "draw_circle"]}
   },
   "data_capabilities": {
-    "temperature_max": {"source_field": "max_c", "unit": "°C", "focus": "temperature", "effect_hint": "draw_circle", "operations": ["lookup", "argmax", "argmin", "trend", "summary"]}
+    "temperature_max": {"source_field": "max_c", "unit": "°C", "focus": "temperature", "operations": ["lookup", "argmax", "argmin", "trend", "summary"]}
   },
   "extension_points": [
     {

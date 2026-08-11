@@ -45,6 +45,7 @@ class LiveFactPack:
 
     facts_for_live: list[dict[str, Any]]
     anchor_target_map: dict[str, dict[str, Any]]
+    panel_anchor_map: dict[str, dict[str, Any]]
     supported_effects: list[dict[str, str]]
     effect_id_map: dict[str, str]
 
@@ -130,10 +131,20 @@ class PresentationPipeline:
         resolves them to actual ``data-present-id`` values.
         """
 
+        panel_anchor_map = _build_panel_anchor_map(prepared)
+        panel_effect_ids = {
+            effect_id
+            for evidence in panel_anchor_map.values()
+            for effect_id in evidence["allowed_effect_ids"]
+        }
+        effect_id_map = {
+            effect_id: effect
+            for effect, effect_id in _EFFECT_IDS.items()
+            if effect_id in panel_effect_ids
+        }
+
         facts_for_live: list[dict[str, Any]] = []
         anchor_target_map: dict[str, dict[str, Any]] = {}
-        effect_ids: set[str] = set()
-        effect_names: set[str] = set()
         for index, fact in enumerate(prepared.grounded_facts, start=1):
             alias = f"f{index}"
             item: dict[str, Any] = {
@@ -145,17 +156,14 @@ class PresentationPipeline:
                 "entity": fact.entity,
                 "visualizable": False,
             }
-            target_id = request.adapter.resolve_target(
-                prepared.declared_capabilities.get(fact.focus),
-                fact.entity,
-                request.compact_data,
-            )
-            allowed_effects = prepared.concrete_animation_capabilities.get(target_id or "", [])
-            if fact.visualizable and target_id and allowed_effects:
-                anchor_id = fact.anchor_id or f"a{index}"
+            capability = prepared.declared_capabilities.get(fact.focus)
+            target_id = _resolve_capability_target(capability, fact.entity)
+            anchor_id = _resolve_capability_anchor(capability, fact.entity)
+            evidence = panel_anchor_map.get(anchor_id or "")
+            if fact.visualizable and target_id and evidence and evidence.get("target_id") == target_id:
                 item["visualizable"] = True
                 item["anchor_id"] = anchor_id
-                effect_aliases = [_effect_id(effect) for effect in allowed_effects]
+                effect_aliases = evidence["allowed_effect_ids"]
                 existing = anchor_target_map.get(anchor_id)
                 if existing is not None and existing.get("target_id") != target_id:
                     raise ValueError(f"anchor_id resolves to multiple targets: {anchor_id}")
@@ -168,17 +176,16 @@ class PresentationPipeline:
                     existing["allowed_effect_ids"] = sorted(
                         set(existing.get("allowed_effect_ids", [])) | set(effect_aliases)
                     )
-                effect_ids.update(effect_aliases)
-                effect_names.update(allowed_effects)
             facts_for_live.append(item)
         return LiveFactPack(
             facts_for_live=facts_for_live,
             anchor_target_map=anchor_target_map,
+            panel_anchor_map=panel_anchor_map,
             supported_effects=[
                 {"id": effect_id, "description": _EFFECT_DESCRIPTIONS[effect_id]}
-                for effect_id in sorted(effect_ids)
+                for effect_id in sorted(panel_effect_ids)
             ],
-            effect_id_map={_effect_id(effect): effect for effect in effect_names},
+            effect_id_map=effect_id_map,
         )
 
 
@@ -205,6 +212,149 @@ def concrete_animation_capabilities(
         if effects:
             allowed[target_id] = sorted(effects)
     return allowed
+
+
+def _build_panel_anchor_map(prepared: PreparedPresentation) -> dict[str, dict[str, Any]]:
+    """Resolve every metadata-declared anchor that exists in the rendered panel."""
+
+    anchor_target_map: dict[str, dict[str, Any]] = {}
+    for capability in prepared.declared_capabilities.values():
+        if not isinstance(capability, dict):
+            continue
+        for target_id in prepared.concrete_animation_capabilities:
+            entity = _entity_for_capability_target(capability, target_id)
+            if entity is None:
+                continue
+            anchor_id = _resolve_capability_anchor(capability, entity)
+            if anchor_id is None:
+                raise ValueError("visual capability must declare anchor_id or anchor_id_pattern")
+            effect_aliases = [
+                _effect_id(effect)
+                for effect in prepared.concrete_animation_capabilities[target_id]
+            ]
+            existing = anchor_target_map.get(anchor_id)
+            if existing is not None and existing.get("target_id") != target_id:
+                raise ValueError(f"anchor_id resolves to multiple targets: {anchor_id}")
+            if existing is None:
+                anchor_target_map[anchor_id] = {
+                    "target_id": target_id,
+                    "allowed_effect_ids": effect_aliases,
+                }
+            else:
+                existing["allowed_effect_ids"] = sorted(
+                    set(existing["allowed_effect_ids"]) | set(effect_aliases)
+                )
+    return anchor_target_map
+
+
+def _entity_for_capability_target(
+    capability: dict[str, Any],
+    target_id: str,
+) -> dict[str, Any] | None:
+    """Recover pattern values from a rendered target so its public anchor can resolve."""
+
+    fixed_entity = capability.get("fixed_entity", {})
+    if not isinstance(fixed_entity, dict):
+        return None
+    declared_target = capability.get("target_id")
+    if isinstance(declared_target, str) and declared_target:
+        return dict(fixed_entity) if declared_target == target_id else None
+
+    pattern = capability.get("target_pattern")
+    if not isinstance(pattern, str) or not pattern:
+        return None
+    entity = dict(fixed_entity)
+    match = _match_target_pattern(pattern, target_id)
+    if match is None:
+        return None
+    entity.update(match)
+    return entity if _entity_matches_fixed(capability, entity) else None
+
+
+def _match_target_pattern(pattern: str, target_id: str) -> dict[str, int] | None:
+    parts = re.split(r"(\{[a-z_]+\})", pattern)
+    regex_parts: list[str] = []
+    seen: set[str] = set()
+    for part in parts:
+        if re.fullmatch(r"\{[a-z_]+\}", part):
+            name = part[1:-1]
+            if name in seen:
+                return None
+            seen.add(name)
+            regex_parts.append(fr"(?P<{name}>\d+)")
+        else:
+            regex_parts.append(re.escape(part))
+    match = re.fullmatch("".join(regex_parts), target_id)
+    if match is None:
+        return None
+    return {name: int(value) for name, value in match.groupdict().items()}
+
+
+def _resolve_capability_target(
+    capability: dict[str, Any] | None,
+    entity: dict[str, Any],
+) -> str | None:
+    """Resolve one declared metadata capability to its concrete DOM target."""
+
+    if not isinstance(capability, dict) or not _entity_matches_fixed(capability, entity):
+        return None
+    target_id = capability.get("target_id")
+    if isinstance(target_id, str) and target_id:
+        return target_id
+    return _render_pattern(capability.get("target_pattern"), entity)
+
+
+def _resolve_capability_anchor(
+    capability: dict[str, Any] | None,
+    entity: dict[str, Any],
+) -> str | None:
+    """Resolve the public anchor exclusively from template metadata."""
+
+    if not isinstance(capability, dict) or not _entity_matches_fixed(capability, entity):
+        return None
+    anchor_id = capability.get("anchor_id")
+    if isinstance(anchor_id, str) and anchor_id:
+        return anchor_id
+    return _render_pattern(capability.get("anchor_id_pattern"), entity)
+
+
+def _entity_matches_fixed(capability: dict[str, Any], entity: dict[str, Any]) -> bool:
+    fixed_entity = capability.get("fixed_entity", {})
+    if not isinstance(fixed_entity, dict):
+        return False
+    return all(entity.get(key) == value for key, value in fixed_entity.items())
+
+
+def _render_pattern(pattern: Any, entity: dict[str, Any]) -> str | None:
+    if not isinstance(pattern, str) or not pattern:
+        return None
+
+    values = _template_values(entity)
+    placeholders = re.findall(r"\{([a-z_]+)\}", pattern)
+    if any(name not in values for name in placeholders):
+        return None
+    try:
+        return pattern.format(**values)
+    except (KeyError, ValueError):
+        return None
+
+
+def _template_values(entity: dict[str, Any]) -> dict[str, Any]:
+    """Return the small, shared placeholder vocabulary for template metadata."""
+
+    values = dict(entity)
+    for source, one_based in (("day_index", "day_number"), ("interval_index", "interval_number")):
+        value = entity.get(source)
+        if isinstance(value, int) and not isinstance(value, bool):
+            values[one_based] = value + 1
+
+    if "index" not in values:
+        for key in ("group_index", "day_index", "interval_index"):
+            value = entity.get(key)
+            if isinstance(value, int) and not isinstance(value, bool):
+                values["index"] = value
+                break
+    return values
 
 
 def _matches_pattern(target_id: str, pattern: Any) -> bool:

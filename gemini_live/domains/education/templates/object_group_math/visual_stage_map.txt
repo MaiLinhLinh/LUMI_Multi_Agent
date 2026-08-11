@@ -2,13 +2,12 @@ VISUAL STAGE MAP — MÀN HÌNH BÀI TOÁN
 
 ┌──────────────────────┐   {{ data.operator }}   ┌──────────────────────┐   =   ┌──────────────────────┐
 │ Nhóm bên trái        │                │ Nhóm bên phải        │       │ Kết quả              │
-│ {{ data.left_count }} {{ data.asset_label }}{% for _ in range(16 - (data.left_count|string|length) - (data.asset_label|length)) %} {% endfor %}│                │ {{ data.right_count }} {{ data.asset_label }}{% for _ in range(15 - (data.right_count|string|length) - (data.asset_label|length)) %} {% endfor %}│       │ Vật thể: {{ stage.result_items_text }}{% for _ in range(10 - (stage.result_items_text|length)) %} {% endfor %}│
+│ {{ data.left_count }} {{ data.asset_label }}{% for _ in range(16 - (data.left_count|string|length) - (data.asset_label|length)) %} {% endfor %}│                │ {{ data.right_count }} {{ data.asset_label }}{% for _ in range(15 - (data.right_count|string|length) - (data.asset_label|length)) %} {% endfor %}│       │ Vật thể: {{ stage.result_items_text }} [anchor: c]│
 │                      │                │                      │       │ Trạng thái: {{ stage.result_items_state }}│
-│                      │                │                      │       │ Số: {{ stage.result_text }}{% for _ in range(18 - (stage.result_text|length)) %} {% endfor %}│
+│                      │                │                      │       │ Số: {{ stage.result_text }} [anchor: e]│
 │                      │                │                      │       │ Trạng thái: {{ stage.answer_state }}│
 └──────────────────────┘                └──────────────────────┘       └──────────────────────┘
-[anchor: a]                             [anchor: b]                    [anchor: c = vật thể kết quả]
-                                                                            [anchor: e = số kết quả]
+[anchor: a]                             [anchor: b]
 
 Biểu thức phía dưới: {{ data.left_count }} {{ data.operator }} {{ data.right_count }} = ?
 [anchor: d]

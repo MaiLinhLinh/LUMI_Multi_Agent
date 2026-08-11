@@ -33,23 +33,23 @@ PRESENT_VISUAL_TOOL = {
 
 
 @dataclass(frozen=True)
-class FactPresentationState:
-    """Server-only current anchor-to-DOM evidence for one rendered panel."""
+class ActivePresentationState:
+    """Server-only full anchor-to-DOM map for one rendered panel."""
 
     template_id: str
-    anchor_target_map: dict[str, dict[str, Any]]
+    panel_anchor_map: dict[str, dict[str, Any]]
     effect_id_map: dict[str, str]
 
     @classmethod
-    def from_fact_pack(cls, *, template_id: str, pack: LiveFactPack) -> "FactPresentationState":
+    def from_fact_pack(cls, *, template_id: str, pack: LiveFactPack) -> "ActivePresentationState":
         return cls(
             template_id=template_id,
-            anchor_target_map=dict(pack.anchor_target_map),
+            panel_anchor_map=dict(pack.panel_anchor_map),
             effect_id_map=dict(pack.effect_id_map),
         )
 
     def resolve(self, *, anchor_id: str, effect_id: str) -> dict[str, str]:
-        evidence = self.anchor_target_map.get(anchor_id)
+        evidence = self.panel_anchor_map.get(anchor_id)
         if not isinstance(evidence, dict):
             raise ValueError("unknown anchor_id for the active presentation")
         allowed = evidence.get("allowed_effect_ids")

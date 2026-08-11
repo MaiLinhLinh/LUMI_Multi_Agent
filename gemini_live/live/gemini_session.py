@@ -6,6 +6,7 @@ import json
 import logging
 import re
 from collections.abc import Awaitable, Callable
+from datetime import datetime
 from typing import Any
 
 from google import genai
@@ -28,11 +29,17 @@ EventCallback = Callable[[dict[str, Any]], Awaitable[None]]
 AudioCallback = Callable[[bytes, int, dict[str, Any] | None], Awaitable[None]]
 _RATE = re.compile(r"rate=(\d+)")
 
+
+def _ui_trace_timestamp() -> str:
+    """Return the local server time in the format shown by the trace log."""
+
+    return datetime.now().strftime("%H:%M:%S.%f")[:-3]
+
 _CORE_INSTRUCTION = """
 Bạn là Lumi, trợ lý giọng nói tiếng Việt.
 Chỉ dùng dữ liệu thật do tool đã đăng ký trả về; không tự tạo dữ kiện, số liệu, kết quả, vùng giao diện hoặc hiệu ứng.
 Khi một tool trả về presentation_instruction, facts, VISUAL STAGE MAP hoặc visual_effects, đó là chỉ dẫn trình bày có hiệu lực cho lượt hiện tại và được ưu tiên hơn hướng dẫn chung. Thực hiện đúng presentation_instruction đó.
-Khi presentation_instruction yêu cầu minh hoạ một fact, hãy gọi present_visual với đúng anchor_id và effect_id hợp lệ trước khi nói về fact đó.
+Khi presentation_instruction yêu cầu minh hoạ một fact, BẮT BUỘC gọi present_visual với đúng anchor_id và effect_id hợp lệ trước khi nói về fact đó.
 Không đọc, nhắc hoặc diễn giải tên tool, ID, JSON, template hay dữ liệu kỹ thuật cho người dùng. Giữ câu hỏi làm rõ ngắn gọn.
 """
 
@@ -163,6 +170,8 @@ class PersistentGeminiLiveConversation:
         self._audio_bytes = 0
         self._sample_rate: int | None = None
         self._audio_started = False
+        self._ui_pending_text_trace: list[str] = []
+        self._ui_pending_text_trace_timestamp: str | None = None
         self._pending_visual_marker: dict[str, Any] | None = None
 
     @property
@@ -215,6 +224,8 @@ class PersistentGeminiLiveConversation:
         self._tool_calls = self._animation_calls = self._audio_chunks = self._audio_bytes = 0
         self._sample_rate = None
         self._audio_started = False
+        self._ui_pending_text_trace = []
+        self._ui_pending_text_trace_timestamp = None
         self._pending_visual_marker = None
         if user_text == "<voice>":
             trace("MIC_BEGIN")
@@ -255,19 +266,28 @@ class PersistentGeminiLiveConversation:
         if not calls:
             return
         responses: list[types.FunctionResponse] = []
+        response_tool_names: list[str] = []
         fact_count = 0
         effect_count = 0
         for call in calls:
+            await self._flush_ui_text_trace()
             name, call_id = str(call.name), str(call.id)
             args = dict(call.args) if isinstance(call.args, dict) else {}
             self._tool_calls += 1
             trace("GEMINI_TOOL_CALL_RECEIVED name=%s args=%s", name, json.dumps(args, ensure_ascii=False))
+            await self._on_event({
+                "type": "live:debug_trace",
+                "timestamp": _ui_trace_timestamp(),
+                "event": "toolcall",
+                "content": f"{name}({json.dumps(args, ensure_ascii=False, separators=(',', ': '))})",
+            })
             if name == "present_visual":
                 # A visual marker is allowed while Gemini is already speaking.
                 # Do not move to WAITING_FOR_TOOL: that transition used to reject
                 # speaking -> waiting_for_tool and discarded the animation call.
                 response = await self._handle_present_visual(args)
                 responses.append(types.FunctionResponse(id=call_id, name=name, response={"result": response}))
+                response_tool_names.append(name)
                 await self._on_event({"type": "tool_result", "name": name, "response": response})
                 continue
             await self._set_state(LiveSessionState.WAITING_FOR_TOOL)
@@ -286,8 +306,15 @@ class PersistentGeminiLiveConversation:
             if isinstance(panel, dict):
                 await self._on_event({"type": "panel", "panel": panel})
             responses.append(types.FunctionResponse(id=call_id, name=name, response={"result": response}))
+            response_tool_names.append(name)
             await self._on_event({"type": "tool_result", "name": name, "response": response})
         await self._transport.send_tool_responses(responses)
+        await self._on_event({
+            "type": "live:debug_trace",
+            "timestamp": _ui_trace_timestamp(),
+            "event": "tool_response",
+            "content": ", ".join(response_tool_names),
+        })
         trace(
             "TOOL_RESPONSE_SENT_TO_GEMINI facts=%s effects=%s",
             fact_count,
@@ -362,13 +389,33 @@ class PersistentGeminiLiveConversation:
         if output and getattr(output, "text", None):
             text = str(output.text)
             self._transcript.append(text)
+            if self._ui_pending_text_trace_timestamp is None:
+                self._ui_pending_text_trace_timestamp = _ui_trace_timestamp()
+            self._ui_pending_text_trace.append(text)
             await self._on_event({
                 "type": "text",
                 "text": text,
                 "presentation_approved": True,
             })
 
+    async def _flush_ui_text_trace(self) -> None:
+        """Emit one readable text segment between successive tool calls."""
+
+        text = "".join(self._ui_pending_text_trace).strip()
+        timestamp = self._ui_pending_text_trace_timestamp
+        self._ui_pending_text_trace = []
+        self._ui_pending_text_trace_timestamp = None
+        if not text or timestamp is None:
+            return
+        await self._on_event({
+            "type": "live:debug_trace",
+            "timestamp": timestamp,
+            "event": "text",
+            "content": text,
+        })
+
     async def _handle_turn_complete(self) -> bool:
+        await self._flush_ui_text_trace()
         if self._pending_visual_marker is not None:
             warning(
                 "VISUAL_MARKER_UNATTACHED anchor=%s",

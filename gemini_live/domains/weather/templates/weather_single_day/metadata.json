@@ -5,6 +5,7 @@
   "name": "Weather Single Day",
   "description": "A focused one-day forecast card with a daily summary and hourly timeline.",
   "template_file": "template.html",
+  "visual_stage_map_file": "visual_stage_map.txt",
   "schema_versions": ["weather.forecast.v1"],
   "required_fields": [
     "location.name",
@@ -51,24 +52,23 @@
     }
   ],
   "presentation_capabilities": {
-    "overview": {"target_id": "weather.overview", "allowed_effects": ["highlight", "draw_circle"]},
-    "day_summary": {"target_id": "weather.day.0.summary", "allowed_effects": ["highlight", "draw_circle"]},
-    "temperature": {"target_id": "weather.day.0.temperature", "allowed_effects": ["highlight", "draw_circle"]},
-    "rain_risk": {"target_id": "weather.day.0.rain_risk", "allowed_effects": ["highlight", "draw_circle"]},
-    "humidity": {"target_id": "weather.day.0.humidity", "allowed_effects": ["highlight", "draw_circle"]},
-    "wind": {"target_id": "weather.day.0.wind", "allowed_effects": ["highlight", "draw_circle"]},
-    "pressure": {"target_id": "weather.day.0.pressure", "allowed_effects": ["highlight", "draw_circle"]},
-    "temperature_trend": {"target_id": "weather.day.0.temperature_trend", "allowed_effects": ["highlight", "draw_circle"]},
-    "hourly_summary": {"target_pattern": "weather.day.{day_index}.interval.{interval_index}.summary", "entity_fields": ["day_index", "interval_index"], "fixed_entity": {"day_index": 0}, "allowed_effects": ["highlight", "draw_circle"]},
-    "hourly_temperature": {"target_pattern": "weather.day.{day_index}.interval.{interval_index}.temperature", "entity_fields": ["day_index", "interval_index"], "fixed_entity": {"day_index": 0}, "allowed_effects": ["highlight", "draw_circle"]},
-    "hourly_rain_risk": {"target_pattern": "weather.day.{day_index}.interval.{interval_index}.rain_risk", "entity_fields": ["day_index", "interval_index"], "fixed_entity": {"day_index": 0}, "allowed_effects": ["highlight", "draw_circle"]},
-    "hourly_condition": {"target_pattern": "weather.day.{day_index}.interval.{interval_index}.condition", "entity_fields": ["day_index", "interval_index"], "fixed_entity": {"day_index": 0}, "allowed_effects": ["highlight", "draw_circle"]}
+    "overview": {"target_id": "weather.overview", "anchor_id": "a", "allowed_effects": ["highlight", "draw_circle"]},
+    "day_summary": {"target_id": "weather.day.0.summary", "anchor_id": "b", "allowed_effects": ["highlight", "draw_circle"]},
+    "temperature": {"target_id": "weather.day.0.temperature", "anchor_id": "c", "allowed_effects": ["highlight", "draw_circle"]},
+    "rain_risk": {"target_id": "weather.day.0.rain_risk", "anchor_id": "d", "allowed_effects": ["highlight", "draw_circle"]},
+    "humidity": {"target_id": "weather.day.0.humidity", "anchor_id": "g", "allowed_effects": ["highlight", "draw_circle"]},
+    "wind": {"target_id": "weather.day.0.wind", "anchor_id": "h", "allowed_effects": ["highlight", "draw_circle"]},
+    "pressure": {"target_id": "weather.day.0.pressure", "anchor_id": "i", "allowed_effects": ["highlight", "draw_circle"]},
+    "temperature_trend": {"target_id": "weather.day.0.temperature_trend", "anchor_id": "j", "allowed_effects": ["highlight", "draw_circle"]},
+    "hourly_summary": {"target_pattern": "weather.day.{day_index}.interval.{interval_index}.summary", "entity_fields": ["day_index", "interval_index"], "fixed_entity": {"day_index": 0}, "anchor_id_pattern": "l{interval_number}", "allowed_effects": ["highlight", "draw_circle"]},
+    "hourly_temperature": {"target_pattern": "weather.day.{day_index}.interval.{interval_index}.temperature", "entity_fields": ["day_index", "interval_index"], "fixed_entity": {"day_index": 0}, "anchor_id_pattern": "n{interval_number}", "allowed_effects": ["highlight", "draw_circle"]},
+    "hourly_rain_risk": {"target_pattern": "weather.day.{day_index}.interval.{interval_index}.rain_risk", "entity_fields": ["day_index", "interval_index"], "fixed_entity": {"day_index": 0}, "anchor_id_pattern": "m{interval_number}", "allowed_effects": ["highlight", "draw_circle"]}
   },
   "data_capabilities": {
-    "rain_probability": {"source_field": "rain_max_pct", "unit": "%", "focus": "rain_risk", "effect_hint": "draw_circle", "operations": ["lookup", "argmax", "argmin", "trend", "summary"]},
-    "rain_amount": {"source_field": "rain_total_mm", "unit": "mm", "focus": "day_summary", "effect_hint": "draw_circle", "operations": ["lookup", "argmax", "argmin", "trend", "summary"]},
-    "temperature_max": {"source_field": "max_c", "unit": "°C", "focus": "temperature", "effect_hint": "draw_circle", "operations": ["lookup", "argmax", "argmin", "trend", "summary"]},
-    "temperature_min": {"source_field": "min_c", "unit": "°C", "focus": "temperature", "effect_hint": "draw_circle", "operations": ["lookup", "argmax", "argmin", "trend", "summary"]}
+    "rain_probability": {"source_field": "rain_max_pct", "unit": "%", "focus": "rain_risk", "operations": ["lookup", "argmax", "argmin", "trend", "summary"]},
+    "rain_amount": {"source_field": "rain_total_mm", "unit": "mm", "focus": "day_summary", "operations": ["lookup", "argmax", "argmin", "trend", "summary"]},
+    "temperature_max": {"source_field": "max_c", "unit": "°C", "focus": "temperature", "operations": ["lookup", "argmax", "argmin", "trend", "summary"]},
+    "temperature_min": {"source_field": "min_c", "unit": "°C", "focus": "temperature", "operations": ["lookup", "argmax", "argmin", "trend", "summary"]}
   },
   "extension_points": [
     {

@@ -13,7 +13,7 @@ def create_presentation_pipeline(settings: Settings) -> PresentationPipeline:
     """Create the shared render-and-fact-preparation pipeline.
 
     ``settings`` remains an argument so the composition-root interface stays
-    stable while narration moves from the Planner to Gemini Live.
+    stable while narration is handled by Gemini Live.
     """
     del settings
     return PresentationPipeline()

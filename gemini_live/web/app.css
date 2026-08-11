@@ -419,6 +419,21 @@ button { -webkit-tap-highlight-color: transparent; }
 
 .message.user .bubble { border-radius: 16px 16px 5px 16px; border-color: #c8e3f8; background: var(--user); }
 
+.message.debug-trace { margin-left: 39px; }
+.message.debug-trace .bubble {
+  width: min(82%, 680px);
+  max-width: none;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 9px;
+  background: #f1f5f9;
+  color: #43617d;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 0.72rem;
+  line-height: 1.55;
+  box-shadow: none;
+}
+
 .message.typing .bubble { display: flex; gap: 5px; align-items: center; min-height: 42px; }
 .message.typing .bubble i { width: 6px; height: 6px; border-radius: 50%; background: #94a3b8; animation: bounce 900ms infinite; }
 .message.typing .bubble i:nth-child(2) { animation-delay: 120ms; }
@@ -636,5 +651,4 @@ button { -webkit-tap-highlight-color: transparent; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
-
 

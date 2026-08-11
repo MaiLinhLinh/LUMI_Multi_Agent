@@ -2,14 +2,9 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
-from gemini_live.presentation.planner_runtime import fallback_presentation_plan
-from gemini_live.presentation.planner_schemas import GroundedFact, PresentationPlan, PresentationStep
-
-
-_TARGET_ID = re.compile(r"^math\.[a-z][a-z0-9._-]*$")
+from gemini_live.presentation.planner_schemas import GroundedFact
 
 
 class RepeatedGroupsArithmeticAdapter:
@@ -66,11 +61,8 @@ class RepeatedGroupsArithmeticAdapter:
                     "asset_label": asset_label,
                 },
                 focus="group",
-                effect_hint="draw_circle",
                 capabilities=presentation_capabilities,
                 entity={"group_index": index},
-                anchor_id=f"g{index}",
-                target_id=f"math.repeated.group.{index}",
             )
             if fact is not None:
                 facts.append(fact)
@@ -85,10 +77,7 @@ class RepeatedGroupsArithmeticAdapter:
                 "right_operand": domain_data.get("right_operand"),
             },
             focus="expression",
-            effect_hint="highlight",
             capabilities=presentation_capabilities,
-            anchor_id="d",
-            target_id="math.repeated.expression",
         )
         answer = self._fact(
             fact_id="answer",
@@ -96,10 +85,7 @@ class RepeatedGroupsArithmeticAdapter:
             operation="lookup",
             value={"result": result, "asset_label": asset_label},
             focus="answer",
-            effect_hint="reveal",
             capabilities=presentation_capabilities,
-            anchor_id="e",
-            target_id="math.repeated.answer",
         )
         if expression is not None:
             facts.append(expression)
@@ -120,42 +106,6 @@ class RepeatedGroupsArithmeticAdapter:
             "answer_state": "visible" if reveal_answer else "hidden",
         }
 
-    def fallback_plan(
-        self,
-        capabilities: dict[str, Any],
-        grounded_facts: list[GroundedFact],
-        *,
-        presentation_phase: str = "opening",
-    ) -> PresentationPlan:
-        fact_by_id = {fact.id: fact for fact in grounded_facts}
-        if presentation_phase in {"correct", "reveal_answer"}:
-            answer = fact_by_id.get("answer")
-            if answer is not None:
-                value = answer.value if isinstance(answer.value, dict) else {}
-                return PresentationPlan(steps=[PresentationStep(
-                    narration=f"Đáp án là {value.get('result')}.",
-                    fact_id=answer.id,
-                    effect=answer.effect_hint,
-                    gesture="explain",
-                )])
-        expression = fact_by_id.get("expression")
-        if expression is None:
-            return fallback_presentation_plan(
-                capabilities=capabilities,
-                grounded_facts=grounded_facts,
-                fallback_narration="Cùng quan sát các nhóm trên màn hình nhé.",
-            )
-        value = expression.value if isinstance(expression.value, dict) else {}
-        return PresentationPlan(steps=[PresentationStep(
-            narration=(
-                f"{value.get('left_operand')} {value.get('operator')} "
-                f"{value.get('right_operand')} bằng bao nhiêu nhỉ?"
-            ),
-            fact_id=expression.id,
-            effect=expression.effect_hint,
-            gesture="explain",
-        )])
-
     @staticmethod
     def _fact(
         *,
@@ -164,17 +114,11 @@ class RepeatedGroupsArithmeticAdapter:
         operation: str,
         value: dict[str, Any],
         focus: str,
-        effect_hint: str,
         capabilities: dict[str, Any],
         entity: dict[str, Any] | None = None,
-        anchor_id: str,
-        target_id: str,
     ) -> GroundedFact | None:
         capability = capabilities.get(focus)
-        allowed = capability.get("allowed_effects") if isinstance(capability, dict) else None
-        if not isinstance(allowed, list) or effect_hint not in allowed:
-            return None
-        if not _TARGET_ID.fullmatch(target_id):
+        if not isinstance(capability, dict):
             return None
         return GroundedFact(
             id=fact_id,
@@ -182,11 +126,8 @@ class RepeatedGroupsArithmeticAdapter:
             operation=operation,  # type: ignore[arg-type]
             value=value,
             focus=focus,
-            effect_hint=effect_hint,  # type: ignore[arg-type]
             entity=entity or {},
-            anchor_id=anchor_id,
             visualizable=True,
-            visual_evidence={"kind": "static_target", "target_id": target_id},
         )
 
     @staticmethod

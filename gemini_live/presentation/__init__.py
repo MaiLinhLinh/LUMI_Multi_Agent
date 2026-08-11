@@ -1,4 +1,4 @@
-"""Reusable rendering, planning, and compilation contracts."""
+"""Reusable rendering and verified Live fact-pack contracts."""
 
 from .base import DomainPresentationAdapter, PresentationRenderer
 from .pipeline import LiveFactPack, PreparedPresentation, PresentationPipeline, PresentationRequest

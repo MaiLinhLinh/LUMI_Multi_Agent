@@ -130,16 +130,16 @@ Gemini Live không sở hữu dữ liệu nghiệp vụ. Nó không đọc Redis
 Sau khi tool hoàn thành, domain tạo một `PresentationRequest` gồm `domain_id`, `template_id`, `view_model`, `domain_data`, `compact_data` và Domain Presentation Adapter. `PresentationPipeline` thực hiện cùng một chuỗi cho mọi domain:
 
 1. **JinjaPresentationRenderer** nạp template theo `domain_id + template_id` và render `view_model` thành HTML/SVG panel.
-2. Đọc `metadata.json` của template để biết semantic target nào tồn tại và effect nào được phép.
-3. Gọi Domain Presentation Adapter tạo các **grounded facts** từ dữ liệu thật, mỗi fact có thể có anchor trực quan ngắn.
+2. Đọc `metadata.json` của template để biết mỗi semantic focus ánh xạ tới target, anchor và effect nào được phép.
+3. Gọi Domain Presentation Adapter tạo các **grounded facts** nghiệp vụ từ dữ liệu thật.
 4. Render optional visual stage map để Gemini hiểu bố cục template bằng dữ liệu đã render.
 5. Xây dựng Fact Pack: facts công khai, effect được phép và anchor-to-target map chỉ lưu ở server. Gemini không nhận DOM ID hay selector.
 
-Grounded fact là một đơn vị thông tin đã được backend xác nhận, ví dụ “xác suất mưa cao nhất là 98% vào ngày 04/08” hoặc “nhóm A có 7 bông hoa”. Fact có ID ổn định, dữ liệu evidence và optional `anchor_id` để minh hoạ. Gemini Live được quyền chọn và kể lại fact, nhưng không được tạo ra một giá trị mới ngoài Fact Pack.
+Grounded fact là một đơn vị thông tin đã được backend xác nhận, ví dụ “xác suất mưa cao nhất là 98% vào ngày 04/08” hoặc “nhóm A có 7 bông hoa”. Fact có ID ổn định, dữ liệu evidence, `focus`, `entity` và cờ `visualizable`. Adapter không tự gán DOM target hoặc anchor. Gemini Live được quyền chọn và kể lại fact, nhưng không được tạo ra một giá trị mới ngoài Fact Pack.
 
 ## Fact Pack và animation theo audio cue
 
-Fact Pack là ranh giới presentation hiện tại. Gemini Live nhận facts, effect ID và anchor ID ngắn; server giữ map `anchor_id → target_id + allowed effects`. Ví dụ một fact công khai:
+Fact Pack là ranh giới presentation hiện tại. Pipeline resolve `focus + entity` qua metadata rồi mới bổ sung anchor ID ngắn và effect ID hợp lệ cho Gemini Live; server giữ map `anchor_id → target_id + allowed effects`. Ví dụ một fact công khai trong Fact Pack:
 
 ```json
 {
@@ -204,7 +204,7 @@ domains/sales/
   tools.py           # truy vấn/ghi dữ liệu nghiệp vụ, validation
   prompt.py          # hướng dẫn riêng cho Gemini Live về domain Sales
   view_model.py      # chuẩn hoá dữ liệu cho template
-  adapter.py         # grounded facts, target resolver, planner guidance
+  adapter.py         # grounded facts, target resolver, Live presentation instruction
   context.py          # chỉ cần khi Sales có follow-up state riêng
   models.py           # chỉ cần khi domain có schema nghiệp vụ riêng
   templates/
@@ -244,15 +244,17 @@ Metadata không chỉ là mô tả. Nó là danh sách quyền animation của t
 
 ```json
 {
-  "fact_id": "highest_revenue_region",
-  "description": "Miền Bắc có doanh thu cao nhất trong quý",
+  "id": "highest_revenue_region",
+  "metric": "revenue",
+  "operation": "argmax",
+  "value": 125000000,
   "focus": "top_region",
   "entity": {"region_index": 2},
-  "visual_evidence": {"target_id": "sales.region.2"}
+  "visualizable": true
 }
 ```
 
-Adapter cũng cung cấp anchor/target mapping, visual stage map và presentation instruction để Gemini hiểu facts cùng bố cục template mà không nhận selector/DOM ID.
+Adapter cũng có thể cung cấp visual stage map và presentation instruction. Pipeline dùng metadata của template để resolve anchor/target/effect, nhờ vậy Adapter không cần biết selector hay DOM ID.
 
 ### Bước 5 - Đăng ký ở bootstrap
 

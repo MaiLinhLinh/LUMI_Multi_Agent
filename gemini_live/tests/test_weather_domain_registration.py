@@ -11,11 +11,6 @@ from gemini_live.settings import Settings
 
 def _settings() -> Settings:
     return Settings(
-        gemini_api_key="test-key",
-        gemini_model="test-model",
-        planner_provider="gemini",
-        cerebras_api_key="",
-        cerebras_planner_model="gpt-oss-120b",
         gemini_live_api_key="test-live-key",
         gemini_live_model="test-live-model",
         gemini_live_voice="kore",

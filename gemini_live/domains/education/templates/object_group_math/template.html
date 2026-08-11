@@ -41,9 +41,9 @@
 </head>
 <body>
 {% set asset_id = data.asset_id|default('flower', true) %}
-{% set left_count = data.left_count|default(3, true)|int %}
-{% set right_count = data.right_count|default(2, true)|int %}
-{% set result = data.result|default(5, true)|int %}
+{% set left_count = data.left_count|default(3)|int %}
+{% set right_count = data.right_count|default(2)|int %}
+{% set result = data.result|default(5)|int %}
 <main class="lesson" data-present-id="math.exercise.overview">
   <header class="lesson-header">
     <p class="eyebrow">Toán trong phạm vi 10</p>

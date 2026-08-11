@@ -10,7 +10,7 @@ from gemini_live.presentation import PresentationPipeline, PresentationRequest
 
 from .dispatcher import LiveToolDispatcher
 from .memory import SessionMemoryStore
-from .visual_presentation import FactPresentationState, RenderedPresentation
+from .visual_presentation import ActivePresentationState, RenderedPresentation
 from .session_protocol import LiveSessionState, can_transition
 from gemini_live.trace import trace, warning
 
@@ -36,7 +36,7 @@ class LiveSessionOrchestrator:
         self._presentation_pipeline = presentation_pipeline
         self._memory_store = memory_store or SessionMemoryStore()
         self._technical_states: dict[str, LiveSessionState] = {}
-        self._fact_presentations: dict[str, FactPresentationState] = {}
+        self._fact_presentations: dict[str, ActivePresentationState] = {}
 
     def session_state(self, session_id: str) -> LiveSessionState:
         """Return shared technical state; domain business state is separate."""
@@ -138,7 +138,7 @@ class LiveSessionOrchestrator:
             presentation_context = presentation_request.adapter.live_presentation_context()
             if presentation_context:
                 response.update(presentation_context)
-            self._fact_presentations[session_id] = FactPresentationState.from_fact_pack(
+            self._fact_presentations[session_id] = ActivePresentationState.from_fact_pack(
                 template_id=presentation_request.template_id,
                 pack=live_fact_pack,
             )
