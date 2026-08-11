@@ -16,7 +16,7 @@ from .tools import (
     EducationTools,
     ExerciseValidationError,
 )
-from .view_model import object_group_math_view_model
+from .view_model import object_group_math_view_model, repeated_groups_arithmetic_view_model
 
 
 class EducationLiveDomain(LiveDomain):
@@ -71,14 +71,14 @@ class EducationLiveDomain(LiveDomain):
                 detail=str(exc),
             )
 
-        view_model = object_group_math_view_model(exercise)
-        compact_data = {"template_id": "object_group_math", **view_model}
+        template_id, view_model = self._view_model_for_exercise(exercise)
+        compact_data = {"template_id": template_id, **view_model}
         return DomainResult(
             status="completed",
             context=self._context.start_exercise(exercise, view_model),
             presentation=PresentationRequest(
                 domain_id=self.domain_id,
-                template_id="object_group_math",
+                template_id=template_id,
                 view_model=view_model,
                 adapter=self._adapter,
                 domain_data=view_model,
@@ -109,17 +109,26 @@ class EducationLiveDomain(LiveDomain):
 
         presentation = None
         if checked.status in {"incorrect_hint", "correct", "reveal_answer"}:
-            view_model = object_group_math_view_model(checked.state.to_exercise())
+            template_id, view_model = self._view_model_for_exercise(checked.state.to_exercise())
             presentation = PresentationRequest(
                 domain_id=self.domain_id,
-                template_id="object_group_math",
+                template_id=template_id,
                 view_model=view_model,
                 adapter=EducationPresentationAdapter(presentation_phase=checked.status),
                 domain_data=view_model,
-                compact_data={"template_id": "object_group_math", **view_model},
+                compact_data={"template_id": template_id, **view_model},
+                render_panel=False,
             )
         return DomainResult(
             status=checked.status,
             context=self._context.save_lesson_state(context, checked.state),
             presentation=presentation,
         )
+
+    @staticmethod
+    def _view_model_for_exercise(exercise: Any) -> tuple[str, dict[str, object]]:
+        if exercise.operation in {"+", "-"}:
+            return "object_group_math", object_group_math_view_model(exercise)
+        if exercise.operation in {"*", "/"}:
+            return "repeated_groups_arithmetic", repeated_groups_arithmetic_view_model(exercise)
+        raise ValueError(f"unsupported arithmetic operation: {exercise.operation!r}")

@@ -28,7 +28,13 @@ EventCallback = Callable[[dict[str, Any]], Awaitable[None]]
 AudioCallback = Callable[[bytes, int, dict[str, Any] | None], Awaitable[None]]
 _RATE = re.compile(r"rate=(\d+)")
 
-_CORE_INSTRUCTION = """You are Lumi, a Vietnamese voice assistant. Use registered domain tools for real-world facts and never invent tool data. After a successful domain tool response, present only its verified facts naturally in Vietnamese. If that response includes `presentation_instruction`, follow it for that presentation. Its `facts` entries describe verified data; visualizable entries provide a short `anchor_id`. If `visual_stage_map` is supplied, use it to understand the rendered screen. Its `visual_effects` entries are the only visual effects available. When a fact would benefit from a visual, call present_visual with that fact's anchor_id and an allowed effect_id immediately before discussing that fact. Never invent facts, anchors, DOM targets, effects, or visual IDs. A visual tool response only confirms the animation; continue the explanation naturally after it. Keep clarification questions concise."""
+_CORE_INSTRUCTION = """
+Bạn là Lumi, trợ lý giọng nói tiếng Việt.
+Chỉ dùng dữ liệu thật do tool đã đăng ký trả về; không tự tạo dữ kiện, số liệu, kết quả, vùng giao diện hoặc hiệu ứng.
+Khi một tool trả về presentation_instruction, facts, VISUAL STAGE MAP hoặc visual_effects, đó là chỉ dẫn trình bày có hiệu lực cho lượt hiện tại và được ưu tiên hơn hướng dẫn chung. Thực hiện đúng presentation_instruction đó.
+Khi presentation_instruction yêu cầu minh hoạ một fact, hãy gọi present_visual với đúng anchor_id và effect_id hợp lệ trước khi nói về fact đó.
+Không đọc, nhắc hoặc diễn giải tên tool, ID, JSON, template hay dữ liệu kỹ thuật cho người dùng. Giữ câu hỏi làm rõ ngắn gọn.
+"""
 
 
 class GeminiLiveSessionError(RuntimeError):
@@ -88,6 +94,7 @@ class GeminiLiveSession:
         return types.LiveConnectConfig(
             response_modalities=["AUDIO"],
             tools=[types.Tool(function_declarations=declarations)],
+            #thinking_config=types.ThinkingConfig(thinking_level="low"),
             input_audio_transcription=types.AudioTranscriptionConfig(
                 language_hints=types.LanguageHints(language_codes=["vi-VN"])
             ),

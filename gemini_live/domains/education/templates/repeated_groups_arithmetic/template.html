@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <title>{{ data.title|default('Cùng học theo nhóm', true) }}</title>
+  <style>
+    :root { font-family: "Nunito", "Segoe UI", sans-serif; color: #25324a; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100%; background: linear-gradient(145deg, #effcf4, #fffbe9); }
+    .lesson { width: min(1120px, calc(100% - 40px)); margin: 0 auto; padding: 28px 0 34px; }
+    .lesson-header { text-align: center; margin-bottom: 22px; }
+    .eyebrow { margin: 0; color: #3c9b68; font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+    h1 { margin: 6px 0 0; font-size: clamp(25px, 3.5vw, 36px); }
+    .prompt { margin: 8px auto 0; max-width: 680px; color: #5c6c7c; font-size: 17px; }
+    .exercise { padding: clamp(18px, 4vw, 34px); border: 2px solid #d9eadf; border-radius: 28px; background: rgba(255,255,255,.94); box-shadow: 0 14px 40px rgba(35, 102, 67, .12); }
+    .group-grid { display: grid; grid-template-columns: repeat(var(--group-columns), minmax(0, 1fr)); gap: clamp(14px, 2.5vw, 28px); align-items: stretch; }
+    .group-card { min-height: calc(var(--items-min-height) + 68px); padding: 14px; border: 3px solid #2181bf; border-radius: 3px; background: #fff; display: flex; flex-direction: column; min-width: 0; }
+    .group-label { margin: 0 0 10px; color: #435369; font-size: 15px; font-weight: 800; text-align: center; }
+    .items { flex: 1; min-height: var(--items-min-height); display: grid; grid-template-columns: repeat(var(--item-columns), minmax(0, 1fr)); place-items: center; align-content: center; gap: var(--item-gap); }
+    .item { width: var(--item-size); height: var(--item-size); display: grid; place-items: center; }
+    .item svg { width: 100%; height: 100%; filter: drop-shadow(0 3px 2px rgba(34, 94, 61, .12)); }
+    .expression { margin-top: 28px; padding-top: 20px; border-top: 1px solid #e4eee6; color: #e43030; font-size: clamp(30px, 5vw, 50px); font-weight: 900; text-align: center; }
+    .answer-cell { display: inline-grid; min-width: 68px; min-height: 68px; place-items: center; border: 2px dashed #86b898; border-radius: 14px; color: #3d9f6b; }
+    .answer-value { display: none; }
+    .answer-cell.lumi-highlight .answer-placeholder { display: none; }
+    .answer-cell.lumi-highlight .answer-value { display: inline; }
+    @media (max-width: 720px) { .lesson { width: min(100% - 24px, 1120px); } .group-grid { grid-template-columns: repeat(min(2, var(--group-columns)), minmax(0, 1fr)); } }
+    @media (max-width: 460px) { .group-grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+{% set groups = data.groups|default([], true) %}
+{% set group_count = data.group_count|default(groups|length, true)|int %}
+{% set items_per_group = data.items_per_group|default(0, true)|int %}
+{% set asset_id = data.asset_id|default('flower', true) %}
+{% set group_columns = group_count if group_count <= 3 else 2 if group_count == 4 else 4 %}
+<main class="lesson" data-present-id="math.repeated.overview">
+  <header class="lesson-header">
+    <p class="eyebrow">Toán theo nhóm bằng nhau</p>
+    <h1>{{ data.title|default('Cùng quan sát các nhóm nào!', true) }}</h1>
+    <p class="prompt">{{ group_count }} nhóm, mỗi nhóm có {{ items_per_group }} {{ data.asset_label|default('vật thể', true) }}</p>
+  </header>
+  <section class="exercise" aria-label="Bài tập nhóm bằng nhau">
+    <div class="group-grid" data-group-count="{{ group_count }}" style="--group-columns: {{ group_columns }};">
+      {% for group in groups %}
+      {% set item_count = group.item_count|default(items_per_group, true)|int %}
+      {% set sizing = namespace(item_columns=1) %}
+      {% for candidate in range(1, item_count + 1) %}
+        {% if sizing.item_columns == 1 and candidate * candidate >= item_count %}{% set sizing.item_columns = candidate %}{% endif %}
+      {% endfor %}
+      {% set item_rows = (item_count + sizing.item_columns - 1) // sizing.item_columns %}
+      {% if sizing.item_columns <= 2 %}
+        {% set item_size = 64 %}{% set item_gap = 14 %}
+      {% elif sizing.item_columns == 3 %}
+        {% set item_size = 52 %}{% set item_gap = 10 %}
+      {% elif sizing.item_columns == 4 %}
+        {% set item_size = 42 %}{% set item_gap = 8 %}
+      {% else %}
+        {% set item_size = 34 %}{% set item_gap = 6 %}
+      {% endif %}
+      {% set items_min_height = item_rows * item_size + (item_rows - 1) * item_gap %}
+      <section class="group-card" data-present-id="math.repeated.group.{{ loop.index }}" style="--item-columns: {{ sizing.item_columns }}; --item-size: {{ item_size }}px; --item-gap: {{ item_gap }}px; --items-min-height: {{ items_min_height }}px;">
+        <p class="group-label">Nhóm {{ loop.index }}</p>
+        <div class="items">
+          {% for _ in range(item_count) %}<span class="item">{% if asset_id == 'ball' %}{% include 'assets/ball.svg' %}{% elif asset_id == 'rocket' %}{% include 'assets/rocket.svg' %}{% else %}{% include 'assets/flower.svg' %}{% endif %}</span>{% endfor %}
+        </div>
+      </section>
+      {% endfor %}
+    </div>
+    <div class="expression" data-present-id="math.repeated.expression">
+      {{ data.left_operand }} {{ data.operator }} {{ data.right_operand }} =
+      <span class="answer-cell" data-present-id="math.repeated.answer">
+        <span class="answer-placeholder">?</span><span class="answer-value">{{ data.result }}</span>
+      </span>
+    </div>
+  </section>
+</main>
+</body>
+</html>

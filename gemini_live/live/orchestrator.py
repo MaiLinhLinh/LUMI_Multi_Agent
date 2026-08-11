@@ -151,13 +151,15 @@ class LiveSessionOrchestrator:
                 presentation_request.domain_id,
                 len(presentation_instruction),
             )
-            rendered_presentation = RenderedPresentation(
-                panel={
-                    "ui_type": presentation_request.domain_id,
-                    "template_id": presentation_request.template_id,
-                    "html": prepared.panel.html,
-                },
-            )
+            rendered_presentation = None
+            if presentation_request.render_panel:
+                rendered_presentation = RenderedPresentation(
+                    panel={
+                        "ui_type": presentation_request.domain_id,
+                        "template_id": presentation_request.template_id,
+                        "html": prepared.panel.html,
+                    },
+                )
             return OrchestratedToolResult(
                 response=response,
                 presentation=rendered_presentation,

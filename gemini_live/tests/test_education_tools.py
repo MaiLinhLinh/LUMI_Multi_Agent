@@ -294,7 +294,9 @@ class EducationToolsTests(unittest.TestCase):
             arguments={"answer": 5},
         ))
         self.assertEqual(checked.response["status"], "correct")
-        self.assertIsInstance(checked.presentation, RenderedPresentation)
+        self.assertIsNone(checked.presentation)
+        self.assertIn("facts", checked.response)
+        self.assertEqual(checked.response["presentation"]["mode"], "fact_pack")
 
 
 if __name__ == "__main__":

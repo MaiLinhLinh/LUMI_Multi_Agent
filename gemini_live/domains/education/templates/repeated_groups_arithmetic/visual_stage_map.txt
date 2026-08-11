@@ -1,0 +1,30 @@
+VISUAL STAGE MAP — EQUAL GROUPS ARITHMETIC
+
+{{ data.group_count }} groups, each with {{ data.items_per_group }} {{ data.asset_label }}.
+
+{% set groups = data.groups|default([], true) -%}
+{% set group_count = data.group_count|default(groups|length, true)|int -%}
+{% set groups_per_row = group_count if group_count <= 3 else 2 if group_count == 4 else 4 -%}
+GROUP GRID: {{ groups_per_row }} columns. Groups wrap to the next row in the same order as the screen.
+
+{% for row in groups|batch(groups_per_row, none) -%}
+ROW {{ loop.index }} (left to right)
+{% set row_number = loop.index -%}
+{% for group in row if group -%}
+{% set item_count = group.item_count|default(data.items_per_group, true)|int -%}
+{% set sizing = namespace(item_columns=1) -%}
+{% for candidate in range(1, item_count + 1) -%}
+{% if sizing.item_columns == 1 and candidate * candidate >= item_count %}{% set sizing.item_columns = candidate %}{% endif -%}
+{% endfor -%}
+{% set item_rows = (item_count + sizing.item_columns - 1) // sizing.item_columns -%}
+[ Group {{ loop.index + ((row_number - 1) * groups_per_row) }} | {{ item_rows }} rows × {{ sizing.item_columns }} columns of {{ data.asset_label }} | anchor: g{{ loop.index + ((row_number - 1) * groups_per_row) }} ]{% if not loop.last %}    {% endif %}{% endfor %}
+
+{% endfor -%}
+BOTTOM, below every group row
+Expression: {{ data.left_operand }} {{ data.operator }} {{ data.right_operand }} = {{ stage.answer_text }}
+[anchor: d = expression]  [anchor: e = answer, currently {{ stage.answer_state }}]
+
+ANCHOR LEGEND
+g1…g{{ data.group_count }} = one equal group of objects, in the row and column shown above
+d = arithmetic expression
+e = answer

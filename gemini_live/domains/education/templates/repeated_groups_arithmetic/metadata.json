@@ -1,0 +1,20 @@
+{
+  "id": "repeated_groups_arithmetic",
+  "kind": "complete_template",
+  "domain": "education",
+  "name": "Repeated Groups Arithmetic",
+  "description": "A reusable visual template for multiplication and exact division through equal groups.",
+  "template_file": "template.html",
+  "visual_stage_map_file": "visual_stage_map.txt",
+  "schema_versions": ["education.repeated_groups.v1"],
+  "required_fields": ["operator", "left_operand", "right_operand", "result", "group_count", "items_per_group", "groups", "asset_id", "asset_label"],
+  "tags": ["education", "math", "multiplication", "division", "equal-groups"],
+  "display_scope": "single_exercise",
+  "fillable": true,
+  "presentation_capabilities": {
+    "overview": {"target_id": "math.repeated.overview", "allowed_effects": ["highlight", "draw_circle"]},
+    "group": {"target_pattern": "math.repeated.group.{index}", "anchor_id_pattern": "g{index}", "allowed_effects": ["highlight", "draw_circle"]},
+    "expression": {"target_id": "math.repeated.expression", "anchor_id": "d", "allowed_effects": ["highlight", "draw_circle"]},
+    "answer": {"target_id": "math.repeated.answer", "anchor_id": "e", "allowed_effects": ["reveal", "highlight", "draw_circle"]}
+  }
+}

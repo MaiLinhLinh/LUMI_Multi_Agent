@@ -59,6 +59,7 @@ class PresentationRequest:
     adapter: DomainPresentationAdapter
     domain_data: dict[str, Any]
     compact_data: dict[str, Any]
+    render_panel: bool = True
 
 
 class PresentationPipeline:

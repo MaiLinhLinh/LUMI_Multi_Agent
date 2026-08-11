@@ -24,7 +24,11 @@ class JinjaPresentationRenderer(PresentationRenderer):
         if not template_path.is_file():
             raise ValueError(f"template is not registered: {domain_id}/{template_id}")
         environment = Environment(
-            loader=FileSystemLoader(str(template_path.parent)),
+            # A template can include its own local files and domain-shared
+            # assets stored directly under ``templates/assets``.
+            loader=FileSystemLoader(
+                [str(template_path.parent), str(template_path.parent.parent)]
+            ),
             undefined=StrictUndefined,
             autoescape=True,
         )

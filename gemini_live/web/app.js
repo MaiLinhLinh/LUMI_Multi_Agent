@@ -32,6 +32,7 @@ let socket = null;
 let socketReady = false;
 let liveState = "idle";
 let readyWaiters = [];
+let presentationFitObserver = null;
 let audioContext = null, sampleRate = null, nextAudioAt = 0, pendingAudioMarker = null;
 let sources = new Set(), assistantBubble = null, inputTranscriptBubble = null;
 let microphoneStream = null, microphoneContext = null, microphoneSource = null, microphoneProcessor = null, muteGain = null;
@@ -91,6 +92,26 @@ function playPcm(bytes) {
   sources.add(source);
   source.addEventListener("ended", () => sources.delete(source), { once: true });
 }
+
+function fitPresentationToHost(content) {
+  const fit = () => {
+    content.style.transform = "scale(1)";
+    const availableWidth = templateHost.clientWidth;
+    const availableHeight = templateHost.clientHeight;
+    const contentWidth = Math.max(content.scrollWidth, content.offsetWidth);
+    const contentHeight = content.scrollHeight;
+    if (!availableWidth || !availableHeight || !contentWidth || !contentHeight) return;
+    const scale = Math.min(1, availableWidth / contentWidth, availableHeight / contentHeight);
+    content.style.transform = `scale(${scale})`;
+  };
+
+  const scheduleFit = () => requestAnimationFrame(() => requestAnimationFrame(fit));
+  presentationFitObserver?.disconnect();
+  presentationFitObserver = new ResizeObserver(scheduleFit);
+  presentationFitObserver.observe(templateHost);
+  scheduleFit();
+}
+
 function renderPanel(panel) {
   if (!panel?.html) return;
   contentPanel.hidden = false; weatherView.hidden = false; welcome.hidden = true;
@@ -100,8 +121,12 @@ function renderPanel(panel) {
   root.replaceChildren();
   const style = document.createElement("style");
   style.textContent = `[data-present-id]{transition:outline .18s,box-shadow .18s,transform .18s}.lumi-highlight{outline:3px solid #0ea5e9!important;outline-offset:4px;box-shadow:0 0 0 8px #0ea5e922!important}.lumi-pulse{animation:lumi-pulse 720ms cubic-bezier(.2,.8,.3,1) 2}@keyframes lumi-pulse{0%,100%{transform:scale(1);filter:none}50%{transform:scale(1.035);filter:drop-shadow(0 0 8px rgba(14,165,233,.7))}}`;
-  const content = document.createElement("div"); content.innerHTML = panel.html;
-  root.append(style, content); animationController.clear();
+  const content = document.createElement("div");
+  content.style.cssText = "width:100%; transform-origin:top center; will-change:transform;";
+  content.innerHTML = panel.html;
+  root.append(style, content);
+  fitPresentationToHost(content);
+  animationController.clear();
 }
 function showText(text) {
   if (!text) return;
