@@ -4,7 +4,7 @@ VISUAL STAGE MAP — DỰ BÁO THỜI TIẾT NHIỀU NGÀY
 Dự báo {{ data.forecast.days | length }} ngày{% if data.location.country %} · {{ data.location.country }}{% endif %}
 
 ┌──────────────────────────── KHỐI TỔNG QUAN NGÀY ĐẦU ────────────────────────────┐
-│ [anchor: a — toàn bộ khối tổng quan]                                               │
+│ [anchor: a — toàn bộ khối tổng quan của ngày đầu tiên]                                               │
 │ [Biểu tượng thời tiết]  [anchor: b — {{ data.forecast.days[0].temperature.max_celsius | default('—') }}°C]  {{ data.forecast.days[0].condition.description | default('—') }}
 │                                      Ngày bắt đầu: {{ data.forecast.days[0].date | default('—') }}
 │
