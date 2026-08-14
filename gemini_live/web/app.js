@@ -34,12 +34,10 @@ let liveState = "idle";
 let readyWaiters = [];
 let presentationFitObserver = null;
 let audioContext = null, sampleRate = null, nextAudioAt = 0, pendingAudioMarker = null;
+let pendingAudioChunkTurnId = null, activeAudioTurnId = null;
 let sources = new Set(), inputTranscriptBubble = null, traceBubble = null;
 let microphoneStream = null, microphoneContext = null, microphoneSource = null, microphoneProcessor = null, muteGain = null;
-let recording = false, openingMicrophone = false, speechDetected = false, lastSpeechAt = 0;
-
-const SPEECH_RMS_THRESHOLD = 0.012;
-const SILENCE_END_MS = 1300;
+let recording = false, openingMicrophone = false;
 
 function reportVisualDiagnostic(phase, details = {}) {
   const message = JSON.stringify(details);
@@ -67,25 +65,59 @@ async function armAudio() {
 function resetAudio() {
   for (const item of sources) { try { item.stop(); } catch (_) {} }
   sources = new Set(); sampleRate = null; nextAudioAt = 0; pendingAudioMarker = null;
+  pendingAudioChunkTurnId = null; activeAudioTurnId = null;
+}
+function interruptOutput(turnId) {
+  for (const source of [...sources]) {
+    if (turnId && source.lumiTurnId !== turnId) continue;
+    try { source.stop(); } catch (_) {}
+    sources.delete(source);
+  }
+  if (!turnId || activeAudioTurnId === turnId) {
+    activeAudioTurnId = null;
+    nextAudioAt = audioContext?.currentTime || 0;
+  }
+  if (!turnId || pendingAudioChunkTurnId === turnId) pendingAudioChunkTurnId = null;
+  if (!turnId || pendingAudioMarker?.turn_id === turnId) pendingAudioMarker = null;
+  if (turnId) animationController.cancelTurn(turnId);
+  else animationController.clear();
 }
 function playPcm(bytes) {
   if (!audioContext || !sampleRate || !bytes.byteLength) return;
-  if (recording) endVoiceInput("assistant_audio");
+  const pcmTurnId = pendingAudioChunkTurnId;
+  pendingAudioChunkTurnId = null;
+  if (!pcmTurnId) {
+    console.warn("[GEMINI_LIVE:AUDIO_DROPPED]", { reason: "missing_turn_id" });
+    return;
+  }
+  if (activeAudioTurnId !== pcmTurnId) {
+    activeAudioTurnId = pcmTurnId;
+  }
   const input = new Int16Array(bytes);
   const buffer = audioContext.createBuffer(1, input.length, sampleRate);
   const output = buffer.getChannelData(0);
   for (let i = 0; i < input.length; i += 1) output[i] = input[i] / 32768;
   const source = audioContext.createBufferSource();
   source.buffer = buffer; source.connect(audioContext.destination);
-  const start = Math.max(audioContext.currentTime + 0.025, nextAudioAt);
+  source.lumiTurnId = pcmTurnId;
+  const start = Math.max(audioContext.currentTime + 0.010, nextAudioAt);
   source.start(start); nextAudioAt = start + buffer.duration;
   if (pendingAudioMarker) {
-    animationController.queue(pendingAudioMarker);
-    reportVisualDiagnostic("marker_attached_to_pcm", {
-      anchor_id: pendingAudioMarker.anchor_id,
-      effect: pendingAudioMarker.effect,
-      audio_start_at: start,
-    });
+    if (pendingAudioMarker.turn_id === pcmTurnId) {
+      animationController.queue(pendingAudioMarker);
+      reportVisualDiagnostic("marker_attached_to_pcm", {
+        anchor_id: pendingAudioMarker.anchor_id,
+        effect: pendingAudioMarker.effect,
+        turn_id: pcmTurnId,
+        audio_start_at: start,
+      });
+    } else {
+      console.warn("[GEMINI_LIVE:MARKER_DROPPED]", {
+        reason: "turn_id_mismatch",
+        markerTurnId: pendingAudioMarker.turn_id,
+        pcmTurnId,
+      });
+    }
     pendingAudioMarker = null;
   }
   animationController.armAtAudioStart(start, audioContext);
@@ -191,30 +223,37 @@ function canStartUserTurn() {
 }
 
 function handleMessage(event) {
-  if (event.data instanceof ArrayBuffer) { playPcm(event.data); return; }
+  if (event.data instanceof ArrayBuffer) {
+    playPcm(event.data);
+    avatar.dataset.avatarState = "speaking";
+    voiceStatus.textContent = "Lumi đang nói…";
+    return;
+  }
   const payload = JSON.parse(event.data);
   console.info("[GEMINI_LIVE:EVENT]", payload);
   if (payload.type === "live:session_ready") {
     socketReady = true; connectionStatus.textContent = "Đã kết nối";
-    voiceStatus.textContent = "Nhấn micro để nói"; releaseReadyWaiters();
+    voiceStatus.textContent = "Đang mở micro…"; releaseReadyWaiters();
+    void enableMicrophone();
   }
   if (payload.type === "live:state") {
     liveState = String(payload.state || "idle");
     const labels = { idle: "Sẵn sàng", listening: recording ? "Đang nghe…" : "Sẵn sàng nói", waiting_for_tool: "Đang xử lý…", speaking: "Lumi đang trình bày…", error: "Có lỗi" };
     connectionStatus.textContent = labels[liveState] || liveState;
+    if (liveState === "listening") voiceStatus.textContent = recording ? "Đang nghe…" : "Đã tắt micro";
+    if (liveState === "waiting_for_tool") voiceStatus.textContent = "Lumi đang xử lý…";
+    if (liveState === "speaking") voiceStatus.textContent = "Lumi đang nói…";
     if (liveState === "speaking" || liveState === "waiting_for_tool") avatar.dataset.avatarState = "speaking";
     if (liveState === "idle" || (liveState === "listening" && !recording)) avatar.dataset.avatarState = "idle";
   }
   if (payload.type === "live:input_ready") {
-    // The backend can acknowledge audio_begin before getUserMedia() resolves.
+    // The backend can acknowledge mic_enabled before getUserMedia() resolves.
     // startCapture() is also called after recording is set below, so this
     // acknowledgement is harmless in either ordering.
-    voiceStatus.textContent = "Đang nghe… giữ micro khi nói, thả ra để gửi.";
+    voiceStatus.textContent = "Đang nghe…";
     startCapture();
   }
-  if (payload.type === "live:server_audio_received") voiceStatus.textContent = `Đã gửi ${payload.chunks} đoạn audio.`;
   if (payload.type === "input_transcript" && payload.text) {
-    voiceStatus.textContent = `Đã nghe: ${payload.text}`;
     showInputTranscript(payload.text, Boolean(payload.final));
   }
   if (payload.type === "panel") renderPanel(payload.panel);
@@ -224,14 +263,19 @@ function handleMessage(event) {
     actions: payload.scene.actions || [],
     animation_delay_ms: Number(payload.animation_delay_ms) || 0,
   });
+  if (payload.type === "audio_chunk") {
+    pendingAudioChunkTurnId = typeof payload.turn_id === "string" && payload.turn_id ? payload.turn_id : null;
+  }
   if (payload.type === "audio_marker") {
     pendingAudioMarker = {
       ...payload.cue,
       animation_delay_ms: Number(payload.animation_delay_ms) || 0,
+      turn_id: typeof payload.turn_id === "string" ? payload.turn_id : null,
     };
     reportVisualDiagnostic("marker_received", {
       anchor_id: pendingAudioMarker.anchor_id,
       effect: pendingAudioMarker.effect,
+      turn_id: pendingAudioMarker.turn_id,
     });
   }
   if (payload.type === "audio_format") sampleRate = Number(payload.sample_rate_hz);
@@ -239,7 +283,12 @@ function handleMessage(event) {
   if (payload.type === "text") showText(payload.text);
   if (payload.type === "live:turn_complete") {
     avatar.dataset.avatarState = "idle";
-    voiceStatus.textContent = "Nhấn micro để nói tiếp";
+    voiceStatus.textContent = recording ? "Đang nghe…" : "Đã tắt micro";
+  }
+  if (payload.type === "live:interrupted") {
+    interruptOutput(typeof payload.turn_id === "string" ? payload.turn_id : null);
+    avatar.dataset.avatarState = "idle";
+    voiceStatus.textContent = recording ? "Đang nghe…" : "Đã tắt micro";
   }
   if (payload.type === "live:timeout") {
     stopCapture();
@@ -282,26 +331,23 @@ function startCapture() {
   microphoneProcessor.addEventListener("audioprocess", event => {
     if (!recording || socket?.readyState !== WebSocket.OPEN) return;
     const samples = event.inputBuffer.getChannelData(0);
-    let energy = 0; for (const sample of samples) energy += sample * sample;
-    const rms = Math.sqrt(energy / samples.length), now = performance.now();
-    if (rms >= SPEECH_RMS_THRESHOLD) { speechDetected = true; lastSpeechAt = now; }
     socket.send(pcm16k(samples, event.inputBuffer.sampleRate));
   });
   microphoneSource.connect(microphoneProcessor); microphoneProcessor.connect(muteGain); muteGain.connect(microphoneContext.destination);
 }
-function endVoiceInput(reason) {
+function disableMicrophone(reason) {
   if (!recording && !microphoneStream) return;
   recording = false;
-  if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "live:audio_end" }));
+  if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "live:mic_disabled" }));
   stopCapture();
-  console.info("[GEMINI_LIVE:MIC_STOPPED]", { reason, speech_detected: speechDetected });
+  voiceStatus.textContent = "Đã tắt micro";
+  console.info("[GEMINI_LIVE:MIC_STOPPED]", { reason });
 }
 function stopCapture() {
   recording = false;
   microphoneProcessor?.disconnect(); microphoneSource?.disconnect(); muteGain?.disconnect();
   microphoneContext?.close(); microphoneStream?.getTracks().forEach(track => track.stop());
   microphoneStream = microphoneContext = microphoneSource = microphoneProcessor = muteGain = null;
-  speechDetected = false; lastSpeechAt = 0;
   mic.classList.remove("listening"); mic.setAttribute("aria-pressed", "false");
 }
 
@@ -321,25 +367,21 @@ document.querySelectorAll("[data-query]").forEach(button => button.addEventListe
   queryInput.value = button.dataset.query; form.requestSubmit();
 }));
 
-async function beginVoiceInput() {
+async function enableMicrophone() {
   if (openingMicrophone || !navigator.mediaDevices?.getUserMedia) return;
+  openingMicrophone = true;
   try {
     if (!socketReady) voiceStatus.textContent = "Đang kết nối Gemini Live…";
     await ensureSocket();
-    if (!canStartUserTurn()) {
-      console.warn("[GEMINI_LIVE:MIC_BLOCKED]", { socketReady, liveState, recording, audioSources: sources.size });
-      voiceStatus.textContent = sources.size || liveState === "speaking" ? "Lumi đang nói, hãy chờ phần trình bày kết thúc." : "Lumi đang xử lý lượt trước.";
-      return;
-    }
-    openingMicrophone = true;
-    await armAudio(); resetAudio(); animationController.clear(); inputTranscriptBubble = null; traceBubble = null;
+    if (recording || microphoneStream) return;
+    await armAudio();
     microphoneStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
-    recording = true; speechDetected = false; lastSpeechAt = performance.now();
+    recording = true;
     mic.classList.add("listening"); mic.setAttribute("aria-pressed", "true");
-    socket.send(JSON.stringify({ type: "live:audio_begin" }));
+    socket.send(JSON.stringify({ type: "live:mic_enabled" }));
     // Do not rely solely on live:input_ready: it may have reached the browser
     // while getUserMedia() was still pending, before recording became true.
-    // WebSocket preserves the audio_begin → PCM ordering on this connection.
+    // WebSocket preserves the mic_enabled → PCM ordering on this connection.
     startCapture();
     console.info("[GEMINI_LIVE:MIC_CAPTURE_STARTED]", { sampleRate: microphoneContext?.sampleRate });
   } catch (error) {
@@ -348,14 +390,14 @@ async function beginVoiceInput() {
 }
 mic.addEventListener("click", event => {
   event.preventDefault();
-  if (recording || microphoneStream) endVoiceInput("button_toggle");
-  else beginVoiceInput();
+  if (recording || microphoneStream) disableMicrophone("button_toggle");
+  else void enableMicrophone();
 });
 mic.addEventListener("keydown", event => {
   if (event.repeat || (event.key !== "Enter" && event.key !== " ")) return;
   event.preventDefault();
-  if (recording || microphoneStream) endVoiceInput("key_toggle");
-  else beginVoiceInput();
+  if (recording || microphoneStream) disableMicrophone("key_toggle");
+  else void enableMicrophone();
 });
 
 fetch("/api/client-debug", {
@@ -365,7 +407,10 @@ fetch("/api/client-debug", {
 }).catch(() => {});
 
 window.addEventListener("pagehide", () => {
-  if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "live:close" }));
+  if (socket?.readyState === WebSocket.OPEN) {
+    if (recording) socket.send(JSON.stringify({ type: "live:mic_disabled" }));
+    socket.send(JSON.stringify({ type: "live:close" }));
+  }
   socket?.close();
 });
 connectSocket();

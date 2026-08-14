@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import uuid
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Any
@@ -26,7 +27,7 @@ logger = logging.getLogger("lumi.gemini_live")
 EventCallback = Callable[[dict[str, Any]], Awaitable[None]]
 # ``marker`` is emitted immediately before its PCM packet.  The browser uses
 # that packet's AudioContext start time as the visual cue's clock.
-AudioCallback = Callable[[bytes, int, dict[str, Any] | None], Awaitable[None]]
+AudioCallback = Callable[[bytes, int, dict[str, Any] | None, str], Awaitable[None]]
 _RATE = re.compile(r"rate=(\d+)")
 
 
@@ -101,6 +102,14 @@ class GeminiLiveSession:
         return types.LiveConnectConfig(
             response_modalities=["AUDIO"],
             tools=[types.Tool(function_declarations=declarations)],
+            realtime_input_config=types.RealtimeInputConfig(
+                automatic_activity_detection=types.AutomaticActivityDetection(
+                    disabled=False,
+                    prefix_padding_ms=200,
+                    silence_duration_ms=200,
+                ),
+                activity_handling=types.ActivityHandling.START_OF_ACTIVITY_INTERRUPTS,
+            ),
             #thinking_config=types.ThinkingConfig(thinking_level="low"),
             input_audio_transcription=types.AudioTranscriptionConfig(
                 language_hints=types.LanguageHints(language_codes=["vi-VN"])
@@ -172,7 +181,10 @@ class PersistentGeminiLiveConversation:
         self._audio_started = False
         self._ui_pending_text_trace: list[str] = []
         self._ui_pending_text_trace_timestamp: str | None = None
+        self._ui_pending_text_trace_turn_id: str | None = None
         self._pending_visual_marker: dict[str, Any] | None = None
+        self._interrupted_turn_pending = False
+        self._output_turn_id: str | None = None
 
     @property
     def turn_id(self) -> str:
@@ -200,17 +212,49 @@ class PersistentGeminiLiveConversation:
         await self._on_event({"type": "live:input_ready", "sample_rate_hz": 16_000})
 
     async def send_audio(self, pcm: bytes) -> None:
-        if self.state != LiveSessionState.LISTENING:
-            raise GeminiLiveSessionError("Microphone audio is accepted only while listening.")
+        if self.state in {LiveSessionState.IDLE, LiveSessionState.ERROR}:
+            raise GeminiLiveSessionError("Microphone audio is accepted only while the Live session is active.")
         await self._transport.send_audio(pcm)
 
-    async def end_audio(self) -> dict[str, Any]:
-        if self.state != LiveSessionState.LISTENING:
-            raise GeminiLiveSessionError("No active microphone turn to end.")
+    async def end_audio_stream(self) -> None:
+        """Close the physical microphone stream, never an individual VAD turn."""
+
         await self._transport.end_audio()
-        trace("GEMINI_INPUT_END_SENT")
-        await self._set_state(LiveSessionState.WAITING_FOR_TOOL)
-        return await self._consume_until_settled()
+        trace("GEMINI_AUDIO_STREAM_END_SENT")
+
+    async def consume_audio_stream(self) -> None:
+        """Continuously consume Gemini events while the browser microphone is enabled.
+
+        Gemini's automatic VAD, rather than ``audio_stream_end``, decides each
+        user turn.  This coroutine intentionally remains alive across model
+        turn completions until the persistent transport closes or its caller
+        cancels it.
+        """
+
+        async for message in self._transport.receive():
+            server = getattr(message, "server_content", None)
+            await self._handle_input_transcript(server)
+            if await self._handle_interruption(server):
+                continue
+            self._resume_after_interruption_if_output(message, server)
+            await self._handle_tool_calls(message)
+            await self._handle_model_turn(server)
+            if server and bool(getattr(server, "turn_complete", False)):
+                if self._interrupted_turn_pending:
+                    trace("GEMINI_INTERRUPTED_TURN_COMPLETE_IGNORED")
+                    self._interrupted_turn_pending = False
+                    self._reset_voice_turn_tracking()
+                    continue
+                if await self._handle_turn_complete():
+                    summary = self._finish_turn()
+                    await self._on_event({
+                        "type": "live:turn_complete",
+                        "session_id": self._session_id,
+                        "turn_id": self._output_turn_id,
+                        "summary": summary,
+                    })
+                    self._reset_voice_turn_tracking()
+        raise GeminiLiveSessionError("Gemini Live connection closed while microphone streaming.")
 
     async def close(self) -> None:
         await self._transport.close()
@@ -226,11 +270,68 @@ class PersistentGeminiLiveConversation:
         self._audio_started = False
         self._ui_pending_text_trace = []
         self._ui_pending_text_trace_timestamp = None
+        self._ui_pending_text_trace_turn_id = None
         self._pending_visual_marker = None
+        self._interrupted_turn_pending = False
+        self._output_turn_id = None
         if user_text == "<voice>":
             trace("MIC_BEGIN")
         else:
             trace("TEXT_BEGIN chars=%s", len(user_text))
+
+    def _reset_voice_turn_tracking(self) -> None:
+        """Prepare for Gemini VAD's next voice turn without ending the PCM stream."""
+
+        self._active_query = "<voice>"
+        self._transcript = []
+        self._tool_calls = self._animation_calls = self._audio_chunks = self._audio_bytes = 0
+        self._sample_rate = None
+        self._audio_started = False
+        self._ui_pending_text_trace = []
+        self._ui_pending_text_trace_timestamp = None
+        self._ui_pending_text_trace_turn_id = None
+        self._pending_visual_marker = None
+        self._interrupted_turn_pending = False
+        self._output_turn_id = None
+
+    async def _handle_interruption(self, server: Any) -> bool:
+        """Discard the cancelled model output and notify the browser promptly."""
+
+        if not server or not bool(getattr(server, "interrupted", False)):
+            return False
+        await self._flush_ui_text_trace()
+        if self._pending_visual_marker is not None:
+            warning(
+                "VISUAL_MARKER_DISCARDED_ON_INTERRUPT anchor=%s",
+                self._pending_visual_marker["cue"].get("anchor_id"),
+            )
+            self._pending_visual_marker = None
+        self._interrupted_turn_pending = True
+        trace("GEMINI_INTERRUPTED")
+        await self._set_state(LiveSessionState.LISTENING)
+        interrupted_turn_id = self._output_turn_id
+        await self._on_event({"type": "live:interrupted", "turn_id": interrupted_turn_id})
+        # The next model output is a new VAD turn, not a continuation of the
+        # generation that Gemini cancelled.
+        self._output_turn_id = None
+        return True
+
+    def _ensure_output_turn_id(self) -> str:
+        """Return the local identifier for this model-output turn."""
+
+        if self._output_turn_id is None:
+            self._output_turn_id = uuid.uuid4().hex[:8]
+        return self._output_turn_id
+
+    def _resume_after_interruption_if_output(self, message: Any, server: Any) -> None:
+        """A fresh model output belongs to the user's new VAD-managed turn."""
+
+        if not self._interrupted_turn_pending:
+            return
+        has_tool_call = bool(getattr(getattr(message, "tool_call", None), "function_calls", None))
+        has_model_turn = bool(getattr(getattr(server, "model_turn", None), "parts", None)) if server else False
+        if has_tool_call or has_model_turn:
+            self._interrupted_turn_pending = False
 
     async def _set_state(self, target: LiveSessionState) -> None:
         current = self.state
@@ -244,9 +345,17 @@ class PersistentGeminiLiveConversation:
         async for message in self._transport.receive():
             server = getattr(message, "server_content", None)
             await self._handle_input_transcript(server)
+            if await self._handle_interruption(server):
+                continue
+            self._resume_after_interruption_if_output(message, server)
             await self._handle_tool_calls(message)
             await self._handle_model_turn(server)
             if server and bool(getattr(server, "turn_complete", False)):
+                if self._interrupted_turn_pending:
+                    trace("GEMINI_INTERRUPTED_TURN_COMPLETE_IGNORED")
+                    self._interrupted_turn_pending = False
+                    self._reset_voice_turn_tracking()
+                    continue
                 if await self._handle_turn_complete():
                     return self._finish_turn()
         raise GeminiLiveSessionError("Gemini Live connection closed before the turn completed.")
@@ -273,12 +382,14 @@ class PersistentGeminiLiveConversation:
             await self._flush_ui_text_trace()
             name, call_id = str(call.name), str(call.id)
             args = dict(call.args) if isinstance(call.args, dict) else {}
+            output_turn_id = self._ensure_output_turn_id()
             self._tool_calls += 1
             trace("GEMINI_TOOL_CALL_RECEIVED name=%s args=%s", name, json.dumps(args, ensure_ascii=False))
             await self._on_event({
                 "type": "live:debug_trace",
                 "timestamp": _ui_trace_timestamp(),
                 "event": "toolcall",
+                "turn_id": output_turn_id,
                 "content": f"{name}({json.dumps(args, ensure_ascii=False, separators=(',', ': '))})",
             })
             if name == "present_visual":
@@ -313,6 +424,7 @@ class PersistentGeminiLiveConversation:
             "type": "live:debug_trace",
             "timestamp": _ui_trace_timestamp(),
             "event": "tool_response",
+            "turn_id": self._ensure_output_turn_id(),
             "content": ", ".join(response_tool_names),
         })
         trace(
@@ -351,6 +463,7 @@ class PersistentGeminiLiveConversation:
         self._pending_visual_marker = {
             "cue": cue,
             "animation_delay_ms": self._settings.presentation_animation_delay_ms,
+            "turn_id": self._ensure_output_turn_id(),
         }
         trace("VISUAL_MARKER_PENDING anchor=%s effect=%s", anchor_id, effect_id)
         return {"status": "completed", "anchor_id": anchor_id, "effect_id": effect_id}
@@ -364,6 +477,7 @@ class PersistentGeminiLiveConversation:
                 continue
             if self.state == LiveSessionState.WAITING_FOR_TOOL:
                 await self._set_state(LiveSessionState.SPEAKING)
+            output_turn_id = self._ensure_output_turn_id()
             rate = _sample_rate(getattr(inline, "mime_type", None))
             if self._sample_rate is None:
                 self._sample_rate = rate
@@ -383,7 +497,7 @@ class PersistentGeminiLiveConversation:
                     cue.get("effect"),
                     self._audio_chunks,
                 )
-            await self._on_audio(pcm, rate, marker)
+            await self._on_audio(pcm, rate, marker, output_turn_id)
 
         output = getattr(server, "output_transcription", None) if server else None
         if output and getattr(output, "text", None):
@@ -391,10 +505,12 @@ class PersistentGeminiLiveConversation:
             self._transcript.append(text)
             if self._ui_pending_text_trace_timestamp is None:
                 self._ui_pending_text_trace_timestamp = _ui_trace_timestamp()
+                self._ui_pending_text_trace_turn_id = self._ensure_output_turn_id()
             self._ui_pending_text_trace.append(text)
             await self._on_event({
                 "type": "text",
                 "text": text,
+                "turn_id": self._ensure_output_turn_id(),
                 "presentation_approved": True,
             })
 
@@ -403,14 +519,17 @@ class PersistentGeminiLiveConversation:
 
         text = "".join(self._ui_pending_text_trace).strip()
         timestamp = self._ui_pending_text_trace_timestamp
+        output_turn_id = self._ui_pending_text_trace_turn_id
         self._ui_pending_text_trace = []
         self._ui_pending_text_trace_timestamp = None
+        self._ui_pending_text_trace_turn_id = None
         if not text or timestamp is None:
             return
         await self._on_event({
             "type": "live:debug_trace",
             "timestamp": timestamp,
             "event": "text",
+            "turn_id": output_turn_id,
             "content": text,
         })
 
@@ -436,6 +555,7 @@ class PersistentGeminiLiveConversation:
             assistant_text=final_text,
         )
         summary = {
+            "turn_id": self._output_turn_id,
             "tool_calls": self._tool_calls,
             "animation_calls": self._animation_calls,
             "audio_chunks": self._audio_chunks,

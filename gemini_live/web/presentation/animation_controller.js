@@ -9,19 +9,32 @@ export class AnimationController {
     this.avatar = avatar;
     this.onDiagnostic = typeof onDiagnostic === "function" ? onDiagnostic : () => {};
     this.pendingScene = null;
-    this.scheduledTimers = new Set();
+    this.scheduledTimers = new Map();
     this.cleanupEffect = null;
+    this.activeEffectTurnId = null;
   }
 
-  clearActiveEffect() {
+  clearActiveEffect(turnId = null) {
+    if (turnId && this.activeEffectTurnId !== turnId) return;
     this.cleanupEffect?.();
     this.cleanupEffect = null;
+    this.activeEffectTurnId = null;
     this.overlay.replaceChildren();
   }
 
-  cancelScheduledEffects() {
-    for (const timer of this.scheduledTimers) window.clearTimeout(timer);
-    this.scheduledTimers.clear();
+  cancelScheduledEffects(turnId = null) {
+    for (const [timer, timerTurnId] of this.scheduledTimers) {
+      if (turnId && timerTurnId !== turnId) continue;
+      window.clearTimeout(timer);
+      this.scheduledTimers.delete(timer);
+    }
+  }
+
+  cancelTurn(turnId) {
+    if (!turnId) return;
+    if (this.pendingScene?.turn_id === turnId) this.pendingScene = null;
+    this.cancelScheduledEffects(turnId);
+    this.clearActiveEffect(turnId);
   }
 
   clear() {
@@ -40,7 +53,7 @@ export class AnimationController {
       this.avatar.dataset.avatarState = "speaking";
       this.play(command);
     }, delay);
-    this.scheduledTimers.add(timer);
+    this.scheduledTimers.set(timer, command.turn_id || null);
     console.info("[GEMINI_LIVE:VISUAL_CUE_SCHEDULED]", {
       anchor_id: command.anchor_id,
       effect: command.effect,
@@ -59,7 +72,7 @@ export class AnimationController {
       this.avatar.dataset.avatarState = "speaking";
       this.play(scene);
     }, delay);
-    this.scheduledTimers.add(timer);
+    this.scheduledTimers.set(timer, scene.turn_id || null);
     console.info("[GEMINI_LIVE:SCENE_ARMED]", { scene, delay_ms: Math.round(delay) });
     this.onDiagnostic("armed_at_audio_start", {
       anchor_id: scene.anchor_id,
@@ -100,7 +113,10 @@ export class AnimationController {
       rect: context.rect,
     });
     const cleanup = handler(context, command);
-    if (typeof cleanup === "function") this.cleanupEffect = cleanup;
+    if (typeof cleanup === "function") {
+      this.cleanupEffect = cleanup;
+      this.activeEffectTurnId = command.turn_id || null;
+    }
   }
 
   rectFor(target) {

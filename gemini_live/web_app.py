@@ -142,6 +142,7 @@ async def live_socket(websocket: WebSocket) -> None:
     await websocket.accept()
     conversation: Any | None = None
     turn_task: asyncio.Task[None] | None = None
+    audio_stream_task: asyncio.Task[None] | None = None
     idle_task: asyncio.Task[None] | None = None
     session_id = ""
     try:
@@ -166,11 +167,17 @@ async def live_socket(websocket: WebSocket) -> None:
                 async with send_lock:
                     await websocket.send_json(payload)
 
-            async def audio(pcm: bytes, _: int, marker: dict[str, Any] | None = None) -> None:
+            async def audio(
+                pcm: bytes,
+                _: int,
+                marker: dict[str, Any] | None = None,
+                turn_id: str = "",
+            ) -> None:
                 touch()
                 async with send_lock:
+                    await websocket.send_json({"type": "audio_chunk", "turn_id": turn_id})
                     if marker is not None:
-                        await websocket.send_json({"type": "audio_marker", **marker})
+                        await websocket.send_json({"type": "audio_marker", **marker, "turn_id": turn_id})
                     await websocket.send_bytes(pcm)
 
             async def reconnect(reason: str) -> None:
@@ -206,7 +213,12 @@ async def live_socket(websocket: WebSocket) -> None:
             async def finish_turn(awaitable: Any) -> None:
                 try:
                     summary = await asyncio.wait_for(awaitable, timeout=settings.live_turn_timeout_seconds)
-                    await event({"type": "live:turn_complete", "session_id": session_id, "summary": summary})
+                    await event({
+                        "type": "live:turn_complete",
+                        "session_id": session_id,
+                        "turn_id": summary.get("turn_id"),
+                        "summary": summary,
+                    })
                 except asyncio.TimeoutError:
                     logger.warning("[WEB:PERSISTENT_TURN_TIMEOUT] session=%s timeout_s=%s", session_id, settings.live_turn_timeout_seconds)
                     await event({"type": "live:timeout", "reason": "turn_timeout"})
@@ -232,6 +244,26 @@ async def live_socket(websocket: WebSocket) -> None:
                     return
 
             idle_task = asyncio.create_task(idle_watch(), name=f"live-idle:{session_id}")
+            microphone_enabled = False
+
+            async def consume_audio_stream() -> None:
+                """Consume the persistent microphone stream across Gemini VAD turns."""
+
+                while microphone_enabled:
+                    try:
+                        await conversation.consume_audio_stream()
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as exc:
+                        logger.exception("[WEB:PERSISTENT_AUDIO_STREAM_ERROR] session=%s", session_id)
+                        try:
+                            await reconnect("audio_stream_error")
+                            if microphone_enabled:
+                                await conversation.begin_audio()
+                        except Exception:
+                            await event({"type": "live:error", "message": str(exc)})
+                            return
+
             chunks = size = 0
             while True:
                 packet = await websocket.receive()
@@ -240,7 +272,10 @@ async def live_socket(websocket: WebSocket) -> None:
                     break
                 if packet.get("bytes") is not None:
                     if turn_task is not None and not turn_task.done():
-                        logger.warning("[WEB:PERSISTENT_AUDIO_REJECTED] session=%s reason=turn_active", session_id)
+                        logger.warning("[WEB:PERSISTENT_AUDIO_REJECTED] session=%s reason=text_turn_active", session_id)
+                        continue
+                    if not microphone_enabled:
+                        logger.warning("[WEB:PERSISTENT_AUDIO_REJECTED] session=%s reason=microphone_disabled", session_id)
                         continue
                     chunk = packet["bytes"]
                     chunks += 1
@@ -267,25 +302,31 @@ async def live_socket(websocket: WebSocket) -> None:
                         await event({"type": "live:error", "message": "Lumi đang xử lý lượt trước."})
                     else:
                         turn_task = asyncio.create_task(finish_turn(conversation.submit_text(query)), name=f"live-text:{session_id}")
-                elif command_type == "live:audio_begin":
+                elif command_type in {"live:audio_begin", "live:mic_enabled"}:
                     if turn_task is not None and not turn_task.done():
                         await event({"type": "live:error", "message": "Lumi đang xử lý lượt trước."})
                     else:
                         # Gemini may have closed its remote socket while the
                         # browser stayed open. Recreate it before accepting a
-                        # new microphone turn so PCM is not sent to a dead
-                        # session.
+                        # continuous microphone stream so PCM is not sent to
+                        # a dead session.
                         if not persistent_transports.get(session_id).connected:
                             await reconnect("transport_closed_before_microphone")
                         chunks = size = 0
+                        microphone_enabled = True
                         await conversation.begin_audio()
-                elif command_type == "live:audio_end":
+                        if audio_stream_task is None or audio_stream_task.done():
+                            audio_stream_task = asyncio.create_task(
+                                consume_audio_stream(), name=f"live-audio-stream:{session_id}"
+                            )
+                elif command_type in {"live:audio_end", "live:mic_disabled"}:
                     if turn_task is not None and not turn_task.done():
                         await event({"type": "live:error", "message": "Không có lượt microphone đang chờ."})
                     else:
                         trace("MIC_END chunks=%s total_bytes=%s", chunks, size)
                         await event({"type": "live:server_audio_closed", "chunks": chunks, "bytes": size})
-                        turn_task = asyncio.create_task(finish_turn(conversation.end_audio()), name=f"live-audio:{session_id}")
+                        microphone_enabled = False
+                        await conversation.end_audio_stream()
                 elif command_type == "live:close":
                     break
                 else:
@@ -305,6 +346,10 @@ async def live_socket(websocket: WebSocket) -> None:
             turn_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await turn_task
+        if audio_stream_task is not None and not audio_stream_task.done():
+            audio_stream_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await audio_stream_task
         # Keep Gemini open briefly so a browser reconnect can retain its Live
         # context. Verified memory is preserved even if the grace period ends.
         _schedule_cleanup(session_id)
