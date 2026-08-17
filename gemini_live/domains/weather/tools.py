@@ -151,12 +151,9 @@ class WeatherTools:
             "weather": weather_payload,
             "source": source,
         }
-        # `data` remains available to the graph/Visual node.  Gemini receives
-        # only daily facts, never the 24 hourly records per day.
         return {
             "status": "completed",
             "data": data,
-            "_llm_response": {"status": "completed", "weather_facts": self._llm_facts(data)},
             # A follow-up may select one day from a seven-day snapshot. Keep
             # the original covered range instead of shrinking the session
             # cache to that selected response.
@@ -277,71 +274,3 @@ class WeatherTools:
                 }
                 return selected
         return None
-
-    @staticmethod
-    def _llm_facts(data: dict[str, Any]) -> dict[str, Any]:
-        """Port of the old weather agent's compact daily-facts contract."""
-        weather = data.get("weather") if isinstance(data.get("weather"), dict) else {}
-        selection = weather.get("hourly_selection")
-        if isinstance(selection, dict):
-            day = next((item for item in weather.get("days", []) if isinstance(item, dict)), {})
-            interval = next((item for item in day.get("intervals", []) if isinstance(item, dict)), {})
-            condition = interval.get("condition") if isinstance(interval.get("condition"), dict) else {}
-            return {
-                "kind": "hourly_forecast",
-                "place": data.get("location") or weather.get("location"),
-                "date": day.get("date"),
-                "requested_time": selection.get("requested_time_of_day"),
-                "matched_interval_start": selection.get("matched_interval_start_time"),
-                "condition": condition.get("description") or condition.get("main"),
-                "temp_c": interval.get("temperature_celsius"),
-                "feels_c": interval.get("feels_like_celsius"),
-                "humidity_pct": interval.get("humidity_percent"),
-                "rain_pct": interval.get("rain_probability"),
-                "rain_mm": interval.get("rain_1h_mm"),
-                "wind_ms": interval.get("wind_speed_mps"),
-            }
-        days: list[dict[str, Any]] = []
-        for raw_day in weather.get("days", []) if isinstance(weather.get("days"), list) else []:
-            if not isinstance(raw_day, dict):
-                continue
-            temperature = raw_day.get("temperature") if isinstance(raw_day.get("temperature"), dict) else {}
-            condition = raw_day.get("condition") if isinstance(raw_day.get("condition"), dict) else {}
-            probability = raw_day.get("max_rain_probability")
-            if isinstance(probability, (int, float)) and not isinstance(probability, bool):
-                probability = round(probability * 100 if 0 <= probability <= 1 else probability, 1)
-            # A multi-day overview needs only the fields that let the model
-            # accurately compare days.  Preserve the richer one-day contract
-            # for questions about a specific day.
-            if int(data.get("requested_days", 1) or 1) > 1:
-                facts = {
-                    "date": raw_day.get("date"),
-                    "condition": condition.get("description") or condition.get("main"),
-                    "min_c": temperature.get("min_celsius"),
-                    "max_c": temperature.get("max_celsius"),
-                    "rain_max_pct": probability,
-                    "rain_total_mm": raw_day.get("total_rain_mm"),
-                }
-            else:
-                facts = {
-                "date": raw_day.get("date"),
-                "condition": condition.get("description") or condition.get("main"),
-                "conditions": raw_day.get("common_conditions"),
-                "min_c": temperature.get("min_celsius"),
-                "max_c": temperature.get("max_celsius"),
-                "max_feels_c": raw_day.get("temperature_feels_like_celsius"),
-                "rain_max_pct": probability,
-                "rain_total_mm": raw_day.get("total_rain_mm"),
-                "humidity_avg_pct": raw_day.get("humidity_percent"),
-                "pressure_avg_hpa": raw_day.get("pressure_hpa"),
-                "wind_avg_ms": raw_day.get("wind_speed_mps"),
-                "partial_day": raw_day.get("is_partial_day"),
-                }
-            days.append({key: value for key, value in facts.items() if value not in (None, "", [], {})})
-        return {
-            "kind": "daily_forecast" if days else "current_weather",
-            "place": data.get("location") or weather.get("location"),
-            "requested_start_date": data.get("requested_date"),
-            "requested_days": data.get("requested_days"),
-            "days": days,
-        }

@@ -1,6 +1,5 @@
-"""Lesson-representation adapters owned by the Education domain."""
+"""Lesson-specific stage-state helpers owned by the Education domain."""
 
-from .object_group_math import ObjectGroupMathAdapter
 from .repeated_groups_arithmetic import RepeatedGroupsArithmeticAdapter
 
-__all__ = ["ObjectGroupMathAdapter", "RepeatedGroupsArithmeticAdapter"]
+__all__ = ["RepeatedGroupsArithmeticAdapter"]

@@ -60,7 +60,8 @@ settings = load_settings()
 registry = create_domain_registry(settings)
 presentation_pipeline = create_presentation_pipeline(settings)
 orchestrator = LiveSessionOrchestrator(
-    LiveToolDispatcher(registry), presentation_pipeline=presentation_pipeline
+    LiveToolDispatcher(registry),
+    presentation_pipeline=presentation_pipeline,
 )
 live_session = GeminiLiveSession(settings=settings, registry=registry, orchestrator=orchestrator)
 persistent_transports = PersistentLiveTransportStore()

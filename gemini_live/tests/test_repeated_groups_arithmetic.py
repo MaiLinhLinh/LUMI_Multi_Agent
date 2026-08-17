@@ -113,10 +113,13 @@ class RepeatedGroupsArithmeticTests(unittest.TestCase):
         assert checked.presentation is not None
         pipeline = PresentationPipeline()
         prepared = pipeline.prepare(request=checked.presentation)
-        fact_pack = pipeline.build_live_fact_pack(checked.presentation, prepared)
-        self.assertEqual(fact_pack.anchor_target_map["e"]["target_id"], "math.repeated.answer")
+        presentation_pack = pipeline.build_live_presentation_pack(prepared)
+        self.assertEqual(
+            presentation_pack.panel_anchor_map["e"]["target_id"],
+            "math.repeated.answer",
+        )
 
-    def test_live_fact_pack_resolves_dynamic_group_anchors(self) -> None:
+    def test_presentation_pack_resolves_dynamic_group_anchors(self) -> None:
         domain = EducationLiveDomain()
         result = asyncio.run(domain.execute_tool(
             "create_arithmetic_exercise",
@@ -127,13 +130,12 @@ class RepeatedGroupsArithmeticTests(unittest.TestCase):
         assert result.presentation is not None
         pipeline = PresentationPipeline()
         prepared = pipeline.prepare(request=result.presentation)
-        pack = pipeline.build_live_fact_pack(result.presentation, prepared)
+        pack = pipeline.build_live_presentation_pack(prepared)
         self.assertEqual(
-            pack.anchor_target_map["g3"]["target_id"],
+            pack.panel_anchor_map["g3"]["target_id"],
             "math.repeated.group.3",
         )
-        self.assertEqual(pack.anchor_target_map["d"]["target_id"], "math.repeated.expression")
-        self.assertNotIn("e", pack.anchor_target_map)
+        self.assertEqual(pack.panel_anchor_map["d"]["target_id"], "math.repeated.expression")
         self.assertEqual(pack.panel_anchor_map["e"]["target_id"], "math.repeated.answer")
 
 

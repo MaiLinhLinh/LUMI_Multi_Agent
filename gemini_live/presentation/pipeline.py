@@ -1,8 +1,8 @@
 """Shared preparation of trusted presentation data for every business domain.
 
 Domains provide a normalized view model, selected template ID, and an adapter.
-This module renders the panel, discovers its capabilities, and produces facts
-verified by the domain.  It deliberately does not decide narration or scenes.
+This module renders the panel, discovers its capabilities, and prepares the
+trusted ASCII stage map. It deliberately does not decide narration or scenes.
 """
 
 from __future__ import annotations
@@ -14,7 +14,6 @@ from typing import Any
 from .base import DomainPresentationAdapter
 from .capabilities import load_template_metadata, presentation_capabilities
 from gemini_live.trace import trace
-from .planner_schemas import GroundedFact
 from .renderer import JinjaPresentationRenderer
 from .schemas import RenderedPanel
 
@@ -29,22 +28,18 @@ class PreparedPresentation:
     panel: RenderedPanel
     template_metadata: dict[str, Any]
     declared_capabilities: dict[str, dict[str, Any]]
-    grounded_facts: list[GroundedFact]
     concrete_animation_capabilities: dict[str, list[str]]
     visual_stage_map: str = ""
 
 
 @dataclass(frozen=True)
-class LiveFactPack:
-    """Public facts for Gemini Live plus server-only visual resolution data.
+class LivePresentationPack:
+    """Server-resolved visual capabilities for one rendered panel.
 
-    Gemini receives only ``facts_for_live`` and ``supported_effects``.  The
-    target map remains server-owned so the model never needs to construct or
-    guess a DOM identifier.
+    Gemini receives the rendered ASCII map and the effect catalog. The full
+    anchor-to-DOM map remains server-owned so it never constructs DOM IDs.
     """
 
-    facts_for_live: list[dict[str, Any]]
-    anchor_target_map: dict[str, dict[str, Any]]
     panel_anchor_map: dict[str, dict[str, Any]]
     supported_effects: list[dict[str, str]]
     effect_id_map: dict[str, str]
@@ -57,9 +52,10 @@ class PresentationRequest:
     domain_id: str
     template_id: str
     view_model: dict[str, Any]
-    adapter: DomainPresentationAdapter
     domain_data: dict[str, Any]
     compact_data: dict[str, Any]
+    adapter: DomainPresentationAdapter | None = None
+    presentation_instruction: str = ""
     render_panel: bool = True
 
 
@@ -67,7 +63,7 @@ class PresentationPipeline:
     """Run presentation stages shared by all business domains.
 
     Domains provide a view model and DomainPresentationAdapter. This class owns
-    renderer, metadata, and verified fact preparation only.
+    renderer, metadata, stage-map rendering, and visual validation data.
     """
 
     def __init__(
@@ -82,7 +78,7 @@ class PresentationPipeline:
         *,
         request: PresentationRequest,
     ) -> PreparedPresentation:
-        if request.adapter.domain_id != request.domain_id:
+        if request.adapter is not None and request.adapter.domain_id != request.domain_id:
             raise ValueError("Presentation adapter does not belong to the requested domain.")
 
         panel = self._renderer.render(
@@ -93,43 +89,33 @@ class PresentationPipeline:
         trace("VIEW_MODEL_READY template=%s", request.template_id)
         metadata = load_template_metadata(request.domain_id, request.template_id)
         declared = presentation_capabilities(metadata)
-        trace("ADAPTER_START")
-        facts = request.adapter.build_candidate_facts(
-            request.domain_data,
-            compact_data=request.compact_data,
-            presentation_capabilities=declared,
-        )
-        trace("ADAPTER_DONE facts=%s fact_ids=%s", len(facts), [fact.id for fact in facts])
+        trace("STAGE_MAP_START")
+        stage_context = {}
+        if request.adapter is not None:
+            stage_context = request.adapter.live_visual_stage_context(
+                domain_data=request.domain_data,
+                compact_data=request.compact_data,
+                view_model=request.view_model,
+            )
         visual_stage_map = self._renderer.render_visual_stage_map(
             domain_id=request.domain_id,
             template_id=request.template_id,
             data=request.view_model,
-            stage_context=request.adapter.live_visual_stage_context(
-                domain_data=request.domain_data,
-                compact_data=request.compact_data,
-                view_model=request.view_model,
-            ),
+            stage_context=stage_context,
         )
         return PreparedPresentation(
             panel=panel,
             template_metadata=metadata,
             declared_capabilities=declared,
-            grounded_facts=facts,
             concrete_animation_capabilities=concrete_animation_capabilities(panel.html, declared),
             visual_stage_map=visual_stage_map,
         )
 
     @staticmethod
-    def build_live_fact_pack(
-        request: PresentationRequest,
+    def build_live_presentation_pack(
         prepared: PreparedPresentation,
-    ) -> LiveFactPack:
-        """Expose compact fact/anchor aliases and retain trusted DOM mapping.
-
-        Fact aliases describe verified data. Visual calls use independent,
-        compact anchor aliases; the backend remains the sole authority that
-        resolves them to actual ``data-present-id`` values.
-        """
+    ) -> LivePresentationPack:
+        """Build the server-only anchor map and public effect catalog."""
 
         panel_anchor_map = _build_panel_anchor_map(prepared)
         panel_effect_ids = {
@@ -143,43 +129,7 @@ class PresentationPipeline:
             if effect_id in panel_effect_ids
         }
 
-        facts_for_live: list[dict[str, Any]] = []
-        anchor_target_map: dict[str, dict[str, Any]] = {}
-        for index, fact in enumerate(prepared.grounded_facts, start=1):
-            alias = f"f{index}"
-            item: dict[str, Any] = {
-                "id": alias,
-                "metric": fact.metric,
-                "operation": fact.operation,
-                "value": fact.value,
-                "unit": fact.unit,
-                "entity": fact.entity,
-                "visualizable": False,
-            }
-            capability = prepared.declared_capabilities.get(fact.focus)
-            target_id = _resolve_capability_target(capability, fact.entity)
-            anchor_id = _resolve_capability_anchor(capability, fact.entity)
-            evidence = panel_anchor_map.get(anchor_id or "")
-            if fact.visualizable and target_id and evidence and evidence.get("target_id") == target_id:
-                item["visualizable"] = True
-                item["anchor_id"] = anchor_id
-                effect_aliases = evidence["allowed_effect_ids"]
-                existing = anchor_target_map.get(anchor_id)
-                if existing is not None and existing.get("target_id") != target_id:
-                    raise ValueError(f"anchor_id resolves to multiple targets: {anchor_id}")
-                if existing is None:
-                    anchor_target_map[anchor_id] = {
-                        "target_id": target_id,
-                        "allowed_effect_ids": effect_aliases,
-                    }
-                else:
-                    existing["allowed_effect_ids"] = sorted(
-                        set(existing.get("allowed_effect_ids", [])) | set(effect_aliases)
-                    )
-            facts_for_live.append(item)
-        return LiveFactPack(
-            facts_for_live=facts_for_live,
-            anchor_target_map=anchor_target_map,
+        return LivePresentationPack(
             panel_anchor_map=panel_anchor_map,
             supported_effects=[
                 {"id": effect_id, "description": _EFFECT_DESCRIPTIONS[effect_id]}
@@ -217,7 +167,7 @@ def concrete_animation_capabilities(
 def _build_panel_anchor_map(prepared: PreparedPresentation) -> dict[str, dict[str, Any]]:
     """Resolve every metadata-declared anchor that exists in the rendered panel."""
 
-    anchor_target_map: dict[str, dict[str, Any]] = {}
+    panel_anchor_map: dict[str, dict[str, Any]] = {}
     for capability in prepared.declared_capabilities.values():
         if not isinstance(capability, dict):
             continue
@@ -232,11 +182,11 @@ def _build_panel_anchor_map(prepared: PreparedPresentation) -> dict[str, dict[st
                 _effect_id(effect)
                 for effect in prepared.concrete_animation_capabilities[target_id]
             ]
-            existing = anchor_target_map.get(anchor_id)
+            existing = panel_anchor_map.get(anchor_id)
             if existing is not None and existing.get("target_id") != target_id:
                 raise ValueError(f"anchor_id resolves to multiple targets: {anchor_id}")
             if existing is None:
-                anchor_target_map[anchor_id] = {
+                panel_anchor_map[anchor_id] = {
                     "target_id": target_id,
                     "allowed_effect_ids": effect_aliases,
                 }
@@ -244,7 +194,7 @@ def _build_panel_anchor_map(prepared: PreparedPresentation) -> dict[str, dict[st
                 existing["allowed_effect_ids"] = sorted(
                     set(existing["allowed_effect_ids"]) | set(effect_aliases)
                 )
-    return anchor_target_map
+    return panel_anchor_map
 
 
 def _entity_for_capability_target(
@@ -288,20 +238,6 @@ def _match_target_pattern(pattern: str, target_id: str) -> dict[str, int] | None
     if match is None:
         return None
     return {name: int(value) for name, value in match.groupdict().items()}
-
-
-def _resolve_capability_target(
-    capability: dict[str, Any] | None,
-    entity: dict[str, Any],
-) -> str | None:
-    """Resolve one declared metadata capability to its concrete DOM target."""
-
-    if not isinstance(capability, dict) or not _entity_matches_fixed(capability, entity):
-        return None
-    target_id = capability.get("target_id")
-    if isinstance(target_id, str) and target_id:
-        return target_id
-    return _render_pattern(capability.get("target_pattern"), entity)
 
 
 def _resolve_capability_anchor(

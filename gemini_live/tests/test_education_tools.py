@@ -76,7 +76,7 @@ class EducationToolsTests(unittest.TestCase):
         ))
         self.assertEqual(reveal.status, "reveal_answer")
 
-    def test_education_tool_reaches_live_fact_pipeline(self) -> None:
+    def test_education_tool_reaches_live_stage_map_pipeline(self) -> None:
         registry = LiveDomainRegistry()
         registry.register(EducationLiveDomain())
         orchestrator = LiveSessionOrchestrator(
@@ -89,7 +89,8 @@ class EducationToolsTests(unittest.TestCase):
             arguments={"operation": "+", "left_operand": 3, "right_operand": 2},
         ))
         self.assertEqual(result.response["status"], "completed")
-        self.assertIn("facts", result.response)
+        self.assertNotIn("facts", result.response)
+        self.assertIn("visual_stage_map", result.response)
         self.assertIsInstance(result.presentation, RenderedPresentation)
 
 

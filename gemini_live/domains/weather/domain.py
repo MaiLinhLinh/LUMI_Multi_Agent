@@ -9,9 +9,8 @@ from gemini_live.domains.base import DomainRequest, DomainResult, LiveDomain
 from gemini_live.presentation import PresentationRequest
 from gemini_live.settings import Settings
 
-from .adapter import WeatherPresentationAdapter
 from .context import WeatherContextResolver
-from .prompt import WEATHER_LIVE_GUIDANCE
+from .prompt import WEATHER_LIVE_GUIDANCE, WEATHER_PRESENTATION_INSTRUCTION
 from .tools import WEATHER_DECLARATION, WeatherTools
 from .view_model import VisualTools, _weather_contract
 
@@ -24,7 +23,6 @@ class WeatherLiveDomain(LiveDomain):
     ) -> None:
         self._weather = WeatherTools(settings)
         self._visual = VisualTools()
-        self._adapter = WeatherPresentationAdapter()
         self._context = WeatherContextResolver()
 
     @property
@@ -75,8 +73,6 @@ class WeatherLiveDomain(LiveDomain):
         data = result.get("data") if isinstance(result.get("data"), dict) else {}
         compact_data = self._visual.compact_weather_data(data)
         template_id = self._visual.select_weather_template(data)
-        domain_data = result.get("_llm_response", {}).get("weather_facts", {})
-        domain_data = domain_data if isinstance(domain_data, dict) else {}
         return DomainResult(
             status="completed",
             context=self._next_weather_context(result, weather_context),
@@ -84,9 +80,9 @@ class WeatherLiveDomain(LiveDomain):
                 domain_id=self.domain_id,
                 template_id=template_id,
                 view_model=_weather_contract(compact_data),
-                adapter=self._adapter,
-                domain_data=domain_data,
+                domain_data={},
                 compact_data=compact_data,
+                presentation_instruction=WEATHER_PRESENTATION_INSTRUCTION,
             ),
         )
 

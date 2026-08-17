@@ -15,7 +15,7 @@ from google.genai import types
 
 from gemini_live.domains import LiveDomainRegistry
 from gemini_live.settings import Settings
-from gemini_live.trace import begin_turn, trace, turn_id, warning
+from gemini_live.trace import begin_turn, trace, warning
 
 from .orchestrator import LiveSessionOrchestrator
 from .persistent_transport import PersistentLiveTransport
@@ -38,11 +38,15 @@ def _ui_trace_timestamp() -> str:
 
 _CORE_INSTRUCTION = """
 Bạn là Lumi, trợ lý giọng nói tiếng Việt.
-Chỉ dùng dữ liệu thật do tool đã đăng ký trả về; không tự tạo dữ kiện, số liệu, kết quả, vùng giao diện hoặc hiệu ứng.
-Khi một tool trả về presentation_instruction, facts, VISUAL STAGE MAP hoặc visual_effects, đó là chỉ dẫn trình bày có hiệu lực cho lượt hiện tại và được ưu tiên hơn hướng dẫn chung. Thực hiện đúng presentation_instruction đó.
-Khi presentation_instruction yêu cầu minh hoạ một fact, BẮT BUỘC gọi present_visual với đúng anchor_id và effect_id hợp lệ trước khi nói về fact đó.
-Không đọc, nhắc hoặc diễn giải tên tool, ID, JSON, template hay dữ liệu kỹ thuật cho người dùng. Giữ câu hỏi làm rõ ngắn gọn.
-"""
+Chỉ dùng dữ liệu thật do các tool đã đăng ký trả về. Không tự tạo hoặc thay đổi số liệu, kết quả, trạng thái, vùng giao diện, anchor hay hiệu ứng.
+Khi một tool trả về presentation_instruction, VISUAL STAGE MAP và visual_effects, đây là hợp đồng trình bày của lượt hiện tại:
+- presentation_instruction quy định cách trình bày;
+- VISUAL STAGE MAP là nguồn dữ liệu và mô phỏng màn hình người dùng đang nhìn thấy;
+- visual_effects là danh sách hiệu ứng duy nhất được phép dùng.
+Tuân thủ presentation_instruction trước mọi hướng dẫn chung.
+Khi chọn nói về một vùng có [anchor: ...] trong VISUAL STAGE MAP, gọi present_visual với đúng anchor_id của vùng đó và một effect_id hợp lệ ngay trước khi nói về vùng đó. Không gọi anchor không có trong map, không gọi effect không có trong visual_effects, và không gọi animation cho vùng không định nói ngay sau đó.
+Không đọc, nhắc hoặc diễn giải tên tool, anchor_id, effect_id, JSON, template hay dữ liệu kỹ thuật cho người dùng. Giữ câu hỏi làm rõ ngắn gọn.
+""".strip()
 
 
 class GeminiLiveSessionError(RuntimeError):
@@ -55,7 +59,7 @@ def _sample_rate(mime_type: str | None) -> int:
 
 
 class GeminiLiveSession:
-    """Transport only: domains own tools, facts, templates and planning."""
+    """Transport only: domains own tools, templates and presentation state."""
 
     def __init__(
         self,
@@ -185,10 +189,6 @@ class PersistentGeminiLiveConversation:
         self._pending_visual_marker: dict[str, Any] | None = None
         self._interrupted_turn_pending = False
         self._output_turn_id: str | None = None
-
-    @property
-    def turn_id(self) -> str:
-        return turn_id()
 
     @property
     def state(self) -> LiveSessionState:
@@ -376,7 +376,6 @@ class PersistentGeminiLiveConversation:
             return
         responses: list[types.FunctionResponse] = []
         response_tool_names: list[str] = []
-        fact_count = 0
         effect_count = 0
         for call in calls:
             await self._flush_ui_text_trace()
@@ -410,7 +409,6 @@ class PersistentGeminiLiveConversation:
             )
             response = result.response
             if isinstance(response, dict):
-                fact_count = len(response.get("facts", []))
                 effect_count = len(response.get("visual_effects", []))
             presentation = result.presentation
             panel = getattr(presentation, "panel", None)
@@ -428,8 +426,7 @@ class PersistentGeminiLiveConversation:
             "content": ", ".join(response_tool_names),
         })
         trace(
-            "TOOL_RESPONSE_SENT_TO_GEMINI facts=%s effects=%s",
-            fact_count,
+            "TOOL_RESPONSE_SENT_TO_GEMINI effects=%s",
             effect_count,
         )
 
@@ -511,7 +508,6 @@ class PersistentGeminiLiveConversation:
                 "type": "text",
                 "text": text,
                 "turn_id": self._ensure_output_turn_id(),
-                "presentation_approved": True,
             })
 
     async def _flush_ui_text_trace(self) -> None:

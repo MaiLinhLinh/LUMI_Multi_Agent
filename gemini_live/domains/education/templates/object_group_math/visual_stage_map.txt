@@ -1,5 +1,7 @@
 VISUAL STAGE MAP — MÀN HÌNH BÀI TOÁN
 
+MỤC TIÊU LƯỢT NÀY: {{ stage.presentation_goal | default('Không có mục tiêu bổ sung.') }}
+
 ┌──────────────────────┐   {{ data.operator }}   ┌──────────────────────┐   =   ┌──────────────────────┐
 │ Nhóm bên trái        │                │ Nhóm bên phải        │       │ Kết quả              │
 │ {{ data.left_count }} {{ data.asset_label }}{% for _ in range(16 - (data.left_count|string|length) - (data.asset_label|length)) %} {% endfor %}│                │ {{ data.right_count }} {{ data.asset_label }}{% for _ in range(15 - (data.right_count|string|length) - (data.asset_label|length)) %} {% endfor %}│       │ Vật thể: {{ stage.result_items_text }} [anchor: c]│

@@ -23,19 +23,3 @@ class WeatherContextResolver:
             if isinstance(location, str) and location.strip():
                 resolved["location_text"] = location.strip()
         return resolved
-
-    @staticmethod
-    def compact_for_prompt(context: dict[str, Any]) -> dict[str, Any]:
-        """Exclude raw snapshot/HTML while retaining useful confirmed fields."""
-        allowed = {
-            "last_location_id",
-            "last_location_name",
-            "last_request_type",
-            "last_start_date",
-            "last_days",
-        }
-        return {
-            key: value
-            for key, value in context.items()
-            if key in allowed and isinstance(value, (str, int, float, bool))
-        }

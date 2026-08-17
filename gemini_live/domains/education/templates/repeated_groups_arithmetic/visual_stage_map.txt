@@ -1,5 +1,7 @@
 VISUAL STAGE MAP — EQUAL GROUPS ARITHMETIC
 
+CURRENT PRESENTATION GOAL: {{ stage.presentation_goal | default('No additional goal.') }}
+
 {{ data.group_count }} groups, each with {{ data.items_per_group }} {{ data.asset_label }}.
 
 {% set groups = data.groups|default([], true) -%}

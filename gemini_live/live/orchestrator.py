@@ -36,7 +36,7 @@ class LiveSessionOrchestrator:
         self._presentation_pipeline = presentation_pipeline
         self._memory_store = memory_store or SessionMemoryStore()
         self._technical_states: dict[str, LiveSessionState] = {}
-        self._fact_presentations: dict[str, ActivePresentationState] = {}
+        self._active_presentations: dict[str, ActivePresentationState] = {}
 
     def session_state(self, session_id: str) -> LiveSessionState:
         """Return shared technical state; domain business state is separate."""
@@ -58,22 +58,6 @@ class LiveSessionOrchestrator:
         """Use after a closed/recovered transport; keep domain memory intact."""
 
         self._technical_states[session_id] = LiveSessionState.IDLE
-
-    async def execute_tool_call(
-        self,
-        *,
-        session_id: str,
-        query: str,
-        tool_name: str,
-        arguments: dict[str, Any],
-    ) -> dict[str, Any]:
-        result = await self.execute_tool_call_result(
-            session_id=session_id,
-            query=query,
-            tool_name=tool_name,
-            arguments=arguments,
-        )
-        return result.response
 
     async def execute_tool_call_result(
         self,
@@ -122,30 +106,27 @@ class LiveSessionOrchestrator:
                         "detail": f"Presentation could not be prepared: {exc}",
                     },
                 )
-            live_fact_pack = self._presentation_pipeline.build_live_fact_pack(
-                presentation_request,
-                prepared,
-            )
-            # The alias-to-target map is intentionally not included in the
-            # Gemini tool response. CP-04 will retain it per Live session.
-            response["facts"] = live_fact_pack.facts_for_live
-            response["visual_effects"] = live_fact_pack.supported_effects
+            presentation_pack = self._presentation_pipeline.build_live_presentation_pack(prepared)
+            # The full alias-to-target map is intentionally server-only.
+            response["visual_effects"] = presentation_pack.supported_effects
             if prepared.visual_stage_map:
                 response["visual_stage_map"] = prepared.visual_stage_map
-            presentation_instruction = presentation_request.adapter.live_presentation_instruction()
+            presentation_instruction = presentation_request.presentation_instruction
+            if not presentation_instruction and presentation_request.adapter is not None:
+                presentation_instruction = presentation_request.adapter.live_presentation_instruction()
             if presentation_instruction:
                 response["presentation_instruction"] = presentation_instruction
-            presentation_context = presentation_request.adapter.live_presentation_context()
-            if presentation_context:
-                response.update(presentation_context)
-            self._fact_presentations[session_id] = ActivePresentationState.from_fact_pack(
+            self._active_presentations[session_id] = ActivePresentationState.from_panel_anchor_map(
                 template_id=presentation_request.template_id,
-                pack=live_fact_pack,
+                panel_anchor_map=presentation_pack.panel_anchor_map,
+                effect_id_map=presentation_pack.effect_id_map,
             )
-            response["presentation"] = {
-                "template_id": presentation_request.template_id,
-                "mode": "fact_pack",
-            }
+            trace(
+                "LIVE_STAGE_MAP_READY map_chars=%s effects=%s anchors=%s",
+                len(prepared.visual_stage_map),
+                len(presentation_pack.supported_effects),
+                len(presentation_pack.panel_anchor_map),
+            )
             trace(
                 "LIVE_PRESENTATION_INSTRUCTION_READY domain=%s chars=%s",
                 presentation_request.domain_id,
@@ -175,7 +156,7 @@ class LiveSessionOrchestrator:
     ) -> dict[str, str]:
         """Resolve one Gemini Live visual call without exposing DOM IDs to it."""
 
-        presentation = self._fact_presentations.get(session_id)
+        presentation = self._active_presentations.get(session_id)
         if presentation is None:
             raise ValueError("no active presentation is available")
         return presentation.resolve(anchor_id=anchor_id, effect_id=effect_id)

@@ -5,7 +5,6 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any
 
-from .planner_schemas import GroundedFact
 from .schemas import RenderedPanel
 
 
@@ -18,7 +17,7 @@ class PresentationRenderer(ABC):
 
 
 class DomainPresentationAdapter(ABC):
-    """Domain facts and target resolution used by the shared Live pipeline."""
+    """Domain-owned narration guidance and trusted stage state."""
 
     @property
     @abstractmethod
@@ -26,32 +25,10 @@ class DomainPresentationAdapter(ABC):
         """Stable domain identifier."""
 
     @abstractmethod
-    def build_candidate_facts(
-        self,
-        domain_data: dict[str, Any],
-        *,
-        compact_data: dict[str, Any],
-        presentation_capabilities: dict[str, Any],
-    ) -> list[GroundedFact]:
-        """Produce verified facts with their permitted visual evidence."""
-
-    @abstractmethod
     def live_presentation_instruction(self) -> str:
-        """Return optional guidance sent with this domain's verified fact pack.
-
-        This is deliberately separate from the connection-level Live guidance.
-        A domain can describe how Gemini should turn its facts into narration at
-        the moment a tool response makes a rendered presentation available.
-        Domains that do not need extra presentation guidance keep the shared
-        behavior by returning an empty string.
-        """
+        """Return this domain's presentation prompt from its prompt module."""
 
         return ""
-
-    def live_presentation_context(self) -> dict[str, Any]:
-        """Return optional domain context that accompanies a Live fact pack."""
-
-        return {}
 
     def live_visual_stage_context(
         self,
@@ -62,8 +39,8 @@ class DomainPresentationAdapter(ABC):
     ) -> dict[str, Any]:
         """Return trusted state used to render an optional template stage map.
 
-        The default is intentionally empty: templates without a visual stage
-        map continue to use the shared Live fact-pack contract unchanged.
+        The default is intentionally empty for templates without dynamic stage
+        state.
         """
 
         return {}

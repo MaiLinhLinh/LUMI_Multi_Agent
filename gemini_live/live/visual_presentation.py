@@ -5,9 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from gemini_live.presentation import LiveFactPack
-
-
 PRESENT_VISUAL_TOOL = {
     "name": "present_visual",
     "description": (
@@ -41,11 +38,17 @@ class ActivePresentationState:
     effect_id_map: dict[str, str]
 
     @classmethod
-    def from_fact_pack(cls, *, template_id: str, pack: LiveFactPack) -> "ActivePresentationState":
+    def from_panel_anchor_map(
+        cls,
+        *,
+        template_id: str,
+        panel_anchor_map: dict[str, dict[str, Any]],
+        effect_id_map: dict[str, str],
+    ) -> "ActivePresentationState":
         return cls(
             template_id=template_id,
-            panel_anchor_map=dict(pack.panel_anchor_map),
-            effect_id_map=dict(pack.effect_id_map),
+            panel_anchor_map=dict(panel_anchor_map),
+            effect_id_map=dict(effect_id_map),
         )
 
     def resolve(self, *, anchor_id: str, effect_id: str) -> dict[str, str]:
@@ -71,6 +74,6 @@ class ActivePresentationState:
 
 @dataclass(frozen=True)
 class RenderedPresentation:
-    """Trusted rendered panel associated with the active fact presentation."""
+    """Trusted rendered panel associated with the active presentation."""
 
     panel: dict[str, Any]
