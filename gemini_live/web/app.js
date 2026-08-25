@@ -144,18 +144,81 @@ function fitPresentationToHost(content) {
   scheduleFit();
 }
 
+function gridPlacement(block) {
+  const grid = block?.grid;
+  const values = [grid?.col, grid?.row, grid?.col_span, grid?.row_span];
+  if (!values.every((value) => Number.isInteger(value) && value > 0)) return null;
+  return grid;
+}
+
+function renderGridLayout(panel, content) {
+  const layout = panel?.layout_spec;
+  if (!layout || layout?.canvas?.columns !== 12 || layout?.canvas?.rows !== 10 || !Array.isArray(layout.blocks)) return;
+  const assetUrls = new Map(
+    (Array.isArray(panel.assets) ? panel.assets : [])
+      .filter((asset) => typeof asset?.id === "string" && typeof asset?.url === "string")
+      .map((asset) => [asset.id, asset.url]),
+  );
+  const grid = document.createElement("main");
+  grid.className = "education-grid-layout";
+  grid.setAttribute("aria-label", "Nội dung học trực quan");
+
+  for (const block of layout.blocks) {
+    const placement = gridPlacement(block);
+    if (!placement || typeof block?.id !== "string") continue;
+    let node = null;
+    if (block.type === "text" && typeof block.content === "string") {
+      node = document.createElement("p");
+      node.className = "education-grid-text";
+      node.textContent = block.content;
+    } else if (block.type === "image" && typeof block.asset_id === "string" && typeof block.label === "string") {
+      const url = assetUrls.get(block.asset_id);
+      if (!url) continue;
+      node = document.createElement("figure");
+      node.className = "education-grid-image";
+      const image = document.createElement("img");
+      image.src = url;
+      image.alt = block.label;
+      const label = document.createElement("figcaption");
+      label.textContent = block.label;
+      node.append(image, label);
+    }
+    if (!node) continue;
+    node.dataset.blockId = block.id;
+    node.dataset.gridRow = String(placement.row);
+    const targetId = panel?.presentation_targets?.[block.id];
+    if (typeof targetId === "string" && targetId) node.dataset.presentId = targetId;
+    node.style.gridColumn = `${placement.col} / span ${placement.col_span}`;
+    node.style.gridRow = `${placement.row} / span ${placement.row_span}`;
+    grid.append(node);
+  }
+  content.append(grid);
+}
+
 function renderPanel(panel) {
-  if (!panel?.html) return;
+  const isHtmlPanel = typeof panel?.html === "string";
+  const isGridPanel = panel?.ui_type === "grid_layout";
+  if (!isHtmlPanel && !isGridPanel) return;
   contentPanel.hidden = false; weatherView.hidden = false; welcome.hidden = true;
   workspace.classList.remove("no-dashboard"); workspace.classList.add("has-dashboard");
   contentTitle.textContent = panel.ui_type === "weather" ? "Thông tin thời tiết" : "Nội dung trực quan";
   const root = templateHost.shadowRoot || templateHost.attachShadow({ mode: "open" });
   root.replaceChildren();
   const style = document.createElement("style");
-  style.textContent = `[data-present-id]{transition:outline .18s,box-shadow .18s,transform .18s}.lumi-highlight{outline:3px solid #0ea5e9!important;outline-offset:4px;box-shadow:0 0 0 8px #0ea5e922!important}.lumi-pulse{animation:lumi-pulse 720ms cubic-bezier(.2,.8,.3,1) 2}@keyframes lumi-pulse{0%,100%{transform:scale(1);filter:none}50%{transform:scale(1.035);filter:drop-shadow(0 0 8px rgba(14,165,233,.7))}}`;
+  style.textContent = `[data-present-id]{transition:outline .18s,box-shadow .18s,transform .18s}.lumi-highlight{outline:3px solid #0ea5e9!important;outline-offset:4px;box-shadow:0 0 0 8px #0ea5e922!important}.lumi-pulse{animation:lumi-pulse 720ms cubic-bezier(.2,.8,.3,1) 2}@keyframes lumi-pulse{0%,100%{transform:scale(1);filter:none}50%{transform:scale(1.035);filter:drop-shadow(0 0 8px rgba(14,165,233,.7))}}
+  .education-grid-layout{width:100%;min-height:100%;aspect-ratio:12 / 10;display:grid;grid-template-columns:repeat(12,minmax(0,1fr));grid-template-rows:repeat(10,minmax(0,1fr));gap:clamp(6px,1vw,12px);padding:clamp(18px,3vw,34px);box-sizing:border-box;overflow:hidden;background:linear-gradient(145deg,#effcf4,#fffbe9);font-family:"Nunito","Segoe UI",sans-serif;color:#25324a}
+  .education-grid-layout>*{min-width:0;min-height:0;box-sizing:border-box}
+  .education-grid-text{z-index:1;align-self:center;margin:0;text-align:center;font-size:clamp(14px,1.7vw,22px);font-weight:700;line-height:1.25;color:#5c6c7c}
+  .education-grid-text[data-grid-row="1"]{font-size:clamp(25px,3.8vw,42px);font-weight:900;letter-spacing:-.04em;line-height:1.08;color:#25324a}
+  .education-grid-text[data-grid-row="2"]{font-size:clamp(15px,1.9vw,21px);font-weight:600;color:#5c6c7c}
+  .education-grid-image{z-index:1;display:grid;grid-template-rows:minmax(0,1fr) auto;gap:clamp(7px,1vw,12px);margin:0;padding:clamp(12px,2vw,22px);border:3px solid #2181bf;border-radius:18px;background:#fff;box-shadow:0 8px 20px rgba(35,102,67,.08);overflow:hidden}
+  .education-grid-image img{width:100%;height:100%;min-width:0;min-height:0;object-fit:contain;filter:drop-shadow(0 4px 3px rgba(34,94,61,.14))}
+  .education-grid-image figcaption{color:#435369;font-size:clamp(14px,1.7vw,20px);font-weight:800;line-height:1.1;text-align:center}
+  @media(max-width:560px){.education-grid-layout{gap:5px;padding:12px}.education-grid-image{padding:8px;border-width:2px;border-radius:12px}.education-grid-text[data-grid-row="1"]{font-size:clamp(20px,7vw,30px)}}`;
   const content = document.createElement("div");
   content.style.cssText = "width:100%; transform-origin:top center; will-change:transform;";
-  content.innerHTML = panel.html;
+  if (isHtmlPanel) content.innerHTML = panel.html;
+  else renderGridLayout(panel, content);
   root.append(style, content);
   fitPresentationToHost(content);
   animationController.clear();

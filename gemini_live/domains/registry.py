@@ -49,6 +49,12 @@ class LiveDomainRegistry:
         guidance = [domain.prompt_guidance.strip() for domain in self._domains.values()]
         return "\n\n".join(item for item in guidance if item)
 
+    def presentation_instruction_for(self, domain_id: str) -> str:
+        """Return the presentation contract owned by one registered business domain."""
+
+        domain = self.domain(domain_id)
+        return domain.presentation_instruction if domain is not None else ""
+
     @property
     def domain_ids(self) -> tuple[str, ...]:
         return tuple(self._domains)

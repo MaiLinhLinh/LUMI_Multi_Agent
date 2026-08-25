@@ -1,0 +1,9 @@
+{
+  "domain_id": "education",
+  "asset_catalog_path": "assets/catalog.json",
+  "template_catalog_path": "plans/catalog.json",
+  "presentation_prompt_path": "prompt.py",
+  "presentation_prompt_constant": "EDUCATION_PRESENTATION_INSTRUCTION",
+  "allowed_widget_ids": ["text", "image", "object_group", "answer", "number_display"],
+  "tool_capabilities": []
+}

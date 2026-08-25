@@ -1,21 +1,30 @@
 """Shared preparation of trusted presentation data for every business domain.
 
-Domains provide a normalized view model, selected template ID, and an adapter.
-This module renders the panel, discovers its capabilities, and prepares the
-trusted ASCII stage map. It deliberately does not decide narration or scenes.
+Domains provide trusted render data, an optional template ID, and an adapter.
+This module renders an already selected template, discovers its capabilities,
+and prepares the trusted ASCII stage map. It deliberately does not choose a
+template or decide narration.
 """
 
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from .base import DomainPresentationAdapter
 from .capabilities import load_template_metadata, presentation_capabilities
+from .dynamic_grid import (
+    DynamicGridAsset,
+    DynamicGridPresentation,
+    PreparedDynamicGridPresentation,
+    prepare_dynamic_grid,
+)
 from gemini_live.trace import trace
 from .renderer import JinjaPresentationRenderer
 from .schemas import RenderedPanel
+from gemini_live.template_engine.layout_contract import layout_spec_to_dict
+from gemini_live.template_engine.template_manager import TemplateManager
 
 
 _PRESENT_ID = re.compile(r'data-present-id\s*=\s*["\']([^"\']+)["\']')
@@ -50,10 +59,9 @@ class PresentationRequest:
     """Domain output consumed by the shared pipeline after a successful tool call."""
 
     domain_id: str
-    template_id: str
-    view_model: dict[str, Any]
-    domain_data: dict[str, Any]
-    compact_data: dict[str, Any]
+    presentation_brief: str = ""
+    render_data: dict[str, Any] = field(default_factory=dict)
+    template_id: str | None = None
     adapter: DomainPresentationAdapter | None = None
     presentation_instruction: str = ""
     render_panel: bool = True
@@ -70,21 +78,63 @@ class PresentationPipeline:
         self,
         *,
         renderer: JinjaPresentationRenderer | None = None,
+        template_manager: TemplateManager | None = None,
     ) -> None:
         self._renderer = renderer or JinjaPresentationRenderer()
+        self._template_manager = template_manager
+
+    async def resolve_template(
+        self,
+        *,
+        request: PresentationRequest,
+        recent_history: tuple[dict[str, str], ...] = (),
+    ) -> PresentationRequest | DynamicGridPresentation:
+        """Resolve only a request without a fixed template through Template LLM.
+
+        Existing business domains still provide ``template_id`` and therefore
+        retain their current Jinja render path without a Template LLM call.
+        """
+
+        if request.template_id is not None:
+            return request
+        if self._template_manager is None:
+            raise ValueError("PresentationRequest requires TemplateManager when template_id is absent.")
+
+        resolution = await self._template_manager.resolve(request, recent_history=recent_history)
+        if resolution.decision == "use_existing":
+            if resolution.template_id is None:
+                raise ValueError("TemplateManager returned use_existing without template_id.")
+            return replace(request, template_id=resolution.template_id)
+        if resolution.decision != "create_layout" or resolution.layout is None:
+            raise ValueError("TemplateManager returned an unsupported resolution.")
+
+        return DynamicGridPresentation(
+            domain_id=request.domain_id,
+            layout_spec=layout_spec_to_dict(resolution.layout),
+            assets=tuple(
+                DynamicGridAsset(
+                    id=asset.id,
+                    url=asset.public_url(f"/assets/{request.domain_id}"),
+                )
+                for asset in resolution.assets
+            ),
+            presentation_instruction=request.presentation_instruction,
+        )
 
     def prepare(
         self,
         *,
         request: PresentationRequest,
     ) -> PreparedPresentation:
+        if request.template_id is None:
+            raise ValueError("PresentationRequest requires a template before rendering.")
         if request.adapter is not None and request.adapter.domain_id != request.domain_id:
             raise ValueError("Presentation adapter does not belong to the requested domain.")
 
         panel = self._renderer.render(
             domain_id=request.domain_id,
             template_id=request.template_id,
-            data=request.view_model,
+            data=request.render_data,
         )
         trace("VIEW_MODEL_READY template=%s", request.template_id)
         metadata = load_template_metadata(request.domain_id, request.template_id)
@@ -93,14 +143,13 @@ class PresentationPipeline:
         stage_context = {}
         if request.adapter is not None:
             stage_context = request.adapter.live_visual_stage_context(
-                domain_data=request.domain_data,
-                compact_data=request.compact_data,
-                view_model=request.view_model,
+                render_data=request.render_data,
+                template_id=request.template_id,
             )
         visual_stage_map = self._renderer.render_visual_stage_map(
             domain_id=request.domain_id,
             template_id=request.template_id,
-            data=request.view_model,
+            data=request.render_data,
             stage_context=stage_context,
         )
         return PreparedPresentation(
@@ -110,6 +159,19 @@ class PresentationPipeline:
             concrete_animation_capabilities=concrete_animation_capabilities(panel.html, declared),
             visual_stage_map=visual_stage_map,
         )
+
+    def prepare_dynamic_grid(
+        self,
+        *,
+        presentation: DynamicGridPresentation,
+    ) -> PreparedDynamicGridPresentation:
+        """Prepare a validated grid panel without invoking the Jinja renderer.
+
+        Anchor/effect maps and the ASCII stage map are intentionally added in
+        Checkpoint 6; this checkpoint only establishes the presentation branch.
+        """
+
+        return prepare_dynamic_grid(presentation)
 
     @staticmethod
     def build_live_presentation_pack(

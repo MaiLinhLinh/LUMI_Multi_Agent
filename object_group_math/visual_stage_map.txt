@@ -1,0 +1,27 @@
+VISUAL STAGE MAP — MÀN HÌNH BÀI TOÁN
+
+┌──────────────────────┐   {{ data.operator }}   ┌──────────────────────┐   =   ┌──────────────────────┐
+│ Nhóm bên trái        │                │ Nhóm bên phải        │       │ Kết quả              │
+│ {{ data.left_count }} {{ data.asset_label }}{% for _ in range(16 - (data.left_count|string|length) - (data.asset_label|length)) %} {% endfor %}│                │ {{ data.right_count }} {{ data.asset_label }}{% for _ in range(15 - (data.right_count|string|length) - (data.asset_label|length)) %} {% endfor %}│       │ Vật thể: đang ẩn [anchor: c]│
+│                      │                │                      │       │ Trạng thái: chỉ reveal theo QUY TẮC KẾT QUẢ│
+│                      │                │                      │       │ Số: đang ẩn [anchor: e]│
+│                      │                │                      │       │ Trạng thái: chỉ reveal theo QUY TẮC KẾT QUẢ│
+└──────────────────────┘                └──────────────────────┘       └──────────────────────┘
+[anchor: a]                             [anchor: b]
+
+Biểu thức phía dưới: {{ data.left_count }} {{ data.operator }} {{ data.right_count }} = ?
+[anchor: d]
+
+QUY TẮC KẾT QUẢ
+- Kết quả hiện đang ẩn trên màn hình.
+- Nếu trẻ trả lời đúng: được phép gọi effect phù hợp cho c và/hoặc e, sau đó nói đáp án.
+- Nếu trẻ trả lời sai rõ ràng lần đầu: giữ kết quả ẩn; gợi ý bằng a, b hoặc d rồi hỏi lại.
+- Nếu trẻ trả lời sai rõ ràng lần thứ hai cho cùng bài: được phép gọi effect phù hợp cho c và/hoặc e, sau đó nêu đáp án.
+- Câu không nghe rõ, câu mơ hồ hoặc câu xin gợi ý không tính là một lần trả lời sai.
+
+ANCHOR LEGEND
+a = nhóm vật thể bên trái
+b = nhóm vật thể bên phải
+c = các vật thể kết quả
+d = biểu thức
+e = số kết quả

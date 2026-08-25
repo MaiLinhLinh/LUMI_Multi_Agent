@@ -1,0 +1,229 @@
+{
+  "template_id": "tm2",
+  "domain_id": "education",
+  "description": "Panel with a title at the top and three fruit cards arranged horizontally. Each card shows the fruit image with its English name visible, and a hidden Vietnamese name beneath to serve as the back side of the flashcard.",
+  "blocks": [
+    {
+      "widget_id": "text",
+      "grid": {
+        "col": 1,
+        "row": 1,
+        "col_span": 16,
+        "row_span": 1
+      },
+      "props": {
+        "content": "$block_1_content",
+        "role": "title"
+      },
+      "initial_visibility": "visible"
+    },
+    {
+      "widget_id": "image",
+      "grid": {
+        "col": 1,
+        "row": 2,
+        "col_span": 5,
+        "row_span": 4
+      },
+      "props": {
+        "asset_id": "$block_2_asset_id"
+      },
+      "initial_visibility": "visible"
+    },
+    {
+      "widget_id": "text",
+      "grid": {
+        "col": 1,
+        "row": 6,
+        "col_span": 5,
+        "row_span": 1
+      },
+      "props": {
+        "content": "$block_3_content",
+        "role": "label"
+      },
+      "initial_visibility": "visible"
+    },
+    {
+      "widget_id": "text",
+      "grid": {
+        "col": 1,
+        "row": 7,
+        "col_span": 5,
+        "row_span": 1
+      },
+      "props": {
+        "content": "$block_4_content",
+        "role": "label"
+      },
+      "initial_visibility": "visible"
+    },
+    {
+      "widget_id": "image",
+      "grid": {
+        "col": 6,
+        "row": 2,
+        "col_span": 5,
+        "row_span": 4
+      },
+      "props": {
+        "asset_id": "$block_5_asset_id"
+      },
+      "initial_visibility": "visible"
+    },
+    {
+      "widget_id": "text",
+      "grid": {
+        "col": 6,
+        "row": 6,
+        "col_span": 5,
+        "row_span": 1
+      },
+      "props": {
+        "content": "$block_6_content",
+        "role": "label"
+      },
+      "initial_visibility": "visible"
+    },
+    {
+      "widget_id": "text",
+      "grid": {
+        "col": 6,
+        "row": 7,
+        "col_span": 5,
+        "row_span": 1
+      },
+      "props": {
+        "content": "$block_7_content",
+        "role": "label"
+      },
+      "initial_visibility": "visible"
+    },
+    {
+      "widget_id": "image",
+      "grid": {
+        "col": 11,
+        "row": 2,
+        "col_span": 5,
+        "row_span": 4
+      },
+      "props": {
+        "asset_id": "$block_8_asset_id"
+      },
+      "initial_visibility": "visible"
+    },
+    {
+      "widget_id": "text",
+      "grid": {
+        "col": 11,
+        "row": 6,
+        "col_span": 5,
+        "row_span": 1
+      },
+      "props": {
+        "content": "$block_9_content",
+        "role": "label"
+      },
+      "initial_visibility": "visible"
+    },
+    {
+      "widget_id": "text",
+      "grid": {
+        "col": 11,
+        "row": 7,
+        "col_span": 5,
+        "row_span": 1
+      },
+      "props": {
+        "content": "$block_10_content",
+        "role": "label"
+      },
+      "initial_visibility": "visible"
+    }
+  ],
+  "bindings": [
+    {
+      "key": "$block_1_content",
+      "block_index": 1,
+      "prop_name": "content",
+      "type": "string",
+      "required": true,
+      "description": "Nội dung văn bản cần hiển thị."
+    },
+    {
+      "key": "$block_2_asset_id",
+      "block_index": 2,
+      "prop_name": "asset_id",
+      "type": "string",
+      "required": true,
+      "description": "ID của asset ảnh sẽ hiển thị.",
+      "source": "asset_catalog.id"
+    },
+    {
+      "key": "$block_3_content",
+      "block_index": 3,
+      "prop_name": "content",
+      "type": "string",
+      "required": true,
+      "description": "Nội dung văn bản cần hiển thị."
+    },
+    {
+      "key": "$block_4_content",
+      "block_index": 4,
+      "prop_name": "content",
+      "type": "string",
+      "required": true,
+      "description": "Nội dung văn bản cần hiển thị."
+    },
+    {
+      "key": "$block_5_asset_id",
+      "block_index": 5,
+      "prop_name": "asset_id",
+      "type": "string",
+      "required": true,
+      "description": "ID của asset ảnh sẽ hiển thị.",
+      "source": "asset_catalog.id"
+    },
+    {
+      "key": "$block_6_content",
+      "block_index": 6,
+      "prop_name": "content",
+      "type": "string",
+      "required": true,
+      "description": "Nội dung văn bản cần hiển thị."
+    },
+    {
+      "key": "$block_7_content",
+      "block_index": 7,
+      "prop_name": "content",
+      "type": "string",
+      "required": true,
+      "description": "Nội dung văn bản cần hiển thị."
+    },
+    {
+      "key": "$block_8_asset_id",
+      "block_index": 8,
+      "prop_name": "asset_id",
+      "type": "string",
+      "required": true,
+      "description": "ID của asset ảnh sẽ hiển thị.",
+      "source": "asset_catalog.id"
+    },
+    {
+      "key": "$block_9_content",
+      "block_index": 9,
+      "prop_name": "content",
+      "type": "string",
+      "required": true,
+      "description": "Nội dung văn bản cần hiển thị."
+    },
+    {
+      "key": "$block_10_content",
+      "block_index": 10,
+      "prop_name": "content",
+      "type": "string",
+      "required": true,
+      "description": "Nội dung văn bản cần hiển thị."
+    }
+  ]
+}

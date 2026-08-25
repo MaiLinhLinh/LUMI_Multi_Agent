@@ -362,6 +362,11 @@ app = Starlette(routes=[
     Route("/api/health", health),
     Route("/api/client-debug", client_debug, methods=["POST"]),
     WebSocketRoute("/ws/live", live_socket),
+    Mount(
+        "/assets/education",
+        app=StaticFiles(directory=BASE / "domains" / "education" / "templates" / "assets"),
+        name="education-assets",
+    ),
     Mount("/assets", app=StaticFiles(directory=WEB), name="assets"),
 ])
 

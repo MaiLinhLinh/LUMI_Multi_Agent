@@ -1,7 +1,5 @@
 VISUAL STAGE MAP — EQUAL GROUPS ARITHMETIC
 
-CURRENT PRESENTATION GOAL: {{ stage.presentation_goal | default('No additional goal.') }}
-
 {{ data.group_count }} groups, each with {{ data.items_per_group }} {{ data.asset_label }}.
 
 {% set groups = data.groups|default([], true) -%}
@@ -23,8 +21,15 @@ ROW {{ loop.index }} (left to right)
 
 {% endfor -%}
 BOTTOM, below every group row
-Expression: {{ data.left_operand }} {{ data.operator }} {{ data.right_operand }} = {{ stage.answer_text }}
-[anchor: d = expression]  [anchor: e = answer, currently {{ stage.answer_state }}]
+Expression: {{ data.left_operand }} {{ data.operator }} {{ data.right_operand }} = ?
+[anchor: d = expression]  [anchor: e = answer, currently hidden]
+
+ANSWER RULES
+- The answer is currently hidden on screen.
+- If the child answers correctly: an allowed effect may be used for e, then state the answer.
+- After the first clearly incorrect answer: keep the answer hidden; guide observation of g1...gN or d, then ask again.
+- After the second clearly incorrect answer for this same exercise: an allowed effect may be used for e, then state the answer.
+- Unclear, ambiguous, or help-seeking speech does not count as an incorrect answer.
 
 ANCHOR LEGEND
 g1…g{{ data.group_count }} = one equal group of objects, in the row and column shown above

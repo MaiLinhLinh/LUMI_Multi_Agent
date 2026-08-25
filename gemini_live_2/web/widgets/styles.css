@@ -1,0 +1,120 @@
+:root {
+  --panel-font: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --panel-ink: #0f172a;
+  --panel-muted: #64748b;
+  --panel-surface: #ffffff;
+  --panel-border: #cbd5e1;
+  --panel-accent: #0ea5e9;
+  --panel-radius: 18px;
+  --panel-space: clamp(8px, 1.4vw, 18px);
+}
+
+.panel-ir-grid {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: repeat(16, minmax(0, 1fr));
+  grid-template-rows: repeat(10, minmax(0, 1fr));
+  gap: var(--panel-space);
+  padding: clamp(14px, 2.8vw, 32px);
+  overflow: hidden;
+  background: linear-gradient(145deg, #f4fbff, #fffdf5);
+}
+
+.panel-ir-grid > * { min-width: 0; min-height: 0; }
+
+.lumi-widget {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  box-sizing: border-box;
+  container-type: size;
+  font-family: var(--panel-font);
+  color: var(--panel-ink);
+}
+
+.lumi-widget-text {
+  margin: 0; min-width: 0; min-height: 0;
+  padding: clamp(4px, min(4cqi, 8cqb), 16px);
+  display: grid; place-items: center; text-align: center;
+  overflow-wrap: anywhere; overflow: hidden;
+}
+.lumi-widget-text-title {
+  /* A title often occupies one short grid row. Keep its glyphs visible even
+     when the row is tighter than the font's line box. */
+  padding-block: 0;
+  overflow: visible;
+  font-size: clamp(1rem, min(5cqi, 46cqb), 3rem);
+  font-weight: 760;
+  line-height: 1.05;
+}
+.lumi-widget-text-subtitle { font-size: clamp(.85rem, min(2.8cqi, 26cqb), 1.3rem); color: var(--panel-muted); }
+.lumi-widget-text-label { font-size: clamp(.7rem, min(2cqi, 20cqb), 1.05rem); font-weight: 700; }
+.lumi-widget-text-body { font-size: clamp(.8rem, min(3cqi, 22cqb), 1.4rem); line-height: 1.35; }
+.lumi-widget-text-token { overflow: hidden; font-size: clamp(1.4rem, min(62cqi, 62cqb), 8rem); font-weight: 800; line-height: 1; }
+
+.lumi-widget-image {
+  width: 100%; height: 100%; min-width: 0; min-height: 0; margin: 0; display: grid;
+  padding: clamp(4px, min(6cqi, 6cqb), 16px); overflow: hidden;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--panel-radius); background: var(--panel-surface);
+}
+.lumi-widget-image img { width: 100%; height: 100%; min-width: 0; min-height: 0; display: block; align-self: stretch; justify-self: stretch; object-fit: contain; }
+
+.lumi-widget-object-group {
+  width: 100%; height: 100%; min-width: 0; min-height: 0;
+  display: grid; grid-template-rows: auto minmax(0, 1fr); gap: clamp(3px, min(2cqi, 3cqb), 10px);
+  padding: clamp(4px, min(6cqi, 6cqb), 16px); overflow: hidden;
+  border: 2px solid var(--panel-accent);
+  border-radius: var(--panel-radius); background: var(--panel-surface);
+}
+.lumi-widget-object-group-label {
+  margin: 0; min-width: 0; max-height: 2.4em; overflow: hidden;
+  text-align: center; color: var(--panel-muted); font-weight: 700;
+  font-size: clamp(.7rem, min(2.6cqi, 18cqb), 1.15rem); line-height: 1.2;
+}
+.lumi-widget-object-group-items { width: 100%; height: 100%; min-width: 0; min-height: 0; display: grid; align-items: stretch; justify-items: stretch; gap: clamp(5px, .8vw, 12px); }
+.lumi-widget-object-group-items img { width: 100%; height: 100%; min-width: 0; min-height: 0; object-fit: contain; }
+
+.lumi-widget-answer {
+  width: 100%; height: 100%; min-width: 0; min-height: 0; display: grid; place-items: center;
+  box-sizing: border-box; overflow: hidden; padding: clamp(2px, min(2.5cqi, 2.5cqb), 8px);
+  border: 3px dashed #38bdf8; border-radius: var(--panel-radius);
+  background: #f0f9ff; color: #0f766e;
+  /* The answer must fit even in a one-row block.  Its height, not the
+     viewport, is the limiting dimension. */
+  font-size: clamp(.8rem, min(38cqi, 38cqb), 6rem);
+  font-weight: 800; line-height: 1;
+}
+
+.lumi-widget-number-display {
+  width: 100%; height: 100%; min-width: 0; min-height: 0;
+  display: grid; place-items: center; box-sizing: border-box; overflow: hidden;
+  padding: clamp(2px, min(2.5cqi, 2.5cqb), 8px); border: 0; background: transparent;
+  color: #0f172a; font-size: clamp(.8rem, min(38cqi, 38cqb), 6rem);
+  font-family: var(--panel-font); font-weight: 850; line-height: 1;
+}
+
+.lumi-widget-hidden-content {
+  display: grid; place-items: center; border-style: dashed;
+  background: linear-gradient(135deg, #f8fafc, #e0f2fe);
+}
+
+.lumi-widget-hidden-placeholder {
+  margin: 0; max-width: 100%; max-height: 100%; overflow: hidden;
+  color: var(--panel-muted); font-weight: 700; text-align: center;
+  font-size: clamp(.72rem, min(3cqi, 18cqb), 1.1rem); line-height: 1.2;
+}
+
+[data-visibility="hidden"] { transition: opacity 180ms ease, transform 180ms ease; }
+[data-visibility="visible"] { transition: opacity 180ms ease, transform 180ms ease; }
+
+.lumi-widget-revealed { animation: lumi-widget-reveal 320ms cubic-bezier(.2, .8, .3, 1) both; }
+
+@keyframes lumi-widget-reveal {
+  from { opacity: .2; transform: scale(.94); }
+  to { opacity: 1; transform: scale(1); }
+}

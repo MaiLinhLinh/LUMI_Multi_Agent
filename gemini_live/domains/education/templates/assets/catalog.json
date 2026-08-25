@@ -1,0 +1,14 @@
+{
+  "assets": [
+    {
+      "id": "dog",
+      "path": "templates/assets/dog.jpg",
+      "caption": "Minh hoạ một chú chó thân thiện dành cho trẻ em."
+    },
+    {
+      "id": "cat",
+      "path": "templates/assets/cat.jpg",
+      "caption": "Minh hoạ một chú mèo thân thiện dành cho trẻ em."
+    }
+  ]
+}

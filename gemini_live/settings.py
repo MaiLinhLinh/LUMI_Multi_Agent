@@ -27,6 +27,8 @@ class Settings:
     live_idle_timeout_seconds: float
     live_reconnect_grace_seconds: float
     presentation_animation_delay_ms: int = 300
+    template_llm_api_key: str = ""
+    template_llm_model: str = "gemma-4-26b-a4b-it"
 
 
 def load_settings() -> Settings:
@@ -55,4 +57,7 @@ def load_settings() -> Settings:
         live_idle_timeout_seconds=float(os.getenv("LIVE_IDLE_TIMEOUT_SECONDS", "900")),
         live_reconnect_grace_seconds=float(os.getenv("LIVE_RECONNECT_GRACE_SECONDS", "30")),
         presentation_animation_delay_ms=max(0, integer("PRESENTATION_ANIMATION_DELAY_MS", 300)),
+        template_llm_api_key=os.getenv("GEMINI_API_KEY", "").strip(),
+        template_llm_model=os.getenv("GEMINI_MODEL", "gemma-4-26b-a4b-it").strip()
+        or "gemma-4-26b-a4b-it",
     )

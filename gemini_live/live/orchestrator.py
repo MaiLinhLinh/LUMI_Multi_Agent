@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from gemini_live.domains import DomainRequest
-from gemini_live.presentation import PresentationPipeline, PresentationRequest
+from gemini_live.presentation import DynamicGridPresentation, PresentationPipeline, PresentationRequest
 
 from .dispatcher import LiveToolDispatcher
 from .memory import SessionMemoryStore
@@ -84,13 +84,76 @@ class LiveSessionOrchestrator:
             result.status == "correct",
             0,
         )
+        presentation_request = result.presentation
+        response_domain_id = (
+            presentation_request.domain_id
+            if isinstance(presentation_request, PresentationRequest)
+            else domain.domain_id
+        )
         response: dict[str, Any] = {
             "status": result.status,
-            "domain_id": domain.domain_id,
+            "domain_id": response_domain_id,
         }
         if result.detail:
             response["detail"] = result.detail
-        presentation_request = result.presentation
+        if isinstance(presentation_request, PresentationRequest):
+            try:
+                trace(
+                    "TEMPLATE_RESOLUTION_START domain=%s has_template=%s",
+                    presentation_request.domain_id,
+                    presentation_request.template_id is not None,
+                )
+                presentation_request = await self._presentation_pipeline.resolve_template(
+                    request=presentation_request,
+                    recent_history=tuple(
+                        {"role": item["role"], "text": item["content"]}
+                        for item in memory.history
+                        if isinstance(item.get("role"), str) and isinstance(item.get("content"), str)
+                    ),
+                )
+            except Exception as exc:
+                warning("TEMPLATE_RESOLUTION_FAILED reason=%s", exc)
+                return OrchestratedToolResult(
+                    response={
+                        "status": "error",
+                        "domain_id": response_domain_id,
+                        "detail": f"Presentation template could not be resolved: {exc}",
+                    },
+                )
+        if isinstance(presentation_request, DynamicGridPresentation):
+            try:
+                trace("DYNAMIC_GRID_PRESENTATION_START domain=%s", presentation_request.domain_id)
+                prepared_dynamic = self._presentation_pipeline.prepare_dynamic_grid(
+                    presentation=presentation_request,
+                )
+            except Exception as exc:
+                warning("DYNAMIC_GRID_PRESENTATION_FAILED reason=%s", exc)
+                return OrchestratedToolResult(
+                    response={
+                        "status": "error",
+                        "domain_id": domain.domain_id,
+                        "detail": f"Dynamic grid presentation could not be prepared: {exc}",
+                    },
+                )
+            response["visual_effects"] = prepared_dynamic.supported_effects
+            response["visual_stage_map"] = prepared_dynamic.visual_stage_map
+            if presentation_request.presentation_instruction:
+                response["presentation_instruction"] = presentation_request.presentation_instruction
+            self._active_presentations[session_id] = ActivePresentationState.from_panel_anchor_map(
+                template_id=presentation_request.presentation_id,
+                panel_anchor_map=prepared_dynamic.panel_anchor_map,
+                effect_id_map=prepared_dynamic.effect_id_map,
+            )
+            trace(
+                "DYNAMIC_GRID_STAGE_MAP_READY map_chars=%s effects=%s anchors=%s",
+                len(prepared_dynamic.visual_stage_map),
+                len(prepared_dynamic.supported_effects),
+                len(prepared_dynamic.panel_anchor_map),
+            )
+            return OrchestratedToolResult(
+                response=response,
+                presentation=RenderedPresentation(panel=prepared_dynamic.panel),
+            )
         if isinstance(presentation_request, PresentationRequest):
             try:
                 trace("PRESENTATION_PIPELINE_START domain=%s", presentation_request.domain_id)

@@ -1,0 +1,35 @@
+{
+  "domain_id": "education",
+  "templates": [
+    {
+      "id": "two_subject_comparison",
+      "description": "So sánh trực quan hai đối tượng ngang hàng: mỗi bên có ảnh lớn và nhãn ngắn, phù hợp khi trẻ quan sát hai chủ thể.",
+      "layout_path": "plans/two_subject_comparison.layout.json"
+    },
+    {
+      "id": "tm1",
+      "description": "A vocabulary learning panel with a title at the top and a horizontal row of fruit images, each labeled with its English name.",
+      "layout_path": "layouts/tm1.layout.json"
+    },
+    {
+      "id": "tm2",
+      "description": "Panel with a title at the top and three fruit cards arranged horizontally. Each card shows the fruit image with its English name visible, and a hidden Vietnamese name beneath to serve as the back side of the flashcard.",
+      "layout_path": "layouts/tm2.layout.json"
+    },
+    {
+      "id": "tm3",
+      "description": "A simple flashcard layout with a title at the top, a large centered image showing the front side of the card, and a hidden text block below that reveals the back side when interacted.",
+      "layout_path": "layouts/tm3.layout.json"
+    },
+    {
+      "id": "tm4",
+      "description": "A vocabulary guessing game panel: title at top, subtitle instruction, three fruit images arranged horizontally in the middle, each with a hidden answer block below that reveals the English name when shown.",
+      "layout_path": "layouts/tm4.layout.json"
+    },
+    {
+      "id": "tm5",
+      "description": "Panel with a title at the top, a centered panda image, and a descriptive text block below that lists the foods pandas eat.",
+      "layout_path": "layouts/tm5.layout.json"
+    }
+  ]
+}

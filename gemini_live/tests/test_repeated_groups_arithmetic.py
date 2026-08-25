@@ -1,4 +1,4 @@
-"""Render and fact-pack coverage for the equal-groups lesson template."""
+"""Render coverage for the equal-groups lesson template."""
 
 from __future__ import annotations
 
@@ -11,6 +11,18 @@ from gemini_live.domains.education.models import MathExercise
 from gemini_live.domains.education.view_model import repeated_groups_arithmetic_view_model
 from gemini_live.presentation.pipeline import PresentationPipeline
 from gemini_live.presentation.renderer import JinjaPresentationRenderer
+from gemini_live.template_engine.template_manager import TemplateResolution
+
+
+class _RepeatedGroupsTemplateManager:
+    async def resolve(
+        self,
+        request: object,
+        *,
+        recent_history: tuple[dict[str, str], ...] = (),
+    ) -> TemplateResolution:
+        del request, recent_history
+        return TemplateResolution(decision="use_existing", template_id="repeated_groups_arithmetic")
 
 
 class RepeatedGroupsArithmeticTests(unittest.TestCase):
@@ -23,18 +35,14 @@ class RepeatedGroupsArithmeticTests(unittest.TestCase):
                 right_operand=group_count,
                 result=2 * group_count,
                 asset_id="flower",
-                asset_label="bông hoa",
+                asset_label="flower",
             )
-            data = repeated_groups_arithmetic_view_model(exercise)
             panel = renderer.render(
                 domain_id="education",
                 template_id="repeated_groups_arithmetic",
-                data=data,
+                data=repeated_groups_arithmetic_view_model(exercise),
             )
-            self.assertEqual(
-                panel.html.count('data-present-id="math.repeated.group.'),
-                group_count,
-            )
+            self.assertEqual(panel.html.count('data-present-id="math.repeated.group.'), group_count)
             self.assertIn('data-present-id="math.repeated.answer"', panel.html)
 
     def test_template_uses_near_square_item_grid(self) -> None:
@@ -46,7 +54,7 @@ class RepeatedGroupsArithmeticTests(unittest.TestCase):
                 right_operand=3,
                 result=item_count * 3,
                 asset_id="flower",
-                asset_label="bông hoa",
+                asset_label="flower",
             )
             panel = renderer.render(
                 domain_id="education",
@@ -63,7 +71,7 @@ class RepeatedGroupsArithmeticTests(unittest.TestCase):
             right_operand=5,
             result=45,
             asset_id="rocket",
-            asset_label="tên lửa",
+            asset_label="rocket",
         )
         stage_map = renderer.render_visual_stage_map(
             domain_id="education",
@@ -73,7 +81,7 @@ class RepeatedGroupsArithmeticTests(unittest.TestCase):
         )
         self.assertIn("ROW 1 (left to right)", stage_map)
         self.assertIn("ROW 2 (left to right)", stage_map)
-        self.assertIn("3 rows × 3 columns of tên lửa", stage_map)
+        self.assertIn("3 rows", stage_map)
         for anchor_id in ("g1", "g2", "g3", "g4", "g5", "d", "e"):
             self.assertIn(f"anchor: {anchor_id}", stage_map)
 
@@ -82,59 +90,48 @@ class RepeatedGroupsArithmeticTests(unittest.TestCase):
         result = asyncio.run(domain.execute_tool(
             "create_arithmetic_exercise",
             {"operation": "*", "left_operand": 3, "right_operand": 4},
-            request=DomainRequest(query="Ba nhân bốn"),
+            request=DomainRequest(query="Three times four"),
             context={},
         ))
         assert result.presentation is not None
-        self.assertEqual(result.presentation.template_id, "repeated_groups_arithmetic")
-        self.assertEqual(result.presentation.view_model["group_count"], 4)
-        self.assertEqual(result.presentation.view_model["items_per_group"], 3)
+        self.assertIsNone(result.presentation.template_id)
+        self.assertEqual(result.presentation.render_data["group_count"], 4)
+        self.assertEqual(result.presentation.render_data["items_per_group"], 3)
 
-    def test_exact_division_renders_equal_groups(self) -> None:
+    def test_exact_division_exposes_the_answer_anchor_without_answer_check_tool(self) -> None:
         domain = EducationLiveDomain()
         result = asyncio.run(domain.execute_tool(
             "create_arithmetic_exercise",
             {"operation": "/", "left_operand": 12, "right_operand": 3},
-            request=DomainRequest(query="Mười hai chia ba"),
+            request=DomainRequest(query="Twelve divided by three"),
             context={},
         ))
         assert result.presentation is not None
-        self.assertEqual(result.presentation.template_id, "repeated_groups_arithmetic")
-        self.assertEqual(result.presentation.view_model["group_count"], 3)
-        self.assertEqual(result.presentation.view_model["items_per_group"], 4)
-        self.assertEqual(result.presentation.view_model["result"], 4)
+        self.assertIsNone(result.presentation.template_id)
+        self.assertEqual(result.presentation.render_data["group_count"], 3)
+        self.assertEqual(result.presentation.render_data["items_per_group"], 4)
+        self.assertEqual(result.presentation.render_data["result"], 4)
 
-        checked = asyncio.run(domain.execute_tool(
-            "check_child_answer",
-            {"answer": 4},
-            request=DomainRequest(query="Bằng bốn"),
-            context=result.context,
-        ))
-        assert checked.presentation is not None
-        pipeline = PresentationPipeline()
-        prepared = pipeline.prepare(request=checked.presentation)
+        pipeline = PresentationPipeline(template_manager=_RepeatedGroupsTemplateManager())  # type: ignore[arg-type]
+        resolved = asyncio.run(pipeline.resolve_template(request=result.presentation))
+        prepared = pipeline.prepare(request=resolved)
         presentation_pack = pipeline.build_live_presentation_pack(prepared)
-        self.assertEqual(
-            presentation_pack.panel_anchor_map["e"]["target_id"],
-            "math.repeated.answer",
-        )
+        self.assertEqual(presentation_pack.panel_anchor_map["e"]["target_id"], "math.repeated.answer")
 
     def test_presentation_pack_resolves_dynamic_group_anchors(self) -> None:
         domain = EducationLiveDomain()
         result = asyncio.run(domain.execute_tool(
             "create_arithmetic_exercise",
             {"operation": "*", "left_operand": 2, "right_operand": 4},
-            request=DomainRequest(query="Hai nhân bốn"),
+            request=DomainRequest(query="Two times four"),
             context={},
         ))
         assert result.presentation is not None
-        pipeline = PresentationPipeline()
-        prepared = pipeline.prepare(request=result.presentation)
+        pipeline = PresentationPipeline(template_manager=_RepeatedGroupsTemplateManager())  # type: ignore[arg-type]
+        resolved = asyncio.run(pipeline.resolve_template(request=result.presentation))
+        prepared = pipeline.prepare(request=resolved)
         pack = pipeline.build_live_presentation_pack(prepared)
-        self.assertEqual(
-            pack.panel_anchor_map["g3"]["target_id"],
-            "math.repeated.group.3",
-        )
+        self.assertEqual(pack.panel_anchor_map["g3"]["target_id"], "math.repeated.group.3")
         self.assertEqual(pack.panel_anchor_map["d"]["target_id"], "math.repeated.expression")
         self.assertEqual(pack.panel_anchor_map["e"]["target_id"], "math.repeated.answer")
 

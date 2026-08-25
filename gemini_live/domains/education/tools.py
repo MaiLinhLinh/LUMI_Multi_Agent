@@ -8,11 +8,9 @@ which number range can be visualised.
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass, replace
 from typing import Any, Protocol
 
 from .models import MathExercise
-from .context import LessonState
 
 
 CREATE_ARITHMETIC_EXERCISE_DECLARATION: dict[str, Any] = {
@@ -36,20 +34,6 @@ CREATE_ARITHMETIC_EXERCISE_DECLARATION: dict[str, Any] = {
     },
 }
 
-CHECK_CHILD_ANSWER_DECLARATION: dict[str, Any] = {
-    "name": "check_child_answer",
-    "description": (
-        "Check the integer answer that the child just gave for the current math exercise. "
-        "Call this instead of deciding whether the child is correct yourself."
-    ),
-    "parameters": {
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {"answer": {"type": "integer"}},
-        "required": ["answer"],
-    },
-}
-
 ASSETS: tuple[tuple[str, str], ...] = (
     ("flower", "bông hoa"),
     ("ball", "quả bóng"),
@@ -63,14 +47,6 @@ class ChoiceSource(Protocol):
 
 class ExerciseValidationError(ValueError):
     """Raised when a model-suggested exercise is unsafe or mathematically invalid."""
-
-
-@dataclass(frozen=True)
-class AnswerCheckResult:
-    """Verified result of one child answer, never inferred by the LLM."""
-
-    status: str
-    state: LessonState
 
 
 class EducationTools:
@@ -109,46 +85,10 @@ class EducationTools:
             asset_label=asset_label,
         )
 
-    def check_child_answer(
-        self,
-        arguments: dict[str, Any],
-        state: LessonState,
-    ) -> AnswerCheckResult:
-        """Compare a Gemini-parsed integer to the server-owned answer.
-
-        The first incorrect answer leads to a hint.  The second incorrect
-        answer reveals the verified result, as agreed for the first lesson.
-        """
-        answer = self._answer(arguments.get("answer"))
-        if state.phase != "awaiting_answer":
-            return AnswerCheckResult(status="no_pending_exercise", state=state)
-        if answer == state.correct_answer:
-            return AnswerCheckResult(
-                status="correct",
-                state=replace(state, phase="completed"),
-            )
-
-        next_attempt = state.attempt_count + 1
-        if next_attempt >= 2:
-            return AnswerCheckResult(
-                status="reveal_answer",
-                state=replace(state, phase="completed", attempt_count=next_attempt),
-            )
-        return AnswerCheckResult(
-            status="incorrect_hint",
-            state=replace(state, attempt_count=next_attempt),
-        )
-
     @staticmethod
     def _operand(value: Any, name: str) -> int:
         if isinstance(value, bool) or not isinstance(value, int):
             raise ExerciseValidationError(f"{name} must be an integer.")
         if value < 0:
             raise ExerciseValidationError(f"{name} must be non-negative.")
-        return value
-
-    @staticmethod
-    def _answer(value: Any) -> int:
-        if isinstance(value, bool) or not isinstance(value, int):
-            raise ExerciseValidationError("answer must be an integer.")
         return value

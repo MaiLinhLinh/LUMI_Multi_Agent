@@ -1,0 +1,14 @@
+{
+  "templates": [
+    {
+      "id": "weather_single_day",
+      "description": "Màn hình thời tiết chi tiết cho một ngày: tổng quan, các chỉ số và diễn biến theo giờ.",
+      "data_description": "Dùng cho yêu cầu một ngày cụ thể hoặc hôm nay/ngày mai; cần địa điểm và dữ liệu dự báo theo giờ của ngày đó."
+    },
+    {
+      "id": "weather_forecast",
+      "description": "Màn hình dự báo nhiều ngày: tổng quan ngày đầu, biểu đồ nhiệt độ và các thẻ từng ngày.",
+      "data_description": "Dùng cho yêu cầu dự báo nhiều ngày hoặc cả tuần; cần địa điểm và danh sách các ngày dự báo."
+    }
+  ]
+}

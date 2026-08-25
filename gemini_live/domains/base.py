@@ -52,6 +52,12 @@ class LiveDomain(ABC):
     def prompt_guidance(self) -> str:
         """Domain-specific guidance appended to the shared Live prompt."""
 
+    @property
+    def presentation_instruction(self) -> str:
+        """Optional domain instruction used after a panel has been rendered."""
+
+        return ""
+
     @abstractmethod
     async def execute_tool(
         self,

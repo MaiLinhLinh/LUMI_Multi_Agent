@@ -13,26 +13,6 @@ _YOUTUBE_VIDEO_ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
 class VisualTools:
     """Code-only render tools for existing, trusted UI templates."""
 
-    def select_weather_template(self, data: dict[str, Any]) -> str:
-        # Same value-aware rule as the original project's visual orchestrator:
-        # a one-day forecast uses the hourly timeline card; an hourly point or
-        # current conditions use the basic card; several days use the forecast
-        # template.  The code_toolcall weather payload stores forecast fields
-        # directly under `weather`, while the older envelope nests them under
-        # `weather.forecast`, so accept both contracts.
-        weather = data.get("weather", {})
-        weather = weather if isinstance(weather, dict) else {}
-        forecast = weather.get("forecast", weather)
-        forecast = forecast if isinstance(forecast, dict) else {}
-        if isinstance(forecast.get("hourly_selection"), dict):
-            return "weather_basic"
-        days = forecast.get("days", [])
-        if isinstance(days, list) and len(days) == 1:
-            return "weather_single_day"
-        if isinstance(days, list) and len(days) > 1:
-            return "weather_forecast"
-        return "weather_basic"
-
     def compact_weather_data(self, value: dict[str, Any]) -> dict[str, Any]:
         """Keep only the requested weather day; never forward a full snapshot."""
         value = value if isinstance(value, dict) else {}

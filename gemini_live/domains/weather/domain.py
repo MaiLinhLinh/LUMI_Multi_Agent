@@ -37,6 +37,10 @@ class WeatherLiveDomain(LiveDomain):
     def prompt_guidance(self) -> str:
         return WEATHER_LIVE_GUIDANCE
 
+    @property
+    def presentation_instruction(self) -> str:
+        return WEATHER_PRESENTATION_INSTRUCTION
+
     async def execute_tool(
         self,
         tool_name: str,
@@ -52,6 +56,7 @@ class WeatherLiveDomain(LiveDomain):
             self._execute_get_weather,
             resolved_arguments,
             context,
+            request.query,
         )
 
         return outcome
@@ -60,6 +65,7 @@ class WeatherLiveDomain(LiveDomain):
         self,
         args: dict[str, Any],
         weather_context: dict[str, Any],
+        presentation_brief: str,
     ) -> DomainResult:
         result = self._weather.get_weather(args, weather_context=weather_context)
         status = str(result.get("status") or "error")
@@ -72,16 +78,13 @@ class WeatherLiveDomain(LiveDomain):
 
         data = result.get("data") if isinstance(result.get("data"), dict) else {}
         compact_data = self._visual.compact_weather_data(data)
-        template_id = self._visual.select_weather_template(data)
         return DomainResult(
             status="completed",
             context=self._next_weather_context(result, weather_context),
             presentation=PresentationRequest(
                 domain_id=self.domain_id,
-                template_id=template_id,
-                view_model=_weather_contract(compact_data),
-                domain_data={},
-                compact_data=compact_data,
+                presentation_brief=presentation_brief,
+                render_data=_weather_contract(compact_data),
                 presentation_instruction=WEATHER_PRESENTATION_INSTRUCTION,
             ),
         )

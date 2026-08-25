@@ -1,0 +1,14 @@
+{
+  "templates": [
+    {
+      "id": "object_group_math",
+      "description": "Bài toán cộng hoặc trừ cho trẻ: hai nhóm vật thể, một biểu thức và đáp án có thể ẩn.",
+      "data_description": "Cần hai số, phép toán, nhãn vật thể và trạng thái đáp án."
+    },
+    {
+      "id": "repeated_groups_arithmetic",
+      "description": "Bài toán nhân hoặc chia hết cho trẻ bằng nhiều nhóm vật thể bằng nhau, kèm biểu thức và đáp án có thể ẩn.",
+      "data_description": "Cần số nhóm, số vật thể mỗi nhóm, phép toán, nhãn vật thể và trạng thái đáp án."
+    }
+  ]
+}

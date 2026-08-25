@@ -33,9 +33,8 @@ class DomainPresentationAdapter(ABC):
     def live_visual_stage_context(
         self,
         *,
-        domain_data: dict[str, Any],
-        compact_data: dict[str, Any],
-        view_model: dict[str, Any],
+        render_data: dict[str, Any],
+        template_id: str,
     ) -> dict[str, Any]:
         """Return trusted state used to render an optional template stage map.
 
