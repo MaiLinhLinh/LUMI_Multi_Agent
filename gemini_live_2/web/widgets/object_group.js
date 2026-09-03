@@ -1,7 +1,7 @@
 export function renderObjectGroupWidget(block, { anchorsByKey = {} } = {}) {
   const container = document.createElement("section");
   container.className = "lumi-widget lumi-widget-object-group";
-  if (anchorsByKey.group?.target_id) container.dataset.presentId = anchorsByKey.group.target_id;
+  if (anchorsByKey.group?.anchor_id) container.dataset.anchorId = anchorsByKey.group.anchor_id;
 
   if (block.visibility === "hidden") {
     container.classList.add("lumi-widget-hidden-content");
@@ -34,7 +34,7 @@ export function renderObjectGroupWidget(block, { anchorsByKey = {} } = {}) {
     image.alt = block.props?.label || "";
     image.draggable = false;
     const itemAnchor = anchorsByKey[`item_${index + 1}`];
-    if (itemAnchor?.target_id) image.dataset.presentId = itemAnchor.target_id;
+    if (itemAnchor?.anchor_id) image.dataset.anchorId = itemAnchor.anchor_id;
     items.append(image);
   }
   container.append(items);

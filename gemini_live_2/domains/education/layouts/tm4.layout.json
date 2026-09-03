@@ -1,7 +1,7 @@
 {
   "template_id": "tm4",
   "domain_id": "education",
-  "description": "A vocabulary guessing game panel: title at top, subtitle instruction, three fruit images arranged horizontally in the middle, each with a hidden answer block below that reveals the English name when shown.",
+  "description": "Một trò chơi trốn tìm với mèo Miu: tiêu đề ở trên cùng, hình ảnh mèo ẩn ban đầu sẽ được hiển thị khi Gemini Live bật.",
   "blocks": [
     {
       "widget_id": "text",
@@ -18,99 +18,18 @@
       "initial_visibility": "visible"
     },
     {
-      "widget_id": "text",
-      "grid": {
-        "col": 1,
-        "row": 2,
-        "col_span": 16,
-        "row_span": 1
-      },
-      "props": {
-        "content": "$block_2_content",
-        "role": "subtitle"
-      },
-      "initial_visibility": "visible"
-    },
-    {
       "widget_id": "image",
       "grid": {
-        "col": 2,
+        "col": 4,
         "row": 3,
-        "col_span": 4,
-        "row_span": 4
+        "col_span": 9,
+        "row_span": 6
       },
       "props": {
-        "asset_id": "$block_3_asset_id",
-        "label": "$block_3_label"
+        "asset_id": "$block_2_asset_id",
+        "label": "$block_2_label"
       },
-      "initial_visibility": "visible"
-    },
-    {
-      "widget_id": "image",
-      "grid": {
-        "col": 7,
-        "row": 3,
-        "col_span": 4,
-        "row_span": 4
-      },
-      "props": {
-        "asset_id": "$block_4_asset_id",
-        "label": "$block_4_label"
-      },
-      "initial_visibility": "visible"
-    },
-    {
-      "widget_id": "image",
-      "grid": {
-        "col": 12,
-        "row": 3,
-        "col_span": 4,
-        "row_span": 4
-      },
-      "props": {
-        "asset_id": "$block_5_asset_id",
-        "label": "$block_5_label"
-      },
-      "initial_visibility": "visible"
-    },
-    {
-      "widget_id": "answer",
-      "grid": {
-        "col": 2,
-        "row": 8,
-        "col_span": 4,
-        "row_span": 1
-      },
-      "props": {
-        "value": "$block_6_value"
-      },
-      "initial_visibility": "visible"
-    },
-    {
-      "widget_id": "answer",
-      "grid": {
-        "col": 7,
-        "row": 8,
-        "col_span": 4,
-        "row_span": 1
-      },
-      "props": {
-        "value": "$block_7_value"
-      },
-      "initial_visibility": "visible"
-    },
-    {
-      "widget_id": "answer",
-      "grid": {
-        "col": 12,
-        "row": 8,
-        "col_span": 4,
-        "row_span": 1
-      },
-      "props": {
-        "value": "$block_8_value"
-      },
-      "initial_visibility": "visible"
+      "initial_visibility": "hidden"
     }
   ],
   "bindings": [
@@ -123,16 +42,8 @@
       "description": "Nội dung văn bản cần hiển thị."
     },
     {
-      "key": "$block_2_content",
+      "key": "$block_2_asset_id",
       "block_index": 2,
-      "prop_name": "content",
-      "type": "string",
-      "required": true,
-      "description": "Nội dung văn bản cần hiển thị."
-    },
-    {
-      "key": "$block_3_asset_id",
-      "block_index": 3,
       "prop_name": "asset_id",
       "type": "string",
       "required": true,
@@ -140,70 +51,12 @@
       "source": "asset_catalog.id"
     },
     {
-      "key": "$block_3_label",
-      "block_index": 3,
+      "key": "$block_2_label",
+      "block_index": 2,
       "prop_name": "label",
       "type": "string",
       "required": false,
       "description": "Nhãn ngắn cho ảnh."
-    },
-    {
-      "key": "$block_4_asset_id",
-      "block_index": 4,
-      "prop_name": "asset_id",
-      "type": "string",
-      "required": true,
-      "description": "ID của asset ảnh sẽ hiển thị.",
-      "source": "asset_catalog.id"
-    },
-    {
-      "key": "$block_4_label",
-      "block_index": 4,
-      "prop_name": "label",
-      "type": "string",
-      "required": false,
-      "description": "Nhãn ngắn cho ảnh."
-    },
-    {
-      "key": "$block_5_asset_id",
-      "block_index": 5,
-      "prop_name": "asset_id",
-      "type": "string",
-      "required": true,
-      "description": "ID của asset ảnh sẽ hiển thị.",
-      "source": "asset_catalog.id"
-    },
-    {
-      "key": "$block_5_label",
-      "block_index": 5,
-      "prop_name": "label",
-      "type": "string",
-      "required": false,
-      "description": "Nhãn ngắn cho ảnh."
-    },
-    {
-      "key": "$block_6_value",
-      "block_index": 6,
-      "prop_name": "value",
-      "type": "string",
-      "required": true,
-      "description": "Đáp án hoặc từ ngắn cần hiển thị."
-    },
-    {
-      "key": "$block_7_value",
-      "block_index": 7,
-      "prop_name": "value",
-      "type": "string",
-      "required": true,
-      "description": "Đáp án hoặc từ ngắn cần hiển thị."
-    },
-    {
-      "key": "$block_8_value",
-      "block_index": 8,
-      "prop_name": "value",
-      "type": "string",
-      "required": true,
-      "description": "Đáp án hoặc từ ngắn cần hiển thị."
     }
   ]
 }

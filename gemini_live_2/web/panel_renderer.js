@@ -1,4 +1,4 @@
-import { widgetRendererFor } from "./widgets/registry.js?v=number-display-20260824";
+import { widgetRendererFor } from "./widgets/registry.js?v=choice-anchor-20260825";
 
 export function renderPanelIR(panel, assets = [], { revealedBlockIds = new Set() } = {}) {
   const grid = document.createElement("main");
@@ -15,8 +15,7 @@ export function renderPanelIR(panel, assets = [], { revealedBlockIds = new Set()
     if (
       typeof anchor?.anchor_id !== "string" ||
       typeof anchor?.block_id !== "string" ||
-      typeof anchor?.anchor_key !== "string" ||
-      typeof anchor?.target_id !== "string"
+      typeof anchor?.anchor_key !== "string"
     ) continue;
     if (!anchorsByBlock.has(anchor.block_id)) anchorsByBlock.set(anchor.block_id, {});
     anchorsByBlock.get(anchor.block_id)[anchor.anchor_key] = anchor;
@@ -27,9 +26,14 @@ export function renderPanelIR(panel, assets = [], { revealedBlockIds = new Set()
     const renderer = widgetRendererFor(block?.widget_id);
     if (!renderer || !validGrid(gridSpec) || typeof block?.id !== "string") continue;
 
-    const props = { ...(block.props || {}) };
-    if (typeof props.asset_id === "string") props.asset_url = assetUrls.get(props.asset_id) || "";
-    const node = renderer({ ...block, props }, { anchorsByKey: anchorsByBlock.get(block.id) || {} });
+    const materializedBlock = withAssetUrl(block, assetUrls);
+    const node = renderer(materializedBlock, {
+      anchorsByKey: anchorsByBlock.get(block.id) || {},
+      // A PanelIR panel_id is the Runtime surface identity.  The browser only
+      // uses the surface name at the interaction boundary.
+      surfaceId: panel?.panel_id || "",
+      renderChild: (child) => renderChoiceChild(child, assetUrls),
+    });
     if (!node) continue;
     node.dataset.blockId = block.id;
     node.dataset.visibility = block.visibility === "hidden" ? "hidden" : "visible";
@@ -39,6 +43,18 @@ export function renderPanelIR(panel, assets = [], { revealedBlockIds = new Set()
     grid.append(node);
   }
   return grid;
+}
+
+function withAssetUrl(block, assetUrls) {
+  const props = { ...(block?.props || {}) };
+  if (typeof props.asset_id === "string") props.asset_url = assetUrls.get(props.asset_id) || "";
+  return { ...block, props };
+}
+
+function renderChoiceChild(child, assetUrls) {
+  const renderer = widgetRendererFor(child?.widget_id);
+  if (!renderer) return null;
+  return renderer(withAssetUrl({ ...child, visibility: "visible" }, assetUrls), { anchorsByKey: {} });
 }
 
 function validGrid(grid) {

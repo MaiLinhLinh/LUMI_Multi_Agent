@@ -10,7 +10,7 @@ from gemini_live_2.catalogs import (
     LayoutTemplateMaterializer,
     TemplateExtractor,
 )
-from gemini_live_2.panel import GridRect, PlanBlock, PresentationPlan
+from gemini_live_2.panel import ChoiceChild, GridRect, PlanBlock, PresentationPlan
 from gemini_live_2.widgets import build_default_widget_registry
 
 
@@ -114,6 +114,38 @@ class LayoutTemplateTests(unittest.TestCase):
                 template=template,
                 bindings={"$block_1_asset_id": "dog", "$extra": "cat"},
             )
+
+    def test_choice_children_are_extracted_and_materialized_without_baking_old_content(self) -> None:
+        source = PresentationPlan(
+            domain_id="education",
+            blocks=(PlanBlock(
+                "choice",
+                GridRect(1, 2, 5, 6),
+                {},
+                children=(
+                    ChoiceChild("image", {"asset_id": "cat", "label": "Mèo"}),
+                    ChoiceChild("text", {"content": "Mèo", "role": "label"}),
+                ),
+            ),),
+        )
+        template = self.extractor.extract(
+            plan=source,
+            template_id="choice_card",
+            description="Một thẻ lựa chọn có ảnh và nhãn.",
+        )
+
+        self.assertEqual(template.blocks[0].children[0].props["asset_id"], "$block_1_child_1_asset_id")
+        self.assertEqual(template.blocks[0].children[1].props["content"], "$block_1_child_2_content")
+        restored = self.materializer.materialize(
+            template=template,
+            bindings={
+                "$block_1_child_1_asset_id": "dog",
+                "$block_1_child_2_content": "Chó",
+            },
+        )
+        self.assertEqual(restored.blocks[0].children[0].props["asset_id"], "dog")
+        self.assertEqual(restored.blocks[0].children[1].props["content"], "Chó")
+        self.assertNotIn("label", restored.blocks[0].children[0].props)
 
 
 if __name__ == "__main__":

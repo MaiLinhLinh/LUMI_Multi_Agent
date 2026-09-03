@@ -8,27 +8,27 @@
     },
     {
       "id": "tm1",
-      "description": "A vocabulary learning panel with a title at the top and a horizontal row of fruit images, each labeled with its English name.",
+      "description": "Bài học cộng học sinh xem hai nhóm động vật (chó và mèo) với dấu cộng và dấu bằng, đáp án ẩn sẽ hiển thị khi Gemini Live bật.",
       "layout_path": "layouts/tm1.layout.json"
     },
     {
       "id": "tm2",
-      "description": "Panel with a title at the top and three fruit cards arranged horizontally. Each card shows the fruit image with its English name visible, and a hidden Vietnamese name beneath to serve as the back side of the flashcard.",
+      "description": "Tiêu đề ở hàng đầu, sau đó là ba phần dọc; mỗi phần gồm một ảnh bên trái và đoạn văn mô tả câu chuyện bên phải, các phần sắp xếp theo chiều dọc.",
       "layout_path": "layouts/tm2.layout.json"
     },
     {
       "id": "tm3",
-      "description": "A simple flashcard layout with a title at the top, a large centered image showing the front side of the card, and a hidden text block below that reveals the back side when interacted.",
+      "description": "Ba hình ảnh của động vật được sắp xếp thành hình tam giác: một hình ở trên, hai hình ở dưới phía trái và phải.",
       "layout_path": "layouts/tm3.layout.json"
     },
     {
       "id": "tm4",
-      "description": "A vocabulary guessing game panel: title at top, subtitle instruction, three fruit images arranged horizontally in the middle, each with a hidden answer block below that reveals the English name when shown.",
+      "description": "Một trò chơi trốn tìm với mèo Miu: tiêu đề ở trên cùng, hình ảnh mèo ẩn ban đầu sẽ được hiển thị khi Gemini Live bật.",
       "layout_path": "layouts/tm4.layout.json"
     },
     {
       "id": "tm5",
-      "description": "Panel with a title at the top, a centered panda image, and a descriptive text block below that lists the foods pandas eat.",
+      "description": "A title at the top, followed by two large animal images side‑by‑side in the middle, and a hidden answer block below that reveals the correct English name when shown.",
       "layout_path": "layouts/tm5.layout.json"
     }
   ]

@@ -161,8 +161,8 @@ Compiler ở CP5. Đã thêm 4 unit test cho registry/props/anchor policy.
 **Kết quả:** Đã tạo `PanelCompiler` trung lập với canvas 16×10. Compiler kiểm
 tra domain/widget/asset/props, bounds và overlap; chỉ resolve alias `$...` đã
 được `DataBundle` công bố; không tự chọn bố cục, nội dung hay asset. Nó
-materialize props thành dữ liệu thật và sinh `PanelIR` cùng `anchor_id`,
-`target_id`, effect map từ anchor policy của widget. Đã thêm 3 test cho compile
+materialize props thành dữ liệu thật và sinh `PanelIR` cùng `anchor_id` và effect
+map từ anchor policy của widget. Đã thêm 3 test cho compile
 hợp lệ, alias/anchor map, và các nhánh lỗi layout/widget/asset/alias.
 
 ## CP6 — Panel Renderer và ASCII Renderer cùng đọc PanelIR
@@ -176,7 +176,7 @@ hợp lệ, alias/anchor map, và các nhánh lỗi layout/widget/asset/alias.
 **Tiêu chí xong:** cùng một PanelIR render được UI và stage map, có test fidelity block/anchor.
 
 **Kết quả:** Đã tạo renderer CSS Grid tổng quát ở browser cho payload `panel_ir`.
-Nó chỉ đặt widget theo block/grid của PanelIR, gắn `target_id` compiler đã sinh và
+Nó chỉ đặt widget theo block/grid của PanelIR, gắn trực tiếp `anchor_id` compiler đã sinh và
 dùng asset URL đã whitelist. `web_app` phục vụ asset theo `domain_id + asset_id`
 từ catalog, không lộ filesystem path. ASCII Renderer đọc đúng PanelIR đó, biểu
 diễn canvas 16×10, nội dung/tọa độ từng block và anchor tương ứng. Đã thêm test
@@ -312,8 +312,8 @@ khôi phục history gần + prompt domain + ASCII map + effects của ActivePan
 Đã chạy 36 unit tests, `compileall` và import `web_app` thành công.
 
 **Bổ sung sau CP11 — ASCII và anchor cho Live:** Compiler nay cấp anchor ngắn
-theo thứ tự trực quan `a`, `b`, `c`…; backend vẫn tự map chúng tới `target_id`
-và effect policy kỹ thuật của widget. ASCII renderer không còn xuất ma trận
+theo thứ tự trực quan `a`, `b`, `c`… cùng effect policy kỹ thuật của widget.
+ASCII renderer không còn xuất ma trận
 `A/B/C` hay ID kỹ thuật; nó dựng khung vùng trực quan từ chính PanelIR, đặt
 anchor ngay trong vùng và thêm `ANCHOR LEGEND`. UI browser không đổi. Đã cập
 nhật test Compiler/renderer/Live và chạy lại 36 unit tests cùng `compileall`.
@@ -368,4 +368,4 @@ Viết hướng dẫn thêm một domain mới chỉ bằng:
   tiết của widget được yêu cầu.
 - Output `create_plan` cuối cùng chỉ chứa `plan.blocks` gồm `widget_id`, `grid`, `props`;
   `domain_id` lấy từ `route_request` đã kiểm chứng, không do Plan Agent sinh. Compiler sinh
-  block ID tuần tự, `target_id` và anchor.
+  block ID tuần tự và anchor.

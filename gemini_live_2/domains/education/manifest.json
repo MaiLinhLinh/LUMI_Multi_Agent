@@ -4,6 +4,6 @@
   "template_catalog_path": "plans/catalog.json",
   "presentation_prompt_path": "prompt.py",
   "presentation_prompt_constant": "EDUCATION_PRESENTATION_INSTRUCTION",
-  "allowed_widget_ids": ["text", "image", "object_group", "answer", "number_display"],
+  "allowed_widget_ids": ["text", "image", "object_group", "answer", "number_display", "choice"],
   "tool_capabilities": []
 }

@@ -12,7 +12,7 @@ Plan Agent nhận Widget Index ngắn
   → gọi native tool describe_widgets(widget_ids)
   → nhận contract props chi tiết của đúng các widget đó
   → trả Presentation Plan
-  → Compiler tạo PanelIR, target_id và anchor_id
+  → Compiler tạo PanelIR và anchor_id
 ```
 
 Template Catalog vẫn là catalog một tầng, ngắn gọn. Plan Agent nhận trực tiếp
@@ -22,8 +22,8 @@ Template Catalog vẫn là catalog một tầng, ngắn gọn. Plan Agent nhận
 
 - `widget_id`: ID widget do Plan Agent chọn, ví dụ `text`, `image`.
 - Plan Agent chỉ tạo `widget_id`, `grid`, `props` trong block của plan.
-- Plan Agent không tạo block ID, `target_id` hoặc `anchor_id`.
-- Compiler sinh block ID tuần tự, `target_id` kỹ thuật và anchor ngắn cho Gemini Live.
+- Plan Agent không tạo block ID hoặc `anchor_id`.
+- Compiler sinh block ID tuần tự và anchor ngắn cho Gemini Live.
 - `describe_widgets` là tool hạ tầng dùng chung, không thuộc một domain.
 - Tool chỉ mô tả widget được phép trong `allowed_widget_ids` của domain hiện hành.
 - Capability lấy/tạo dữ liệu vẫn nằm trong `domains/<domain>/tools.py` và vẫn bị manifest kiểm soát.
@@ -38,7 +38,7 @@ Template Catalog vẫn là catalog một tầng, ngắn gọn. Plan Agent nhận
 
 **Kết quả tại CP-W1:** Runtime khi đó còn dùng `widget_type` và block `id`.
 Mô tả này đã được CP-W6 thay thế: runtime hiện tại dùng `widget_id`; Plan Agent
-không sinh block ID, còn Compiler sinh block ID/`target_id`/anchor.
+không sinh block ID, còn Compiler sinh block ID/anchor.
 
 ### CP-W2 — Chuẩn hoá Widget Registry
 
@@ -94,7 +94,7 @@ này; native tool loop vẫn cho phép xen kẽ nhiều lượt `describe_widget
 - [x] Plan `create_plan` chỉ nhận block gồm `widget_id`, `grid`, `props`.
 - [x] `domain_id` của plan được backend lấy từ `route_request` đã kiểm chứng; Plan Agent không được trả lại trường này.
 - [x] Bỏ yêu cầu Plan Agent tạo block `id`.
-- [x] Compiler sinh block ID, `target_id`, anchor map và PanelIR.
+- [x] Compiler sinh block ID, anchor map và PanelIR.
 - [x] Cập nhật renderer/ASCII map để tiếp tục dùng PanelIR làm nguồn duy nhất.
 
 ### CP-W7 — Kiểm thử và hoàn thiện

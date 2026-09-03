@@ -14,8 +14,15 @@ from google.genai import types
 
 from gemini_live_2.catalogs.domains import DomainRegistry
 from gemini_live_2.gateway import CapabilityDescriptor, DomainCapability, DomainGateway
-from gemini_live_2.panel.contracts import DataAlias, DataBundle
-from gemini_live_2.plan_agent import CreatePlanDecision, PlanAgent, PlanAgentError, PlanAgentRequest
+from gemini_live_2.panel.contracts import (
+    ActiveSurfaceSummary,
+    CreateSurfacePlan,
+    DataAlias,
+    DataBundle,
+    PatchSurfacePlan,
+    UseExistingSurfaceTemplate,
+)
+from gemini_live_2.plan_agent import PlanAgent, PlanAgentError, PlanAgentRequest
 from gemini_live_2.settings import Settings
 from gemini_live_2.widgets import build_default_widget_registry
 
@@ -90,17 +97,18 @@ class PlanAgentTests(unittest.TestCase):
 
             result = asyncio.run(agent.plan(PlanAgentRequest(domain_id="education", intent="Hiển thị chú chó.")))
 
-            self.assertIsInstance(result.decision, CreatePlanDecision)
-            self.assertEqual(result.decision.plan.domain_id, "education")
-            self.assertEqual(result.decision.template_description, "Một ảnh lớn đặt cạnh tiêu đề.")
-            self.assertEqual(result.decision.plan.blocks[0].props["asset_id"], "dog")
+            self.assertIsInstance(result.command, CreateSurfacePlan)
+            self.assertEqual(result.command.blocks[0].props["asset_id"], "dog")
             self.assertEqual(len(client.models.calls), 2)
             config = client.models.calls[0]["config"]
+            self.assertIn("create_surface_plan", config.system_instruction)
+            self.assertNotIn('"decision":"create_plan"', config.system_instruction)
             self.assertEqual(
                 [item.name for item in config.tools[0].function_declarations],
                 ["describe_widgets", "describe_template"],
             )
             payload = json.loads(client.models.calls[0]["contents"][0].parts[0].text)
+            self.assertIsNone(payload["active_surface_summary"])
             self.assertEqual(
                 payload["widget_index"],
                 [
@@ -133,9 +141,9 @@ class PlanAgentTests(unittest.TestCase):
                     id="native-widget-1", name="describe_widgets", args={"widget_ids": ["text"]},
                 )]),
                 _Response(json.dumps({
-                    "decision": "create_plan",
-                    "template_description": "Một tiêu đề phía trên.",
-                    "plan": {
+                    "action": "create_surface_plan",
+                    "template_description": "Một tiêu đề bài học.",
+                    "surface": {
                         "blocks": [{
                             "widget_id": "text",
                             "grid": {"col": 1, "row": 1, "col_span": 12, "row_span": 1},
@@ -179,13 +187,46 @@ class PlanAgentTests(unittest.TestCase):
     def test_create_plan_rejects_model_generated_domain_id(self) -> None:
         with _domain_root([]) as root:
             client = _Client([_Response(json.dumps({
-                "decision": "create_plan",
-                "plan": {"domain_id": "education", "blocks": []},
+                "action": "create_surface_plan",
+                "template_description": "Không hợp lệ.",
+                "surface": {"domain_id": "education", "blocks": []},
             }))])
             agent = _agent(root, DomainGateway(DomainRegistry(root)), client)
 
             with self.assertRaisesRegex(PlanAgentError, "invalid final decision"):
                 asyncio.run(agent.plan(PlanAgentRequest(domain_id="education", intent="Tạo panel.")))
+
+    def test_patch_surface_plan_receives_and_uses_active_surface_summary(self) -> None:
+        with _domain_root([]) as root:
+            client = _Client([_Response(json.dumps({
+                "action": "patch_surface_plan",
+                "surface_id": "s12",
+                "base_revision": 3,
+                "operations": [{
+                    "op": "update_props",
+                    "anchor_id": "b",
+                    "changes": {"asset_id": "cat", "label": "Mèo"},
+                }],
+            }))])
+            agent = _agent(root, DomainGateway(DomainRegistry(root)), client)
+            summary = ActiveSurfaceSummary(
+                surface_id="s12",
+                revision=3,
+                domain_id="education",
+                purpose="Hiển thị chó.",
+                structure_summary=({"anchor_id": "b", "widget": "image", "description": "Chó"},),
+                state_summary={},
+            )
+
+            result = asyncio.run(agent.plan(PlanAgentRequest(
+                domain_id="education", intent="Đổi sang mèo.", active_surface_summary=summary,
+            )))
+
+            self.assertIsInstance(result.command, PatchSurfacePlan)
+            self.assertEqual(result.command.surface_id, "s12")
+            payload = json.loads(client.models.calls[0]["contents"][0].parts[0].text)
+            self.assertEqual(payload["active_surface_summary"]["revision"], 3)
+            self.assertEqual(payload["active_surface_summary"]["structure_summary"][0]["anchor_id"], "b")
 
     def test_describe_widgets_returns_only_allowed_widget_contracts(self) -> None:
         with _domain_root([]) as root:
@@ -215,9 +256,9 @@ class PlanAgentTests(unittest.TestCase):
                     id="native-widget-1", name="describe_widgets", args={"widget_ids": ["answer"]},
                 )]),
                 _Response(json.dumps({
-                    "decision": "create_plan",
-                    "template_description": "Một đáp án ở giữa panel.",
-                    "plan": {
+                    "action": "create_surface_plan",
+                    "template_description": "Một đáp án ẩn.",
+                    "surface": {
                         "blocks": [{
                             "widget_id": "answer",
                             "initial_visibility": "hidden",
@@ -231,10 +272,69 @@ class PlanAgentTests(unittest.TestCase):
 
             result = asyncio.run(agent.plan(PlanAgentRequest(domain_id="education", intent="Tạo đáp án ẩn.")))
 
-            self.assertEqual(result.decision.plan.blocks[0].initial_visibility, "hidden")
+            self.assertEqual(result.command.blocks[0].initial_visibility, "hidden")
             response = client.models.calls[1]["contents"][-1].parts[0].function_response.response
             self.assertEqual(response["widgets"][0]["initial_visibility"]["default"], "visible")
             self.assertEqual(response["widgets"][0]["initial_visibility"]["allowed_values"], ["visible", "hidden"])
+
+    def test_create_plan_with_choice_requires_describing_the_choice_and_its_children(self) -> None:
+        with _domain_root([], allowed_widget_ids=["choice", "image", "text"]) as root:
+            client = _Client([
+                _Response(calls=[types.FunctionCall(
+                    id="native-widget-1",
+                    name="describe_widgets",
+                    args={"widget_ids": ["choice", "image", "text"]},
+                )]),
+                _Response(json.dumps({
+                    "action": "create_surface_plan",
+                    "template_description": "Một thẻ lựa chọn.",
+                    "surface": {"blocks": [{
+                        "widget_id": "choice",
+                        "grid": {"col": 1, "row": 2, "col_span": 4, "row_span": 5},
+                        "props": {},
+                        "children": [
+                            {"widget_id": "image", "props": {"asset_id": "dog"}},
+                            {"widget_id": "text", "props": {"content": "Chó", "role": "label"}},
+                        ],
+                    }]},
+                }, ensure_ascii=False)),
+            ])
+            agent = _agent(root, DomainGateway(DomainRegistry(root)), client)
+
+            result = asyncio.run(agent.plan(PlanAgentRequest(
+                domain_id="education", intent="Chọn đúng con chó."
+            )))
+
+            choice = result.command.blocks[0]
+            self.assertEqual(choice.widget_id, "choice")
+            self.assertEqual(choice.props, {})
+            self.assertEqual([child.widget_id for child in choice.children], ["image", "text"])
+
+    def test_create_plan_rejects_choice_child_that_was_not_described(self) -> None:
+        with _domain_root([], allowed_widget_ids=["choice", "image", "text"]) as root:
+            client = _Client([
+                _Response(calls=[types.FunctionCall(
+                    id="native-widget-1",
+                    name="describe_widgets",
+                    args={"widget_ids": ["choice"]},
+                )]),
+                _Response(json.dumps({
+                    "action": "create_surface_plan",
+                    "template_description": "Một thẻ lựa chọn.",
+                    "surface": {"blocks": [{
+                        "widget_id": "choice",
+                        "grid": {"col": 1, "row": 2, "col_span": 4, "row_span": 5},
+                        "props": {},
+                        "children": [{"widget_id": "image", "props": {"asset_id": "dog"}}],
+                    }]},
+                }, ensure_ascii=False)),
+            ])
+            agent = _agent(root, DomainGateway(DomainRegistry(root)), client)
+
+            with self.assertRaisesRegex(PlanAgentError, "must call describe_widgets before using: image"):
+                asyncio.run(agent.plan(PlanAgentRequest(
+                    domain_id="education", intent="Chọn đúng con chó."
+                )))
 
     def test_describe_widgets_rejects_widget_outside_domain_scope(self) -> None:
         with _domain_root([]) as root:
@@ -258,50 +358,72 @@ class PlanAgentTests(unittest.TestCase):
             with self.assertRaisesRegex(PlanAgentError, "not granted"):
                 asyncio.run(agent.plan(PlanAgentRequest(domain_id="education", intent="Cần dữ liệu.")))
 
-    def test_final_existing_plan_must_belong_to_catalog(self) -> None:
+    def test_legacy_template_decision_is_rejected(self) -> None:
         with _domain_root([], layout_template=True) as root:
             client = _Client([_Response(json.dumps({
                 "decision": "use_existing_plan", "template_id": "missing"
             }))])
             agent = _agent(root, DomainGateway(DomainRegistry(root)), client)
 
-            with self.assertRaisesRegex(PlanAgentError, "not in the domain template catalog"):
+            with self.assertRaisesRegex(PlanAgentError, "invalid final decision"):
                 asyncio.run(agent.plan(PlanAgentRequest(domain_id="education", intent="Dùng plan.")))
 
-
-class PlanAgentTemplateToolTests(unittest.TestCase):
-    def test_describe_template_returns_the_layout_binding_contract(self) -> None:
+    def test_existing_template_requires_describe_then_returns_only_bindings(self) -> None:
         with _domain_root([], layout_template=True) as root:
             client = _Client([
                 _Response(calls=[types.FunctionCall(
                     id="native-template-1", name="describe_template", args={"template_id": "present"},
                 )]),
                 _Response(json.dumps({
-                    "decision": "use_existing_plan",
+                    "action": "use_existing_surface_template",
                     "template_id": "present",
-                    "bindings": {"$block_1_content": "A title"},
+                    "bindings": {"$block_1_content": "Cùng học nhé!"},
+                }, ensure_ascii=False)),
+            ])
+            agent = _agent(root, DomainGateway(DomainRegistry(root)), client)
+
+            result = asyncio.run(agent.plan(PlanAgentRequest(domain_id="education", intent="Dùng khung.")))
+
+            self.assertIsInstance(result.command, UseExistingSurfaceTemplate)
+            self.assertEqual(result.command.template_id, "present")
+            self.assertEqual(result.command.bindings, {"$block_1_content": "Cùng học nhé!"})
+
+
+class PlanAgentTemplateToolTests(unittest.TestCase):
+    def test_describe_template_returns_the_layout_structure_for_create_surface(self) -> None:
+        with _domain_root([], layout_template=True) as root:
+            client = _Client([
+                _Response(calls=[types.FunctionCall(
+                    id="native-template-1", name="describe_template", args={"template_id": "present"},
+                )]),
+                _Response(calls=[types.FunctionCall(
+                    id="native-widget-1", name="describe_widgets", args={"widget_ids": ["text"]},
+                )]),
+                _Response(json.dumps({
+                    "action": "create_surface_plan",
+                    "template_description": "Một tiêu đề bài học.",
+                    "surface": {"blocks": [{
+                        "widget_id": "text",
+                        "grid": {"col": 1, "row": 1, "col_span": 12, "row_span": 1},
+                        "props": {"content": "A title", "role": "title"},
+                    }]},
                 })),
             ])
             agent = _agent(root, DomainGateway(DomainRegistry(root)), client)
 
             asyncio.run(agent.plan(PlanAgentRequest(domain_id="education", intent="Use template.")))
 
-            response = client.models.calls[1]["contents"][-1].parts[0].function_response
-            self.assertEqual(response.name, "describe_template")
+            responses = [
+                part.function_response
+                for call in client.models.calls
+                for content in call["contents"]
+                for part in content.parts
+                if getattr(part, "function_response", None) is not None
+            ]
+            response = next(item for item in responses if item.name == "describe_template")
             self.assertEqual(response.id, "native-template-1")
             self.assertEqual(response.response["bindings"][0]["key"], "$block_1_content")
-
-    def test_layout_template_requires_describe_template_and_complete_bindings(self) -> None:
-        with _domain_root([], layout_template=True) as root:
-            client = _Client([_Response(json.dumps({
-                "decision": "use_existing_plan",
-                "template_id": "present",
-                "bindings": {"$block_1_content": "A title"},
-            }))])
-            agent = _agent(root, DomainGateway(DomainRegistry(root)), client)
-
-            with self.assertRaisesRegex(PlanAgentError, "must call describe_template"):
-                asyncio.run(agent.plan(PlanAgentRequest(domain_id="education", intent="Use template.")))
+            self.assertEqual(response.response["blocks"][0]["widget_id"], "text")
 
 
 class _CerebrasProviderTests(unittest.TestCase):
@@ -309,14 +431,16 @@ class _CerebrasProviderTests(unittest.TestCase):
         with _domain_root([], layout_template=True) as root:
             client = _CerebrasClient([
                 _CerebrasMessage(tool_calls=[_CerebrasToolCall(
-                    call_id="template-1",
-                    name="describe_template",
-                    arguments={"template_id": "present"},
+                    call_id="widget-1", name="describe_widgets", arguments={"widget_ids": ["text"]},
                 )]),
                 _CerebrasMessage(json.dumps({
-                    "decision": "use_existing_plan",
-                    "template_id": "present",
-                    "bindings": {"$block_1_content": "A title"},
+                    "action": "create_surface_plan",
+                    "template_description": "Một tiêu đề bài học.",
+                    "surface": {"blocks": [{
+                        "widget_id": "text",
+                        "grid": {"col": 1, "row": 1, "col_span": 12, "row_span": 1},
+                        "props": {"content": "A title", "role": "title"},
+                    }]},
                 })),
             ])
             settings = replace(
@@ -336,7 +460,7 @@ class _CerebrasProviderTests(unittest.TestCase):
 
             result = asyncio.run(agent.plan(PlanAgentRequest(domain_id="education", intent="Use plan.")))
 
-            self.assertEqual(result.decision.template_id, "present")
+            self.assertIsInstance(result.command, CreateSurfacePlan)
             self.assertEqual(factory_calls, [{
                 "api_key": "cerebras-test-key",
                 "base_url": "https://api.cerebras.ai/v1",
@@ -347,9 +471,9 @@ class _CerebrasProviderTests(unittest.TestCase):
 
 def _create_plan_json() -> str:
     return json.dumps({
-        "decision": "create_plan",
-        "template_description": "Một ảnh lớn đặt cạnh tiêu đề.",
-        "plan": {
+        "action": "create_surface_plan",
+        "template_description": "Một ảnh minh hoạ.",
+        "surface": {
             "blocks": [{
                 "widget_id": "image",
                 "grid": {"col": 1, "row": 1, "col_span": 6, "row_span": 8},

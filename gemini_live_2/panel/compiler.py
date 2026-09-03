@@ -15,7 +15,16 @@ from uuid import uuid4
 
 from gemini_live_2.widgets import WidgetPropsError, WidgetRegistry
 
-from .contracts import AnchorBinding, DataBundle, GridRect, PanelBlock, PanelIR, PlanBlock, PresentationPlan
+from .contracts import (
+    AnchorBinding,
+    DataBundle,
+    GridRect,
+    PanelBlock,
+    PanelChoiceChild,
+    PanelIR,
+    PlanBlock,
+    PresentationPlan,
+)
 
 if TYPE_CHECKING:
     from gemini_live_2.catalogs.domains import DomainResources
@@ -71,13 +80,26 @@ class PanelCompiler:
         data_bundle: DataBundle,
         domain_resources: DomainResources,
         panel_id: str | None = None,
+        block_ids: tuple[str, ...] | None = None,
+        anchor_ids_by_block_key: Mapping[tuple[str, str], str] | None = None,
     ) -> PanelIR:
-        """Validate and materialize a plan without choosing or altering its layout."""
+        """Validate and materialize a plan without choosing or altering its layout.
+
+        ``block_ids`` and ``anchor_ids_by_block_key`` are supplied only by the
+        Runtime when applying a structural patch to an existing surface.  They
+        preserve compiler-owned identities for components that survive the
+        patch; the Plan Agent never chooses either kind of ID.
+        """
 
         if plan.domain_id != data_bundle.domain_id:
             raise PanelCompilationError("plan.domain_id must match data_bundle.domain_id.")
         if plan.domain_id != domain_resources.manifest.domain_id:
             raise PanelCompilationError("plan.domain_id must match domain resources.")
+        if block_ids is not None:
+            if len(block_ids) != len(plan.blocks) or any(not isinstance(item, str) or not item for item in block_ids):
+                raise PanelCompilationError("runtime block identities must match the plan blocks.")
+            if len(set(block_ids)) != len(block_ids):
+                raise PanelCompilationError("runtime block identities must be unique.")
 
         self._validate_grid(plan.blocks)
         aliases = self._alias_values(data_bundle)
@@ -101,26 +123,27 @@ class PanelCompiler:
                 props=normalized_props,
                 domain_resources=domain_resources,
             )
+            children = self._materialize_choice_children(
+                block=block,
+                allowed_child_widget_ids=widget.allowed_child_widget_ids,
+                aliases=aliases,
+                domain_resources=domain_resources,
+            )
             materialized = PanelBlock(
-                id=str(index),
+                id=block_ids[index - 1] if block_ids is not None else str(index),
                 widget_id=block.widget_id,
                 grid=block.grid,
                 props=normalized_props,
                 visibility=block.initial_visibility,
+                children=children,
             )
             materialized_blocks.append(materialized)
             anchor_requests.extend((materialized, anchor) for anchor in widget.anchors_for(materialized.props))
 
         resolved_panel_id = panel_id or f"panel-{uuid4().hex}"
-        anchors = tuple(
-            AnchorBinding(
-                anchor_id=_short_anchor_id(index),
-                block_id=block.id,
-                anchor_key=anchor.key,
-                target_id=f"panel:{resolved_panel_id}:block:{block.id}:anchor:{anchor.key}",
-                allowed_effect_ids=anchor.allowed_effect_ids,
-            )
-            for index, (block, anchor) in enumerate(anchor_requests)
+        anchors = self._materialize_anchors(
+            anchor_requests=anchor_requests,
+            existing_ids=anchor_ids_by_block_key or {},
         )
 
         return PanelIR(
@@ -129,6 +152,86 @@ class PanelCompiler:
             blocks=tuple(materialized_blocks),
             anchors=anchors,
         )
+
+    @staticmethod
+    def _materialize_anchors(
+        *,
+        anchor_requests: list[tuple[PanelBlock, Any]],
+        existing_ids: Mapping[tuple[str, str], str],
+    ) -> tuple[AnchorBinding, ...]:
+        """Keep valid existing anchors and mint only identities a patch adds."""
+
+        used_ids = set(existing_ids.values())
+        next_index = 0
+
+        def allocate() -> str:
+            nonlocal next_index
+            while True:
+                candidate = _short_anchor_id(next_index)
+                next_index += 1
+                if candidate not in used_ids:
+                    used_ids.add(candidate)
+                    return candidate
+
+        bindings: list[AnchorBinding] = []
+        for block, anchor in anchor_requests:
+            identity_key = (block.id, anchor.key)
+            anchor_id = existing_ids.get(identity_key) or allocate()
+            bindings.append(AnchorBinding(
+                anchor_id=anchor_id,
+                block_id=block.id,
+                anchor_key=anchor.key,
+                allowed_effect_ids=anchor.allowed_effect_ids,
+            ))
+        return tuple(bindings)
+
+    def _materialize_choice_children(
+        self,
+        *,
+        block: PlanBlock,
+        allowed_child_widget_ids: tuple[str, ...],
+        aliases: Mapping[str, Any],
+        domain_resources: DomainResources,
+    ) -> tuple[PanelChoiceChild, ...]:
+        """Validate and materialize nested widgets without assigning them grid cells.
+
+        Only a registered container widget declares allowed child widget IDs.
+        At this stage choice is the sole container, so children cannot acquire
+        their own anchors or interaction semantics.
+        """
+
+        if not block.children:
+            if block.widget_id == "choice":
+                raise PanelCompilationError("choice block must contain at least one child.")
+            return ()
+        if not allowed_child_widget_ids:
+            raise PanelCompilationError(f"widget '{block.widget_id}' does not allow children.")
+
+        materialized: list[PanelChoiceChild] = []
+        for child_index, child in enumerate(block.children, start=1):
+            if child.widget_id not in allowed_child_widget_ids:
+                allowed = ", ".join(allowed_child_widget_ids)
+                raise PanelCompilationError(
+                    f"choice child {child_index} widget '{child.widget_id}' is not allowed; "
+                    f"allowed: {allowed}."
+                )
+            if child.widget_id not in domain_resources.manifest.allowed_widget_ids:
+                raise PanelCompilationError(
+                    f"choice child {child_index} widget '{child.widget_id}' is not allowed "
+                    f"by the active domain."
+                )
+            try:
+                widget = self.widget_registry.get(child.widget_id)
+                props = widget.validate(_resolve_aliases(child.props, aliases))
+            except WidgetPropsError as error:
+                raise PanelCompilationError(f"choice child {child_index}: {error}") from error
+            self._validate_asset_reference(
+                widget_id=child.widget_id,
+                props=props,
+                domain_resources=domain_resources,
+            )
+            materialized.append(PanelChoiceChild(widget_id=child.widget_id, props=props))
+        return tuple(materialized)
 
     def _validate_grid(self, blocks: tuple[PlanBlock, ...]) -> None:
         for index, block in enumerate(blocks, start=1):

@@ -3,6 +3,7 @@ from pathlib import Path
 
 from gemini_live_2.catalogs.domains import DomainRegistry
 from gemini_live_2.panel import (
+    ChoiceChild,
     DataBundle,
     GridRect,
     PanelCompiler,
@@ -67,7 +68,6 @@ class PanelRendererTests(unittest.TestCase):
             "anchor_id": "b",
             "block_id": "2",
             "anchor_key": "image",
-            "target_id": "panel:panel-fidelity:block:2:anchor:image",
             "allowed_effect_ids": ["highlight", "circle"],
         })
         self.assertEqual(payload["assets"], [
@@ -96,6 +96,39 @@ class PanelRendererTests(unittest.TestCase):
         self.assertEqual(payload["panel"]["blocks"][0]["visibility"], "hidden")
         self.assertEqual(payload["panel"]["blocks"][0]["props"], {})
         self.assertEqual(payload["assets"], [])
+
+    def test_client_payload_includes_visible_choice_children_and_their_assets(self) -> None:
+        choice_panel = PanelCompiler(build_default_widget_registry()).compile(
+            panel_id="panel-choice-payload",
+            domain_resources=DomainRegistry(PROJECT_ROOT / "domains").load("education"),
+            data_bundle=DataBundle(domain_id="education", data={}),
+            plan=PresentationPlan(
+                domain_id="education",
+                blocks=(
+                    PlanBlock(
+                        "choice",
+                        GridRect(1, 1, 4, 5),
+                        {},
+                        children=(
+                            ChoiceChild("image", {"asset_id": "cat"}),
+                            ChoiceChild("text", {"content": "Mèo", "role": "label"}),
+                        ),
+                    ),
+                ),
+            ),
+        )
+        payload = panel_client_payload(
+            choice_panel,
+            asset_urls={"cat": "/assets/domains/education/cat"},
+        )
+        block = payload["panel"]["blocks"][0]
+        self.assertEqual(block["children"][0], {"widget_id": "image", "props": {"asset_id": "cat"}})
+        self.assertEqual(block["children"][1]["props"]["content"], "Mèo")
+        self.assertEqual(payload["assets"], [{"id": "cat", "url": "/assets/domains/education/cat"}])
+        stage_map = render_visual_stage_map(choice_panel)
+        self.assertIn("ẢNH: cat", stage_map)
+        self.assertIn("Mèo", stage_map)
+        self.assertIn("[anchor: a]", stage_map)
 
     def test_stage_map_redacts_hidden_content_then_exposes_it_after_reveal(self) -> None:
         hidden_panel = PanelCompiler(build_default_widget_registry()).compile(

@@ -45,7 +45,7 @@ Gemini `present_visual`
 
 | Phần cũ | Lý do loại bỏ/thay thế |
 |---|---|
-| `presentation/renderer.py`, `capabilities.py`, Jinja template HTML, metadata template | Ràng buộc panel vào template HTML và `data-present-id` được viết sẵn. Thay bằng widget renderer + PanelIR. |
+| `presentation/renderer.py`, `capabilities.py`, Jinja template HTML, metadata template | Ràng buộc panel vào template HTML và `data-anchor-id` được viết sẵn. Thay bằng widget renderer + PanelIR. |
 | `presentation/pipeline.py` và `PresentationRequest` cũ | Chứa nhánh Jinja, Template LLM thử nghiệm, metadata capability và stage map template. Thay bởi Plan Agent, IR Compiler/Materializer. |
 | `presentation/base.py` / `DomainPresentationAdapter` | Gắn adapter vào template/stage state cũ. Không cần trong framework mới. |
 | `presentation/dynamic_grid.py` | Có ý tưởng đúng (grid 12×10, server anchor map, ASCII map), nhưng chỉ hỗ trợ `text`/`image`, URL Education cố định và tự sinh anchor theo block. Dùng làm tài liệu cho CP4–CP6, không dùng runtime. |
@@ -55,7 +55,7 @@ Gemini `present_visual`
 ## Điểm tích hợp tối thiểu của PanelIR mới
 
 1. `route_request`/Plan Agent tạo `PresentationPlan`.
-2. Compiler materialize `PanelIR`, gồm block thật, `anchor_id → target_id → allowed_effects`, và revision.
+2. Compiler materialize `PanelIR`, gồm block thật, `anchor_id → allowed_effects`, và revision.
 3. Backend gửi `panel` chuẩn PanelIR cho browser; browser Panel Renderer dựng widget CSS Grid.
 4. ASCII Renderer đọc đúng cùng `PanelIR` và gửi map cho Gemini Live.
 5. `ActivePanelState` nhận anchor/effect map từ PanelIR; `present_visual` và marker/PCM không đổi.

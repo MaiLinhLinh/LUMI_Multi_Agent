@@ -8,7 +8,7 @@ creates DOM targets or anchor identifiers directly.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping
 
 
@@ -96,6 +96,53 @@ class WidgetPropDefinition:
 
 
 @dataclass(frozen=True, slots=True)
+class WidgetStateDefinition:
+    """One runtime-state field a widget explicitly permits Runtime to change."""
+
+    name: str
+    value_type: str
+    allowed_values: tuple[str, ...] = ()
+    transitions: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "name", _text(self.name, "widget state name"))
+        object.__setattr__(self, "value_type", _text(self.value_type, "widget state type"))
+        values = tuple(_text(value, "widget state allowed value") for value in self.allowed_values)
+        if len(values) != len(set(values)):
+            raise WidgetPropsError("widget state allowed values must be unique.")
+        object.__setattr__(self, "allowed_values", values)
+        normalized_transitions: dict[str, tuple[str, ...]] = {}
+        for source, targets in self.transitions.items():
+            source_value = _text(source, "widget state transition source")
+            if not isinstance(targets, tuple):
+                raise WidgetPropsError("widget state transition targets must be a tuple.")
+            normalized_transitions[source_value] = tuple(
+                _text(target, "widget state transition target") for target in targets
+            )
+        object.__setattr__(self, "transitions", normalized_transitions)
+
+    def validate_change(self, *, current_value: Any, next_value: Any) -> Any:
+        if self.value_type == "string":
+            if not isinstance(next_value, str):
+                raise WidgetPropsError(f"state.{self.name} must be a string.")
+            if self.allowed_values and next_value not in self.allowed_values:
+                raise WidgetPropsError(
+                    f"state.{self.name} must be one of {list(self.allowed_values)}."
+                )
+        elif self.value_type == "boolean":
+            if not isinstance(next_value, bool):
+                raise WidgetPropsError(f"state.{self.name} must be a boolean.")
+        else:  # Future fields must add an explicit validator instead of guessing.
+            raise WidgetPropsError(f"unsupported state type '{self.value_type}'.")
+        allowed_targets = self.transitions.get(str(current_value))
+        if allowed_targets is not None and next_value not in allowed_targets:
+            raise WidgetPropsError(
+                f"state.{self.name} cannot transition from '{current_value}' to '{next_value}'."
+            )
+        return next_value
+
+
+@dataclass(frozen=True, slots=True)
 class WidgetDefinition:
     """Registered widget behaviour shared by every domain that enables it."""
 
@@ -104,6 +151,9 @@ class WidgetDefinition:
     anchor_policy: AnchorPolicy
     purpose: str
     props: tuple[WidgetPropDefinition, ...]
+    state_fields: tuple[WidgetStateDefinition, ...] = ()
+    allowed_child_widget_ids: tuple[str, ...] = ()
+    interaction_event: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "widget_id", _text(self.widget_id, "widget_id"))
@@ -111,6 +161,15 @@ class WidgetDefinition:
         names = tuple(prop.name for prop in self.props)
         if len(names) != len(set(names)):
             raise WidgetPropsError("widget prop names must be unique.")
+        state_names = tuple(state.name for state in self.state_fields)
+        if len(state_names) != len(set(state_names)):
+            raise WidgetPropsError("widget state field names must be unique.")
+        children = tuple(_text(value, "widget child widget_id") for value in self.allowed_child_widget_ids)
+        if len(children) != len(set(children)):
+            raise WidgetPropsError("widget child widget_ids must be unique.")
+        object.__setattr__(self, "allowed_child_widget_ids", children)
+        if self.interaction_event is not None:
+            object.__setattr__(self, "interaction_event", _text(self.interaction_event, "widget interaction event"))
 
     def validate(self, props: Mapping[str, Any]) -> dict[str, Any]:
         if not isinstance(props, Mapping):
@@ -122,6 +181,49 @@ class WidgetDefinition:
 
     def public_props_contract(self) -> dict[str, dict[str, Any]]:
         return {prop.name: prop.to_public_contract() for prop in self.props}
+
+    def public_contract(self) -> dict[str, Any]:
+        """Detailed contract returned after Plan Agent discovers a widget."""
+
+        contract: dict[str, Any] = {"props": self.public_props_contract()}
+        if self.state_fields:
+            contract["state_fields"] = {
+                state.name: {
+                    "type": state.value_type,
+                    "allowed_values": list(state.allowed_values),
+                    "transitions": {
+                        source: list(targets) for source, targets in state.transitions.items()
+                    },
+                }
+                for state in self.state_fields
+            }
+        if self.allowed_child_widget_ids:
+            contract["allowed_child_widget_ids"] = list(self.allowed_child_widget_ids)
+        if self.interaction_event is not None:
+            contract["interaction_event"] = self.interaction_event
+        return contract
+
+    def validate_state_changes(
+        self,
+        *,
+        current_state: Mapping[str, Any],
+        changes: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        if not isinstance(current_state, Mapping) or not isinstance(changes, Mapping) or not changes:
+            raise WidgetPropsError("state changes must be a non-empty object.")
+        definitions = {field.name: field for field in self.state_fields}
+        unsupported = set(changes) - set(definitions)
+        if unsupported:
+            raise WidgetPropsError(
+                f"{self.widget_id} does not allow state fields: {sorted(unsupported)}."
+            )
+        updated = dict(current_state)
+        for field_name, next_value in changes.items():
+            definition = definitions[field_name]
+            updated[field_name] = definition.validate_change(
+                current_value=updated.get(field_name), next_value=next_value
+            )
+        return updated
 
 
 class WidgetRegistry:
@@ -217,6 +319,12 @@ def _validate_number_display(props: Mapping[str, Any]) -> dict[str, Any]:
     return {"value": value}
 
 
+def _validate_choice(props: Mapping[str, Any]) -> dict[str, Any]:
+    if props:
+        raise WidgetPropsError("choice.props must be empty; the compiler assigns its interaction anchor.")
+    return {}
+
+
 def _no_anchors(_: Mapping[str, Any]) -> tuple[WidgetAnchor, ...]:
     return ()
 
@@ -246,9 +354,19 @@ def _number_display_anchors(_: Mapping[str, Any]) -> tuple[WidgetAnchor, ...]:
     return (WidgetAnchor(key="number", allowed_effect_ids=("highlight", "circle")),)
 
 
+def _choice_anchors(_: Mapping[str, Any]) -> tuple[WidgetAnchor, ...]:
+    return (WidgetAnchor(key="choice", allowed_effect_ids=("highlight", "circle")),)
+
+
 def build_default_widget_registry() -> WidgetRegistry:
     """Return the initial registry without coupling it to any domain manifest."""
 
+    visibility_state = WidgetStateDefinition(
+        name="visibility",
+        value_type="string",
+        allowed_values=("visible", "hidden"),
+        transitions={"visible": ("hidden",), "hidden": ("visible",)},
+    )
     return WidgetRegistry(
         (
             WidgetDefinition(
@@ -273,6 +391,7 @@ def build_default_widget_registry() -> WidgetRegistry:
                         allowed_values=("title", "subtitle", "label", "body"),
                     ),
                 ),
+                state_fields=(visibility_state,),
             ),
             WidgetDefinition(
                 widget_id="image",
@@ -296,6 +415,7 @@ def build_default_widget_registry() -> WidgetRegistry:
                         description="Nhãn ngắn cho ảnh.",
                     ),
                 ),
+                state_fields=(visibility_state,),
             ),
             WidgetDefinition(
                 widget_id="object_group",
@@ -327,6 +447,7 @@ def build_default_widget_registry() -> WidgetRegistry:
                         description="Nhãn ngắn cho cả nhóm.",
                     ),
                 ),
+                state_fields=(visibility_state,),
             ),
             WidgetDefinition(
                 widget_id="answer",
@@ -345,6 +466,7 @@ def build_default_widget_registry() -> WidgetRegistry:
                         description="Đáp án hoặc từ ngắn cần hiển thị.",
                     ),
                 ),
+                state_fields=(visibility_state,),
             ),
             WidgetDefinition(
                 widget_id="number_display",
@@ -360,6 +482,17 @@ def build_default_widget_registry() -> WidgetRegistry:
                         description="Số hoặc giá trị ngắn cần hiển thị nổi bật.",
                     ),
                 ),
+                state_fields=(visibility_state,),
+            ),
+            WidgetDefinition(
+                widget_id="choice",
+                validate_props=_validate_choice,
+                anchor_policy=_choice_anchors,
+                purpose="Tạo một lựa chọn có thể chạm/chọn; hiển thị ảnh hoặc nhóm ở trên và nhãn/chữ ở dưới.",
+                props=(),
+                state_fields=(visibility_state,),
+                allowed_child_widget_ids=("image", "text", "number_display", "object_group"),
+                interaction_event="select",
             ),
         )
     )

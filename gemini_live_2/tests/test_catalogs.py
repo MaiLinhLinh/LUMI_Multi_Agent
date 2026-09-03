@@ -14,9 +14,11 @@ class CatalogTests(unittest.TestCase):
     def test_education_manifest_loads_assets_without_domain_branching(self) -> None:
         resources = DomainRegistry(PROJECT_ROOT / "domains").load("education")
         self.assertEqual(resources.manifest.domain_id, "education")
-        self.assertEqual(resources.manifest.allowed_widget_ids, ("text", "image", "object_group", "answer", "number_display"))
+        self.assertEqual(resources.manifest.allowed_widget_ids, ("text", "image", "object_group", "answer", "number_display", "choice"))
         self.assertIn("cô giáo thân thiện", resources.presentation_instruction)
-        self.assertEqual([asset["id"] for asset in resources.assets.plan_agent_catalog()], ["dog", "cat"])
+        asset_ids = [asset["id"] for asset in resources.assets.plan_agent_catalog()]
+        self.assertIn("dog", asset_ids)
+        self.assertIn("cat", asset_ids)
         self.assertNotIn("path", resources.assets.plan_agent_catalog()[0])
 
     def test_asset_catalog_rejects_mime_mismatch(self) -> None:

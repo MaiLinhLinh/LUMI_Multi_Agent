@@ -77,7 +77,7 @@ export class AnimationController {
     this.onDiagnostic("armed_at_audio_start", {
       anchor_id: scene.anchor_id,
       effect: scene.effect,
-      target_id: scene.target_id,
+      anchor_id: scene.anchor_id,
       delay_ms: Math.round(delay),
     });
   }
@@ -85,13 +85,13 @@ export class AnimationController {
   play(command) {
     this.clearActiveEffect();
     const root = this.templateHost.shadowRoot;
-    const target = root?.querySelector(`[data-present-id="${CSS.escape(command.target_id)}"]`);
+    const target = root?.querySelector(`[data-anchor-id="${CSS.escape(command.anchor_id)}"]`);
     if (!target) {
       console.warn("[GEMINI_LIVE:UI_TARGET_MISSING]", command);
       this.onDiagnostic("target_missing", {
         anchor_id: command.anchor_id,
         effect: command.effect,
-        target_id: command.target_id,
+        anchor_id: command.anchor_id,
       });
       return;
     }
@@ -102,14 +102,14 @@ export class AnimationController {
       this.onDiagnostic("effect_unimplemented", {
         anchor_id: command.anchor_id,
         effect: command.effect,
-        target_id: command.target_id,
+        anchor_id: command.anchor_id,
       });
       return;
     }
     this.onDiagnostic("effect_started", {
       anchor_id: command.anchor_id,
       effect: command.effect,
-      target_id: command.target_id,
+      anchor_id: command.anchor_id,
       rect: context.rect,
     });
     const cleanup = handler(context, command);

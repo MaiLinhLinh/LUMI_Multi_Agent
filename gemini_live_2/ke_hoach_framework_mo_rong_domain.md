@@ -143,8 +143,8 @@ Ví dụ `weather_day_card` tự render ngày, icon, nhiệt độ và xác su�
 Plan Agent chỉ chọn `widget_id`, đặt widget vào grid và truyền props/data binding.
 Trước khi dùng widget trong `create_plan`, Agent phải gọi `describe_widgets` cho widget
 đó. Plan Agent không tự tạo block ID, HTML, CSS, DOM target hoặc `anchor_id`.
-Compiler sinh block ID tuần tự, materialize widget và tạo `target_id` kỹ thuật cùng
-anchor thật trong `PanelIR`; frontend renderer gắn anchor đó vào DOM.
+Compiler sinh block ID tuần tự, materialize widget và tạo `anchor_id` ngắn trong
+`PanelIR`; frontend renderer gắn trực tiếp anchor đó vào DOM.
 
 ## 3. Chốt Layout Contract
 
@@ -370,7 +370,7 @@ Sau đó compiler:
 2. Resolve mọi data alias từ `DataBundle` thành giá trị thật.
 3. Mở rộng block lặp khi cần, dựa trên một mảng có trong `DataBundle`.
 4. Sinh `anchor_id`.
-5. Tạo map `anchor_id → target_id → allowed_effects`.
+5. Tạo map `anchor_id → allowed_effects`.
 6. Tạo `PanelIR` hoàn chỉnh chứa dữ liệu đã materialize.
 
 Compiler không tự chọn bố cục, asset hoặc nội dung.

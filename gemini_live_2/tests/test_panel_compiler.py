@@ -3,6 +3,7 @@ from pathlib import Path
 
 from gemini_live_2.catalogs.domains import DomainRegistry
 from gemini_live_2.panel import (
+    ChoiceChild,
     DataAlias,
     DataBundle,
     GridRect,
@@ -44,8 +45,8 @@ class PanelCompilerTests(unittest.TestCase):
         self.assertEqual(panel.blocks[0].props["content"], "Dog and cat")
         self.assertEqual([block.id for block in panel.blocks], ["1", "2", "3"])
         self.assertEqual(set(panel.anchor_map), {"a", "b", "c", "d", "e"})
-        self.assertEqual(panel.anchor_map["a"].target_id, "panel:panel-test:block:1:anchor:text")
-        self.assertEqual(panel.anchor_map["b"].target_id, "panel:panel-test:block:2:anchor:image")
+        self.assertEqual(panel.anchor_map["a"].block_id, "1")
+        self.assertEqual(panel.anchor_map["b"].anchor_key, "image")
 
     def test_rejects_out_of_bounds_overlap_and_unknown_asset(self) -> None:
         with self.assertRaisesRegex(PanelCompilationError, "exceeds canvas"):
@@ -106,6 +107,37 @@ class PanelCompilerTests(unittest.TestCase):
         ))
         self.assertEqual(panel.blocks[0].visibility, "hidden")
         self.assertEqual(panel.anchor_map["a"].anchor_key, "answer")
+
+    def test_compiles_choice_children_and_creates_one_anchor_for_the_whole_choice(self) -> None:
+        panel = self._compile((
+            PlanBlock(
+                "choice",
+                GridRect(1, 1, 4, 5),
+                {},
+                children=(
+                    ChoiceChild("image", {"asset_id": "cat"}),
+                    ChoiceChild("text", {"content": "Mèo", "role": "label"}),
+                ),
+            ),
+        ))
+        self.assertEqual(panel.blocks[0].children[0].props["asset_id"], "cat")
+        self.assertEqual(panel.blocks[0].children[1].props["content"], "Mèo")
+        self.assertEqual([(anchor.block_id, anchor.anchor_key) for anchor in panel.anchors], [("1", "choice")])
+
+    def test_rejects_invalid_or_duplicate_choice_children(self) -> None:
+        with self.assertRaisesRegex(PanelCompilationError, "must contain at least one child"):
+            self._compile((PlanBlock("choice", GridRect(1, 1, 4, 4), {}),))
+        with self.assertRaisesRegex(PanelCompilationError, "not allowed"):
+            self._compile((
+                PlanBlock(
+                    "choice", GridRect(1, 1, 4, 4), {},
+                    children=(ChoiceChild("answer", {"value": "3"}),),
+                ),
+            ))
+        with self.assertRaisesRegex(PanelCompilationError, "choice.props must be empty"):
+            self._compile((
+                PlanBlock("choice", GridRect(1, 1, 4, 4), {"choice_id": "1"}, children=(ChoiceChild("image", {"asset_id": "cat"}),)),
+            ))
 
     def _compile(self, blocks: tuple[PlanBlock, ...]):
         return self.compiler.compile(

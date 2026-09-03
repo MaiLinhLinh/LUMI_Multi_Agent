@@ -1,6 +1,6 @@
 /** Trace a line already rendered inside a chart target, without inventing data. */
 export function traceEffect({ target }) {
-  const line = target.querySelector("polyline[data-present-id$='.line']");
+  const line = target.querySelector("polyline[data-anchor-id]");
   if (!line || typeof line.getTotalLength !== "function") {
     target.classList.add("lumi-highlight");
     return () => target.classList.remove("lumi-highlight");

@@ -14,14 +14,22 @@ from gemini_live_2.live.registry import LiveToolRegistry
 from gemini_live_2.panel import (
     ActivePanelState,
     AnchorBinding,
+    CreateSurfacePlan,
     DataBundle,
     GridRect,
+    MoveBlockOperation,
     PanelBlock,
     PanelCompilationError,
     PanelCompiler,
+    PanelChoiceChild,
     PanelIR,
+    PlanBlock,
+    PatchSurfacePlan,
+    UpdatePropsOperation,
+    UseExistingSurfaceTemplate,
+    render_visual_stage_map,
 )
-from gemini_live_2.plan_agent import PlanAgentResult, UseExistingPlanDecision
+from gemini_live_2.plan_agent import PlanAgentResult
 from gemini_live_2.settings import Settings
 from gemini_live_2.widgets import build_default_widget_registry
 
@@ -29,24 +37,36 @@ from gemini_live_2.widgets import build_default_widget_registry
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
+def _plan_block(
+    widget_id: str,
+    col: int,
+    row: int,
+    col_span: int,
+    row_span: int,
+    props: dict[str, object],
+) -> PlanBlock:
+    return PlanBlock(
+        widget_id=widget_id,
+        grid=GridRect(col, row, col_span, row_span),
+        props=props,
+    )
+
+
 class _PlanAgentStub:
     def __init__(self) -> None:
         self.requests = []
-        self.decision = UseExistingPlanDecision(
-            "two_subject_comparison",
-            bindings={
-                "$block_1_content": "Cùng quan sát chó và mèo nhé!",
-                "$block_2_asset_id": "dog",
-                "$block_2_label": "Chó",
-                "$block_3_asset_id": "cat",
-                "$block_3_label": "Mèo",
-            },
+        self.command = CreateSurfacePlan(
+            blocks=(
+                _plan_block("text", 1, 1, 16, 1, {"content": "Cùng quan sát chó và mèo nhé!", "role": "title"}),
+                _plan_block("image", 1, 3, 6, 5, {"asset_id": "dog", "label": "Chó"}),
+                _plan_block("image", 10, 3, 6, 5, {"asset_id": "cat", "label": "Mèo"}),
+            ),
         )
 
     async def plan(self, request):
         self.requests.append(request)
         return PlanAgentResult(
-            decision=self.decision,
+            command=self.command,
             data_bundle=DataBundle(domain_id=request.domain_id, data={}),
         )
 
@@ -105,6 +125,57 @@ class LiveRoutingTests(unittest.TestCase):
         self.assertEqual(self.orchestrator.active_panel("s1").revision, 1)
         self.assertEqual(self.agent.requests[0].recent_history[0]["text"], "Cho bé xem hai con vật")
 
+    def test_route_materializes_an_existing_template_from_bindings(self) -> None:
+        self.agent.command = UseExistingSurfaceTemplate(
+            template_id="two_subject_comparison",
+            bindings={
+                "$block_1_content": "Cùng quan sát hai bạn mèo nhé!",
+                "$block_2_asset_id": "cat",
+                "$block_3_asset_id": "cat",
+            },
+        )
+        result = asyncio.run(self.orchestrator.execute_tool_call_result(
+            session_id="s1",
+            tool_name="route_request",
+            arguments={"domain_id": "education", "intent": "Hiển thị hai con mèo."},
+        ))
+
+        self.assertEqual(result.response["status"], "completed")
+        panel = self.orchestrator.active_panel("s1").panel_ir
+        self.assertEqual([block.props.get("asset_id") for block in panel.blocks[1:]], ["cat", "cat"])
+
+    def test_active_surface_summary_is_business_context_and_is_supplied_only_on_later_route(self) -> None:
+        self.assertIsNone(self.orchestrator.active_surface_summary("s1"))
+
+        asyncio.run(self.orchestrator.execute_tool_call_result(
+            session_id="s1",
+            tool_name="route_request",
+            arguments={"domain_id": "education", "intent": "Show a dog."},
+        ))
+        summary = self.orchestrator.active_surface_summary("s1")
+        self.assertIsNotNone(summary)
+        assert summary is not None
+        payload = summary.to_dict()
+        self.assertEqual(payload["purpose"], "Show a dog.")
+        self.assertEqual(payload["domain_id"], "education")
+        self.assertEqual(payload["revision"], 1)
+        self.assertTrue(payload["structure_summary"])
+        self.assertNotIn("grid", payload["structure_summary"][0])
+        self.assertNotIn("target_id", payload["structure_summary"][0])
+
+        asyncio.run(self.orchestrator.execute_tool_call_result(
+            session_id="s1",
+            tool_name="route_request",
+            arguments={"domain_id": "education", "intent": "Change to two cats."},
+        ))
+        passed_to_second_route = self.agent.requests[1].active_surface_summary
+        self.assertIsNotNone(passed_to_second_route)
+        assert passed_to_second_route is not None
+        self.assertEqual(passed_to_second_route.purpose, "Show a dog.")
+
+        self.orchestrator._active_panels.pop("s1")  # type: ignore[attr-defined]
+        self.assertIsNone(self.orchestrator.active_surface_summary("s1"))
+
     def test_active_panel_context_restores_domain_prompt_and_stage_map(self) -> None:
         asyncio.run(self.orchestrator.execute_tool_call_result(
             session_id="s1",
@@ -117,6 +188,8 @@ class LiveRoutingTests(unittest.TestCase):
         self.assertIn("cô giáo thân thiện", context["presentation_instruction"])
         self.assertIn("VISUAL STAGE MAP", context["visual_stage_map"])
         self.assertTrue(context["visual_effects"])
+        self.assertEqual(context["surface_id"], self.orchestrator.active_panel("s1").panel_ir.panel_id)
+        self.assertEqual(context["revision"], 1)
 
     def test_reconnect_instruction_contains_history_and_active_panel_context(self) -> None:
         self.orchestrator.remember_turn(
@@ -142,6 +215,36 @@ class LiveRoutingTests(unittest.TestCase):
         self.assertIn("cô giáo thân thiện", instruction)
         self.assertIn("PANEL HIỆN TẠI", instruction)
         self.assertIn("VISUAL STAGE MAP", instruction)
+        self.assertIn("surface_id:", instruction)
+        self.assertIn("base_revision: 1", instruction)
+
+    def test_delete_surface_requires_current_revision_then_removes_panel(self) -> None:
+        asyncio.run(self.orchestrator.execute_tool_call_result(
+            session_id="s1",
+            tool_name="route_request",
+            arguments={"domain_id": "education", "intent": "Hiển thị một chú chó."},
+        ))
+        active = self.orchestrator.active_panel("s1")
+        assert active is not None
+
+        with self.assertRaisesRegex(ValueError, "base_revision"):
+            self.orchestrator.delete_surface(
+                session_id="s1",
+                surface_id=active.panel_ir.panel_id,
+                base_revision=active.revision + 1,
+            )
+        self.assertIsNotNone(self.orchestrator.active_panel("s1"))
+
+        result = self.orchestrator.delete_surface(
+            session_id="s1",
+            surface_id=active.panel_ir.panel_id,
+            base_revision=active.revision,
+        )
+        self.assertEqual(result.response["status"], "completed")
+        self.assertEqual(result.response["revision"], active.revision + 1)
+        self.assertEqual(result.response["visual_effects"], [])
+        self.assertIn("KHÔNG CÓ PANEL", result.response["visual_stage_map"])
+        self.assertIsNone(self.orchestrator.active_panel("s1"))
 
     def test_present_visual_resolves_only_the_current_panel_anchor_map(self) -> None:
         asyncio.run(self.orchestrator.execute_tool_call_result(
@@ -153,11 +256,11 @@ class LiveRoutingTests(unittest.TestCase):
             session_id="s1", anchor_id="b", effect_id="highlight",
         )
         self.assertEqual(cue["panel_revision"], 1)
-        self.assertIn(":block:2:anchor:image", cue["target_id"])
+        self.assertEqual(cue["anchor_id"], "b")
         with self.assertRaisesRegex(ValueError, "unknown anchor_id"):
             self.orchestrator.present_visual(session_id="s1", anchor_id="missing", effect_id="highlight")
 
-    def test_panel_action_reveals_hidden_blocks_in_place_and_rejects_repeat(self) -> None:
+    def test_update_surface_state_reveals_hidden_blocks_in_place_and_rejects_repeat(self) -> None:
         panel = PanelIR(
             panel_id="panel-hidden",
             domain_id="education",
@@ -175,15 +278,15 @@ class LiveRoutingTests(unittest.TestCase):
                     anchor_id="a",
                     block_id="1",
                     anchor_key="image",
-                    target_id="panel:panel-hidden:block:1:anchor:image",
                     allowed_effect_ids=("highlight", "circle"),
                 ),
             ),
         )
-        self.orchestrator._active_panels["s1"] = ActivePanelState(panel_ir=panel)  # type: ignore[attr-defined]
+        self.orchestrator._active_panels["s1"] = ActivePanelState(panel_ir=panel, purpose="Bài test")  # type: ignore[attr-defined]
 
-        result = self.orchestrator.panel_action(
-            session_id="s1", action_id="reveal", anchor_ids=["a"],
+        result = self.orchestrator.update_surface_state(
+            session_id="s1", surface_id="panel-hidden", base_revision=1,
+            updates=[{"anchor_id": "a", "changes": {"visibility": "visible"}}],
         )
 
         updated = self.orchestrator.active_panel("s1")
@@ -196,13 +299,65 @@ class LiveRoutingTests(unittest.TestCase):
         self.assertEqual(result.panel_update["revision"], 2)
         self.assertEqual(result.panel_update["panel"]["blocks"][0]["props"]["asset_id"], "cat")
         self.assertEqual(
-            self.orchestrator.present_visual(session_id="s1", anchor_id="a", effect_id="highlight")["target_id"],
-            "panel:panel-hidden:block:1:anchor:image",
+            self.orchestrator.present_visual(session_id="s1", anchor_id="a", effect_id="highlight")["anchor_id"],
+            "a",
         )
-        with self.assertRaisesRegex(ValueError, "currently hidden"):
-            self.orchestrator.panel_action(session_id="s1", action_id="reveal", anchor_ids=["a"])
+        with self.assertRaisesRegex(ValueError, "cannot transition"):
+            self.orchestrator.update_surface_state(
+                session_id="s1", surface_id="panel-hidden", base_revision=2,
+                updates=[{"anchor_id": "a", "changes": {"visibility": "visible"}}],
+            )
 
-    def test_panel_action_rejects_unknown_or_duplicate_anchors_without_changing_state(self) -> None:
+    def test_panel_interaction_resolves_registered_action_on_current_surface_revision(self) -> None:
+        panel = PanelIR(
+            panel_id="panel-choice",
+            domain_id="education",
+            blocks=(
+                PanelBlock(
+                    id="1",
+                    widget_id="choice",
+                    grid=GridRect(col=1, row=1, col_span=4, row_span=4),
+                    props={},
+                    children=(
+                        PanelChoiceChild(widget_id="image", props={"asset_id": "cat"}),
+                        PanelChoiceChild(widget_id="text", props={"content": "Mèo", "role": "label"}),
+                    ),
+                ),
+            ),
+            anchors=(AnchorBinding("b", "1", "choice", ("highlight", "circle")),),
+        )
+        self.orchestrator._active_panels["s1"] = ActivePanelState(panel_ir=panel, purpose="Bài test")  # type: ignore[attr-defined]
+
+        event = self.orchestrator.resolve_panel_interaction(
+            session_id="s1", surface_id="panel-choice", revision=1, anchor_id="b", action="select",
+        )
+
+        self.assertEqual(event, {
+            "event": "surface_interaction",
+            "surface_id": "panel-choice",
+            "revision": 1,
+            "anchor_id": "b",
+            "widget_id": "choice",
+            "action": "select",
+            "content": [
+                {"widget_id": "image", "props": {"asset_id": "cat"}},
+                {"widget_id": "text", "props": {"content": "Mèo", "role": "label"}},
+            ],
+        })
+        with self.assertRaisesRegex(ValueError, "does not match"):
+            self.orchestrator.resolve_panel_interaction(
+                session_id="s1", surface_id="stale", revision=1, anchor_id="b", action="select",
+            )
+        with self.assertRaisesRegex(ValueError, "revision does not match"):
+            self.orchestrator.resolve_panel_interaction(
+                session_id="s1", surface_id="panel-choice", revision=2, anchor_id="b", action="select",
+            )
+        with self.assertRaisesRegex(ValueError, "not allowed"):
+            self.orchestrator.resolve_panel_interaction(
+                session_id="s1", surface_id="panel-choice", revision=1, anchor_id="b", action="reveal",
+            )
+
+    def test_update_surface_state_rejects_unknown_or_duplicate_blocks_without_changing_state(self) -> None:
         panel = PanelIR(
             panel_id="panel-hidden",
             domain_id="education",
@@ -212,16 +367,25 @@ class LiveRoutingTests(unittest.TestCase):
                     props={"asset_id": "cat"}, visibility="hidden",
                 ),
             ),
-            anchors=(AnchorBinding("a", "1", "image", "panel:panel-hidden:block:1:anchor:image", ("highlight",)),),
+            anchors=(AnchorBinding("a", "1", "image", ("highlight",)),),
         )
-        self.orchestrator._active_panels["s1"] = ActivePanelState(panel_ir=panel)  # type: ignore[attr-defined]
+        self.orchestrator._active_panels["s1"] = ActivePanelState(panel_ir=panel, purpose="Bài test")  # type: ignore[attr-defined]
         with self.assertRaisesRegex(ValueError, "unknown anchor_id"):
-            self.orchestrator.panel_action(session_id="s1", action_id="reveal", anchor_ids=["missing"])
-        with self.assertRaisesRegex(ValueError, "duplicates"):
-            self.orchestrator.panel_action(session_id="s1", action_id="reveal", anchor_ids=["a", "a"])
+            self.orchestrator.update_surface_state(
+                session_id="s1", surface_id="panel-hidden", base_revision=1,
+                updates=[{"anchor_id": "missing", "changes": {"visibility": "visible"}}],
+            )
+        with self.assertRaisesRegex(ValueError, "same block"):
+            self.orchestrator.update_surface_state(
+                session_id="s1", surface_id="panel-hidden", base_revision=1,
+                updates=[
+                    {"anchor_id": "a", "changes": {"visibility": "visible"}},
+                    {"anchor_id": "a", "changes": {"visibility": "visible"}},
+                ],
+            )
         self.assertEqual(self.orchestrator.active_panel("s1").revision, 1)  # type: ignore[union-attr]
 
-    def test_panel_action_reveals_multiple_hidden_blocks_together(self) -> None:
+    def test_update_surface_state_reveals_multiple_hidden_blocks_together(self) -> None:
         panel = PanelIR(
             panel_id="panel-hidden",
             domain_id="education",
@@ -230,21 +394,44 @@ class LiveRoutingTests(unittest.TestCase):
                 PanelBlock("2", "answer", GridRect(6, 1, 2, 2), {"value": "3"}, "hidden"),
             ),
             anchors=(
-                AnchorBinding("a", "1", "image", "panel:panel-hidden:block:1:anchor:image", ("highlight",)),
-                AnchorBinding("b", "2", "answer", "panel:panel-hidden:block:2:anchor:answer", ("circle",)),
+                AnchorBinding("a", "1", "image", ("highlight",)),
+                AnchorBinding("b", "2", "answer", ("circle",)),
             ),
         )
-        self.orchestrator._active_panels["s1"] = ActivePanelState(panel_ir=panel)  # type: ignore[attr-defined]
+        self.orchestrator._active_panels["s1"] = ActivePanelState(panel_ir=panel, purpose="Bài test")  # type: ignore[attr-defined]
 
-        result = self.orchestrator.panel_action(
-            session_id="s1", action_id="reveal", anchor_ids=["a", "b"],
+        result = self.orchestrator.update_surface_state(
+            session_id="s1", surface_id="panel-hidden", base_revision=1,
+            updates=[
+                {"anchor_id": "a", "changes": {"visibility": "visible"}},
+                {"anchor_id": "b", "changes": {"visibility": "visible"}},
+            ],
         )
 
         updated = self.orchestrator.active_panel("s1")
         self.assertIsNotNone(updated)
         assert updated is not None
         self.assertEqual([block.visibility for block in updated.panel_ir.blocks], ["visible", "visible"])
-        self.assertEqual(result.response["anchor_ids"], ["a", "b"])
+        self.assertEqual(result.response["updated_anchor_ids"], ["a", "b"])
+
+    def test_update_surface_state_rejects_stale_revision_and_unsupported_field(self) -> None:
+        panel = PanelIR(
+            panel_id="panel-state",
+            domain_id="education",
+            blocks=(PanelBlock("1", "image", GridRect(1, 1, 4, 4), {"asset_id": "cat"}),),
+            anchors=(AnchorBinding("a", "1", "image", ("highlight",)),),
+        )
+        self.orchestrator._active_panels["s1"] = ActivePanelState(panel_ir=panel, purpose="Bài test")  # type: ignore[attr-defined]
+        with self.assertRaisesRegex(ValueError, "base_revision"):
+            self.orchestrator.update_surface_state(
+                session_id="s1", surface_id="panel-state", base_revision=2,
+                updates=[{"anchor_id": "a", "changes": {"visibility": "hidden"}}],
+            )
+        with self.assertRaisesRegex(ValueError, "does not allow"):
+            self.orchestrator.update_surface_state(
+                session_id="s1", surface_id="panel-state", base_revision=1,
+                updates=[{"anchor_id": "a", "changes": {"flipped": True}}],
+            )
 
     def test_replacement_panel_increments_revision(self) -> None:
         for intent in ("Cho bé xem chó và mèo.", "So sánh hai bạn."):
@@ -256,16 +443,119 @@ class LiveRoutingTests(unittest.TestCase):
             self.assertEqual(result.response["status"], "completed")
         self.assertEqual(self.orchestrator.active_panel("s1").revision, 2)
 
+    def test_route_applies_patch_atomically_and_preserves_existing_anchor_identity(self) -> None:
+        asyncio.run(self.orchestrator.execute_tool_call_result(
+            session_id="s1",
+            tool_name="route_request",
+            arguments={"domain_id": "education", "intent": "Hiển thị chó."},
+        ))
+        before = self.orchestrator.active_panel("s1")
+        assert before is not None
+        self.agent.command = PatchSurfacePlan(
+            surface_id=before.panel_ir.panel_id,
+            base_revision=before.revision,
+            operations=(UpdatePropsOperation(anchor_id="b", changes={"asset_id": "cat", "label": "Mèo"}),),
+        )
+
+        result = asyncio.run(self.orchestrator.execute_tool_call_result(
+            session_id="s1",
+            tool_name="route_request",
+            arguments={"domain_id": "education", "intent": "Đổi hình chó thành mèo."},
+        ))
+
+        self.assertEqual(result.response["status"], "completed")
+        after = self.orchestrator.active_panel("s1")
+        assert after is not None
+        self.assertEqual(after.panel_ir.panel_id, before.panel_ir.panel_id)
+        self.assertEqual(after.revision, before.revision + 1)
+        self.assertEqual(after.panel_ir.anchor_map["b"].block_id, before.panel_ir.anchor_map["b"].block_id)
+        self.assertEqual(after.panel_ir.block_map[after.panel_ir.anchor_map["b"].block_id].props["asset_id"], "cat")
+
+    def test_surface_operations_keep_revision_and_stage_map_in_sync(self) -> None:
+        """Every structural/state operation exposes the map of its exact PanelIR."""
+
+        created = asyncio.run(self.orchestrator.execute_tool_call_result(
+            session_id="s1",
+            tool_name="route_request",
+            arguments={"domain_id": "education", "intent": "Hiển thị chó."},
+        ))
+        active = self.orchestrator.active_panel("s1")
+        assert active is not None
+        self.assertEqual(created.response["revision"], 1)
+        self.assertEqual(created.response["visual_stage_map"], render_visual_stage_map(active.panel_ir))
+
+        self.agent.command = PatchSurfacePlan(
+            surface_id=active.panel_ir.panel_id,
+            base_revision=active.revision,
+            operations=(UpdatePropsOperation(anchor_id="b", changes={"asset_id": "cat", "label": "Mèo"}),),
+        )
+        patched = asyncio.run(self.orchestrator.execute_tool_call_result(
+            session_id="s1",
+            tool_name="route_request",
+            arguments={"domain_id": "education", "intent": "Đổi hình chó thành mèo."},
+        ))
+        active = self.orchestrator.active_panel("s1")
+        assert active is not None
+        self.assertEqual(patched.response["revision"], 2)
+        self.assertEqual(patched.response["visual_stage_map"], render_visual_stage_map(active.panel_ir))
+
+        updated = self.orchestrator.update_surface_state(
+            session_id="s1",
+            surface_id=active.panel_ir.panel_id,
+            base_revision=active.revision,
+            updates=[{"anchor_id": "b", "changes": {"visibility": "hidden"}}],
+        )
+        active = self.orchestrator.active_panel("s1")
+        assert active is not None
+        self.assertEqual(updated.response["revision"], 3)
+        self.assertEqual(updated.response["visual_stage_map"], render_visual_stage_map(active.panel_ir))
+        self.assertEqual(updated.panel_update["revision"], 3)
+
+        deleted = self.orchestrator.delete_surface(
+            session_id="s1",
+            surface_id=active.panel_ir.panel_id,
+            base_revision=active.revision,
+        )
+        self.assertEqual(deleted.response["revision"], 4)
+        self.assertIn("KHÔNG CÓ PANEL", deleted.response["visual_stage_map"])
+        self.assertIsNone(self.orchestrator.active_panel("s1"))
+
+    def test_invalid_patch_does_not_replace_the_active_surface(self) -> None:
+        asyncio.run(self.orchestrator.execute_tool_call_result(
+            session_id="s1",
+            tool_name="route_request",
+            arguments={"domain_id": "education", "intent": "Hiển thị chó."},
+        ))
+        before = self.orchestrator.active_panel("s1")
+        assert before is not None
+        self.agent.command = PatchSurfacePlan(
+            surface_id=before.panel_ir.panel_id,
+            base_revision=before.revision,
+            operations=(
+                # Title occupies row 1; moving the image there makes the whole
+                # candidate invalid and must leave the active surface untouched.
+                MoveBlockOperation(anchor_id="b", grid=GridRect(1, 1, 6, 5)),
+            ),
+        )
+        result = asyncio.run(self.orchestrator.execute_tool_call_result(
+            session_id="s1",
+            tool_name="route_request",
+            arguments={"domain_id": "education", "intent": "Sửa bố cục."},
+        ))
+
+        self.assertEqual(result.response["status"], "error")
+        after = self.orchestrator.active_panel("s1")
+        assert after is not None
+        self.assertEqual(after.panel_ir, before.panel_ir)
+        self.assertEqual(after.revision, before.revision)
+
     def test_two_cat_bindings_materialize_the_same_layout_with_two_cat_images(self) -> None:
-        self.agent.decision = UseExistingPlanDecision(
-            "two_subject_comparison",
-            bindings={
-                "$block_1_content": "Cùng quan sát hai bạn mèo nhé!",
-                "$block_2_asset_id": "cat",
-                "$block_2_label": "Mèo 1",
-                "$block_3_asset_id": "cat",
-                "$block_3_label": "Mèo 2",
-            },
+        self.agent.command = CreateSurfacePlan(
+            blocks=(
+                _plan_block("text", 1, 1, 16, 1, {"content": "Cùng quan sát hai bạn mèo nhé!", "role": "title"}),
+                _plan_block("image", 1, 3, 6, 5, {"asset_id": "cat", "label": "Mèo 1"}),
+                _plan_block("image", 10, 3, 6, 5, {"asset_id": "cat", "label": "Mèo 2"}),
+            ),
         )
         result = asyncio.run(self.orchestrator.execute_tool_call_result(
             session_id="s1",

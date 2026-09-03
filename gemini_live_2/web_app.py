@@ -12,6 +12,7 @@ import json
 import logging
 import sys
 import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -42,6 +43,10 @@ logger = logging.getLogger("lumi.gemini_live.web")
 _locks: dict[str, asyncio.Lock] = {}
 _locks_guard = asyncio.Lock()
 _cleanup_tasks: dict[str, asyncio.Task[None]] = {}
+
+
+def _trace_timestamp() -> str:
+    return datetime.now().strftime("%H:%M:%S.%f")[:-3]
 
 
 def configure_logging() -> None:
@@ -243,6 +248,29 @@ async def live_socket(websocket: WebSocket) -> None:
                         await event({"type": "live:error", "message": "Lumi đang xử lý lượt trước."})
                     else:
                         text_task = asyncio.create_task(conversation.submit_text(query))
+                elif kind == "panel:interaction":
+                    try:
+                        interaction = orchestrator.resolve_panel_interaction(
+                            session_id=session_id,
+                            surface_id=str(command.get("surface_id") or ""),
+                            revision=command.get("revision"),
+                            anchor_id=str(command.get("anchor_id") or ""),
+                            action=str(command.get("action") or ""),
+                        )
+                    except ValueError as exc:
+                        trace("PANEL_INTERACTION_REJECTED reason=%s", exc)
+                        await event({"type": "panel:interaction_rejected", "message": str(exc)})
+                        continue
+                    await event({
+                        "type": "live:debug_trace",
+                        "timestamp": _trace_timestamp(),
+                        "event": "panel_interaction",
+                        "content": json.dumps(interaction, ensure_ascii=False, separators=(",", ":")),
+                    })
+                    if (stream_task and not stream_task.done()) or (text_task and not text_task.done()):
+                        await conversation.interrupt_with_panel_interaction(interaction)
+                    else:
+                        text_task = asyncio.create_task(conversation.submit_panel_interaction(interaction))
                 elif kind in {"live:audio_begin", "live:mic_enabled"}:
                     chunks = total_bytes = 0
                     microphone_enabled = True

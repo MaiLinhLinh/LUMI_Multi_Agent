@@ -1,7 +1,7 @@
 {
   "template_id": "tm1",
   "domain_id": "education",
-  "description": "A vocabulary learning panel with a title at the top and a horizontal row of fruit images, each labeled with its English name.",
+  "description": "Bài học cộng học sinh xem hai nhóm động vật (chó và mèo) với dấu cộng và dấu bằng, đáp án ẩn sẽ hiển thị khi Gemini Live bật.",
   "blocks": [
     {
       "widget_id": "text",
@@ -18,43 +18,45 @@
       "initial_visibility": "visible"
     },
     {
-      "widget_id": "image",
+      "widget_id": "object_group",
       "grid": {
-        "col": 1,
+        "col": 2,
         "row": 3,
         "col_span": 4,
-        "row_span": 6
+        "row_span": 4
       },
       "props": {
         "asset_id": "$block_2_asset_id",
+        "count": "$block_2_count",
         "label": "$block_2_label"
       },
       "initial_visibility": "visible"
     },
     {
-      "widget_id": "image",
+      "widget_id": "text",
       "grid": {
-        "col": 5,
-        "row": 3,
-        "col_span": 4,
-        "row_span": 6
+        "col": 6,
+        "row": 4,
+        "col_span": 2,
+        "row_span": 2
       },
       "props": {
-        "asset_id": "$block_3_asset_id",
-        "label": "$block_3_label"
+        "content": "$block_3_content",
+        "role": "label"
       },
       "initial_visibility": "visible"
     },
     {
-      "widget_id": "image",
+      "widget_id": "object_group",
       "grid": {
-        "col": 9,
+        "col": 8,
         "row": 3,
         "col_span": 4,
-        "row_span": 6
+        "row_span": 4
       },
       "props": {
         "asset_id": "$block_4_asset_id",
+        "count": "$block_4_count",
         "label": "$block_4_label"
       },
       "initial_visibility": "visible"
@@ -62,16 +64,29 @@
     {
       "widget_id": "text",
       "grid": {
-        "col": 1,
-        "row": 9,
-        "col_span": 16,
-        "row_span": 1
+        "col": 12,
+        "row": 4,
+        "col_span": 2,
+        "row_span": 2
       },
       "props": {
         "content": "$block_5_content",
-        "role": "subtitle"
+        "role": "label"
       },
       "initial_visibility": "visible"
+    },
+    {
+      "widget_id": "answer",
+      "grid": {
+        "col": 14,
+        "row": 3,
+        "col_span": 2,
+        "row_span": 4
+      },
+      "props": {
+        "value": "$block_6_value"
+      },
+      "initial_visibility": "hidden"
     }
   ],
   "bindings": [
@@ -89,8 +104,16 @@
       "prop_name": "asset_id",
       "type": "string",
       "required": true,
-      "description": "ID của asset ảnh sẽ hiển thị.",
+      "description": "ID của asset được lặp trong nhóm.",
       "source": "asset_catalog.id"
+    },
+    {
+      "key": "$block_2_count",
+      "block_index": 2,
+      "prop_name": "count",
+      "type": "integer",
+      "required": true,
+      "description": "Số lượng bản sao của asset trong nhóm."
     },
     {
       "key": "$block_2_label",
@@ -98,24 +121,15 @@
       "prop_name": "label",
       "type": "string",
       "required": false,
-      "description": "Nhãn ngắn cho ảnh."
+      "description": "Nhãn ngắn cho cả nhóm."
     },
     {
-      "key": "$block_3_asset_id",
+      "key": "$block_3_content",
       "block_index": 3,
-      "prop_name": "asset_id",
+      "prop_name": "content",
       "type": "string",
       "required": true,
-      "description": "ID của asset ảnh sẽ hiển thị.",
-      "source": "asset_catalog.id"
-    },
-    {
-      "key": "$block_3_label",
-      "block_index": 3,
-      "prop_name": "label",
-      "type": "string",
-      "required": false,
-      "description": "Nhãn ngắn cho ảnh."
+      "description": "Nội dung văn bản cần hiển thị."
     },
     {
       "key": "$block_4_asset_id",
@@ -123,8 +137,16 @@
       "prop_name": "asset_id",
       "type": "string",
       "required": true,
-      "description": "ID của asset ảnh sẽ hiển thị.",
+      "description": "ID của asset được lặp trong nhóm.",
       "source": "asset_catalog.id"
+    },
+    {
+      "key": "$block_4_count",
+      "block_index": 4,
+      "prop_name": "count",
+      "type": "integer",
+      "required": true,
+      "description": "Số lượng bản sao của asset trong nhóm."
     },
     {
       "key": "$block_4_label",
@@ -132,7 +154,7 @@
       "prop_name": "label",
       "type": "string",
       "required": false,
-      "description": "Nhãn ngắn cho ảnh."
+      "description": "Nhãn ngắn cho cả nhóm."
     },
     {
       "key": "$block_5_content",
@@ -141,6 +163,14 @@
       "type": "string",
       "required": true,
       "description": "Nội dung văn bản cần hiển thị."
+    },
+    {
+      "key": "$block_6_value",
+      "block_index": 6,
+      "prop_name": "value",
+      "type": "string",
+      "required": true,
+      "description": "Đáp án hoặc từ ngắn cần hiển thị."
     }
   ]
 }

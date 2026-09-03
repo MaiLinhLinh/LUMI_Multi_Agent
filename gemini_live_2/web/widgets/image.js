@@ -1,7 +1,7 @@
 export function renderImageWidget(block, { anchorsByKey = {} } = {}) {
   const figure = document.createElement("figure");
   figure.className = "lumi-widget lumi-widget-image";
-  if (anchorsByKey.image?.target_id) figure.dataset.presentId = anchorsByKey.image.target_id;
+  if (anchorsByKey.image?.anchor_id) figure.dataset.anchorId = anchorsByKey.image.anchor_id;
 
   if (block.visibility === "hidden") {
     figure.classList.add("lumi-widget-hidden-content");

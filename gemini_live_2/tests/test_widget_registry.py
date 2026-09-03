@@ -4,11 +4,22 @@ from gemini_live_2.widgets import WidgetPropsError, build_default_widget_registr
 
 
 class WidgetRegistryTests(unittest.TestCase):
+
+    def test_choice_exposes_its_children_anchor_and_select_event(self) -> None:
+        registry = build_default_widget_registry()
+        choice = registry.get("choice")
+        self.assertEqual(choice.validate({}), {})
+        self.assertEqual(choice.anchors_for({})[0].key, "choice")
+        self.assertEqual(choice.allowed_child_widget_ids, ("image", "text", "number_display", "object_group"))
+        self.assertEqual(choice.interaction_event, "select")
     def setUp(self) -> None:
         self.registry = build_default_widget_registry()
 
     def test_default_widget_ids(self) -> None:
-        self.assertEqual(self.registry.widget_ids(), ("text", "image", "object_group", "answer", "number_display"))
+        self.assertEqual(
+            self.registry.widget_ids(),
+            ("text", "image", "object_group", "answer", "number_display", "choice"),
+        )
 
     def test_widget_index_is_short_and_respects_domain_allow_list(self) -> None:
         self.assertEqual(

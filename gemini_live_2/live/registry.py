@@ -24,9 +24,9 @@ class LiveToolRegistry:
         return [{
             "name": "route_request",
             "description": (
-                "Create or replace the visible panel for a new visual request. "
-                "Do not call this for a follow-up that can be answered from the current panel; "
-                "use the current VISUAL STAGE MAP and present_visual instead."
+                "Create a new visual surface or structurally change the visible surface for a new request. "
+                "Do not call this for a follow-up answer, temporary animation, or a state-only change on the "
+                "current panel; use the current VISUAL STAGE MAP with present_visual or update_surface_state instead."
             ),
             "parameters": {
                 "type": "object",

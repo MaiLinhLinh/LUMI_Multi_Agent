@@ -23,11 +23,12 @@ class TemplateCatalogTests(unittest.TestCase):
 
     def test_catalog_exposes_semantic_entries_without_plan_paths(self) -> None:
         entries = self.resources.templates.for_plan_agent()
-        self.assertEqual(entries, [{
+        self.assertIn({
             "id": "two_subject_comparison",
             "description": "So sánh trực quan hai đối tượng ngang hàng: mỗi bên có ảnh lớn và nhãn ngắn, phù hợp khi trẻ quan sát hai chủ thể.",
-        }])
-        self.assertNotIn("plan_path", entries[0])
+        }, entries)
+        self.assertTrue(entries)
+        self.assertTrue(all("layout_path" not in entry and "plan_path" not in entry for entry in entries))
 
     def test_catalogued_layout_materializes_before_using_the_same_compiler(self) -> None:
         layout = self.resources.templates.load_layout_template("two_subject_comparison")

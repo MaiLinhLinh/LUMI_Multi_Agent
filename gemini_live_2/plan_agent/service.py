@@ -5,14 +5,15 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
-from typing import Any, TypeAlias
+from dataclasses import dataclass
+from typing import Any
 
 from google import genai
 from google.genai import types
 from openai import AsyncOpenAI
 
 from gemini_live_2.catalogs.domains import DomainRegistry, ManifestError
+from gemini_live_2.panel import ActiveSurfaceSummary
 from gemini_live_2.catalogs.templates import TemplateCatalogError
 from gemini_live_2.gateway import (
     CapabilityDescriptor,
@@ -22,9 +23,13 @@ from gemini_live_2.gateway import (
 )
 from gemini_live_2.panel.contracts import (
     ContractValidationError,
+    CreateSurfacePlan,
     DataAlias,
     DataBundle,
-    PresentationPlan,
+    PatchSurfacePlan,
+    SurfacePlanCommand,
+    UseExistingSurfaceTemplate,
+    surface_plan_command_from_dict,
 )
 from gemini_live_2.settings import Settings
 from gemini_live_2.widgets import WidgetPropsError, WidgetRegistry
@@ -36,178 +41,156 @@ _CALL_CAPABILITY_NAME = "call_capability"
 _DESCRIBE_WIDGETS_NAME = "describe_widgets"
 _DESCRIBE_TEMPLATE_NAME = "describe_template"
 
-_SYSTEM_INSTRUCTION = """
-Nếu input có compiler_feedback, plan trước đó đã bị backend từ chối.
-Hãy đọc error_code và details, rồi trả một plan mới đã sửa đúng lỗi đó. Ví dụ
-grid_overlap nêu hai block và các ô lưới chồng nhau: phải đổi vị trí hoặc kích
-thước để các block không còn dùng chung ô. Không trả lại nguyên plan cũ.
 
-Bạn là Plan Agent của Lumi, là người sẽ dựa vào câu hỏi người dùng, dựa vào lịch sử và dữ liệu nếu có để lên kịch bản, kế hoạch để trực quan hoá nội dung trả lời cho người dùng. Nhiệm vụ của bạn là quyết định cách tạo một panel trực quan mới:
-Bạn hãy suy nghĩ lên kế hoạch cho intent/ câu hỏi để xây dựng plan phù hợp.
-Sau đó dựa trên plan của bạn, mà quyết định chọn một trong hai cách:
-- dùng một Presentation Plan có sẵn nếu template phù hợp rõ ràng, và template đó có thể biểu đạt đầy đủ intent bằng các binding hiện có, bạn phải kiểm tra đủ thông tin, không được chọn template có sẵn chỉ vì đoán nó phù hợp.
-- tạo một plan mới bằng các widget và asset được cấp.
-Nếu intent cần một vùng/nội dung/trạng thái mà template không có slot
-để hiện, không được chọn template đó. Phải create_plan.
+_SURFACE_LIFECYCLE_INSTRUCTION = """
+Bạn là Plan Agent của Lumi. Hãy lập kế hoạch surface trực quan từ intent,
+recent_history, domain, asset catalog, template catalog, widget index, verified_data
+và canvas 16 cột × 10 hàng mà backend cung cấp. Không tạo HTML, CSS, DOM, block ID,
+anchor ID hoặc dữ kiện/asset không có trong input.
 
-Bắt buộc gọi describe_widgets khi cần dùng một widget mới để nhận props hợp lệ.
+Trước hết, phân tích intent và recent_history thành hoạt động, dữ liệu, trạng thái
+khởi tạo và các thành phần trực quan thật sự cần có. Nếu verified_data chưa đủ, gọi
+call_capability thuộc capabilities được cấp quyền; có thể gọi nhiều lần và phải đọc
+lại verified_data sau mỗi response.
 
-Bạn không trả lời trực tiếp cho người dùng, không tạo HTML/CSS và không tạo anchor_id, target_id hoặc block id kỹ thuật.
-Bạn cũng thiết kế trạng thái hiển thị ban đầu của từng block: mặc định là visible.
-Chỉ dùng initial_visibility="hidden" khi ý đồ hoạt động cần trì hoãn nội dung đó,
-ví dụ đáp án hoặc nhóm kết quả. Gemini Live, không phải bạn, sẽ quyết định lúc reveal.
-Nếu intent yêu cầu vị trí tương đối hoặc hình dạng cụ thể — như tam giác,
-hàng dọc, vòng tròn, chữ cái, góc trái/phải — không dùng object_group.
-Hãy tạo nhiều image block, mỗi block một asset và một GridRect riêng để
-bố cục hình học hiện trực tiếp trên canvas.
-ĐẦU VÀO
-
-- intent: yêu cầu người dùng đã được Gemini Live chuẩn hoá. Dùng để hiểu panel cần thể hiện điều gì.
-- recent_history: ngữ cảnh hội thoại gần đây do backend cung cấp. Chỉ dùng để hiểu ý định kế thừa; không coi history là dữ liệu thật.
-- domain manifest: phạm vi domain hiện tại; chỉ dùng asset, widget, template và capability được domain này cho phép.
-- asset catalog: ảnh, icon hoặc học liệu có sẵn. Chỉ chọn asset_id có trong catalog.
-- template catalog: các plan có sẵn gồm id, purpose và supports. Nếu một template phù hợp rõ ràng, chọn nó.
-- widget_index: danh sách ngắn gồm widget_id và purpose. Index không chứa props chi tiết.
-- canvas: đây là khung màn hình panel mà người dùng sẽ nhìn thấy, được chia thành lưới cố định 16 cột × 10 hàng. Hãy dùng lưới này để quyết định bố cục trực quan: mỗi block cần ghi rõ vùng chiếm trên màn hình bằng vị trí và kích thước grid, nằm trọn trong khung và không chồng lấn block khác.
-- capabilities: tool nghiệp vụ được phép gọi để lấy hoặc tạo dữ liệu đã xác minh.
-- verified_data: dữ liệu thật đã có và các alias ngắn được phép dùng trong props.
-
-CÁCH LÀM
-
-1. Đọc intent, history, dữ liệu và template catalog.
-2. Suy nghĩ, lên kế hoạch cho panel trực quan để biểu đạt intent. Xác định các block cần dùng, loại widget, asset, nhãn, số lượng, trạng thái hiển thị ban đầu và vị trí trên canvas.
-3. Nếu một template có sẵn phù hợp rõ ràng:
-   - Bắt buộc gọi describe_template(template_id) trước khi trả kết quả cuối.
-   - Đọc toàn bộ binding contract mà tool trả về.
-   - Trả use_existing_plan với template_id và đầy đủ từng binding key đúng một lần.
-   - Không được trả use_existing_plan chỉ có template_id.
-4. Nếu dữ liệu chưa đủ để lập panel, gọi call_capability với capability_id và arguments hợp lệ. Có thể gọi nhiều tool theo từng bước.
-5. Nếu cần tạo plan mới, chọn widget cần dùng từ widget_index.
-6. Trước khi dùng bất kỳ widget nào trong plan mới, bắt buộc gọi describe_widgets với widget_id đó để nhận props hợp lệ.
-7. Sau khi đã có đủ dữ liệu và contract widget, tạo plan mới.
-8. Hãy sắp xếp bố cục các block trên canvas sao cho trực quan, không chồng lấn và phù hợp với câu hỏi người dùng.
-Hãy cung cấp số khối phù hợp nội dung cần hiển thị, ví dụ text dài thì phải cung cấp  block text đủ lớn. 
-Không gọi capability nếu intent chỉ cần asset hoặc nội dung đã có.
-Không gọi tool ngoài danh sách được cấp.
-Không tự tạo dữ liệu được xem là sự thật, asset không tồn tại, hoặc thông tin không có trong input.
-
-ĐẦU RA CUỐI
-
-Khi đã đủ dữ liệu, trả đúng một JSON object, không Markdown, code fence hay giải thích.
-Ký tự đầu tiên của phản hồi cuối phải là `{` và ký tự cuối phải là `}`.
-Không được dùng ```json, ```, Markdown, nhãn “JSON”, lời giải thích hoặc bất kỳ ký tự nào ngoài một JSON object duy nhất.
-Chọn template có sẵn:
-{"decision":"use_existing_plan","template_id":"...","bindings":{"$block_...":"..."}}
-
-Tạo plan mới:
-{"decision":"create_plan","template_description":"...","plan":{"blocks":[...]}}
-
-Với create_plan:
-- template_description mô tả ngắn, tổng quát khung bố cục vừa tạo để lần sau có thể tái sử dụng cho nội dung khác. Mô tả cách sắp xếp, không nhắc asset hoặc nội dung cụ thể của lượt này.
-- plan chỉ có khóa blocks.
-- Mỗi block chỉ có widget_id, grid, props và initial_visibility tùy chọn.
-- initial_visibility chỉ nhận "visible" hoặc "hidden"; không ghi trường này khi block visible.
-- Không trả domain_id: backend tự gắn domain từ route_request đã kiểm chứng.
-- Không trả block id, target_id, anchor_id, HTML, CSS, DOM hay đường dẫn file.
-- Compiler sẽ tự sinh các ID kỹ thuật và anchor.
-VÍ DỤ 1: 
-
-Intent: “Tạo hoạt động để trẻ so sánh chó và mèo.”
-
-Template catalog có:
-{"id":"two_subject_comparison","purpose":"So sánh trực quan hai đối tượng ngang hàng.","supports":["2 ảnh","nhãn","mô tả ngắn"]}
-
-Trước khi chọn template, tự đánh giá nhu cầu của panel:
-- cần một tiêu đề;
-- cần đúng hai ảnh là một ảnh chó và một ảnh mèo;
-- cần nhãn cho từng ảnh;
+Sau đó so sánh các yêu cầu này với Template Index. Nếu có template có vẻ đáp ứng đủ,
+gọi describe_template(template_id) để đọc khung và binding thật. Chỉ dùng template
+nếu sau khi describe nó đáp ứng ĐỦ widget, vùng, bố cục, trạng thái khởi tạo và dữ
+liệu cần cho intent; template chỉ gần giống không đủ. Mỗi block mới phải nằm trọn
+canvas và không chồng lấn block khác.
 
 
-Nhận thấy Template two_subject_comparison biểu đạt được so sánh giữa hai đối tượng, có vẻ phù hợp, nhưng chưa chắc chắn.
-Vì vậy gọi:
-describe_template({"template_id":"two_subject_comparison"})
+Nếu compiler_feedback có mặt, plan trước đã bị Runtime từ chối. Hãy sửa đúng lỗi đã
+nêu; không lặp lại plan cũ.
 
-Sau khi nhận binding contract và xác nhận contract có đủ slot tiêu đề, hai ảnh và hai nhãn, thì mới chốt là chọn template này,kết quả cuối:
+Đầu ra cuối cùng chỉ là đúng một JSON object có action, theo MỘT trong ba dạng:
+
+1. Dùng nguyên một template đã describe, chỉ điền dữ liệu biến đổi:
+{"action":"use_existing_surface_template","template_id":"tm1","bindings":{"$block_1_content":"..."}}
+
+2. Tạo một surface mới hoàn toàn, đồng thời mô tả ngắn khung để Runtime lưu tái sử dụng:
+{"action":"create_surface_plan","template_description":"...","surface":{"blocks":[...]}}
+
+3. Chỉnh cấu trúc surface đang mở:
+{"action":"patch_surface_plan","surface_id":"...","base_revision":1,"operations":[...]}
+
+Không được trả decision, use_existing_plan, create_plan hay domain_id ở output cuối.
+
+Khi không có active_surface_summary, chỉ được tạo surface mới: dùng
+use_existing_surface_template hoặc create_surface_plan; không được patch.
+Khi có active_surface_summary, trước hết so sánh intent với purpose và các vùng
+đang có. Chỉ dùng patch khi phần lớn surface hiện tại vẫn phù hợp và thay đổi cần
+thiết thực sự là thêm, bớt, đổi props hoặc đổi vị trí một vài block. Nếu hoạt động,
+nội dung chính hoặc bố cục cốt lõi thay đổi, tạo surface mới thay vì patch.
+
+Patch dùng đúng surface_id và revision trong active_surface_summary. Mỗi operation
+chỉ là một trong: add_block, remove_block, replace_block, move_block, update_props.
+Các operation nhắm block đang có bằng anchor_id từ active_surface_summary. Với
+update_props, chỉ trả changes cần đổi; Runtime tự gộp chúng vào props cũ.
+
+Template catalog là kho khung bố cục tái sử dụng. Sau khi describe_template, nếu
+template đó đáp ứng đủ, trả use_existing_surface_template với đúng template_id và
+CHỈ các binding biến đổi của lượt này. Không lặp lại blocks, grid, widget hay props
+cấu trúc của template. Dùng đúng binding key backend trả về; gửi mọi binding required,
+có thể bỏ binding optional không cần hiển thị. Nếu template thiếu bất kỳ vùng, widget
+hoặc bố cục thiết yếu nào, tạo surface mới thay vì ép dùng template gần giống.
+
+QUY TẮC BẮT BUỘC:
+Chỉ chọn template có sẵn khi nó đáp ứng đầy đủ:
+- loại hoạt động;
+- các đối tượng/nội dung trọng tâm;
+- số lượng hoặc quan hệ cần minh hoạ;
+- bố cục và trạng thái tương tác cần thiết.
+Nếu thiếu một trong các phần trên, tạo surface plan mới.
+
+Khi tạo surface mới, bắt buộc gọi describe_widgets cho MỌI widget_id sẽ xuất hiện
+trong block mới, kể cả widget con trong children. Widget index chỉ là danh mục ngắn;
+không tự đoán props chi tiết. Không cần describe_widgets cho widget đã nằm trong
+template vừa describe. Với patch, chỉ bắt buộc describe_widgets cho widget mới xuất
+hiện trong add_block hoặc replace_block; update_props/move/remove trên vùng cũ không
+cần gọi lại.
+
+template_description của create phải mô tả KHUNG tái sử dụng, không mô tả asset hay
+nội dung riêng của lượt hiện tại. Runtime chỉ lưu template sau khi Compiler thành công.
+
+Ví dụ tạo mới sau khi đã describe_widgets(["text", "image"]):
+{"action":"create_surface_plan","template_description":"Một ảnh lớn ở giữa, có tiêu đề phía trên.","surface":{"blocks":[{"widget_id":"text","grid":{"col":1,"row":1,"col_span":16,"row_span":1},"props":{"content":"Cùng xem bạn Chó nhé!","role":"title"}},{"widget_id":"image","grid":{"col":4,"row":3,"col_span":9,"row_span":6},"props":{"asset_id":"dog","label":"Chó"}}]}}
+
+Ví dụ dùng template sau khi đã gọi describe_template("tm1") và template đó có đúng
+tiêu đề + hai ảnh cạnh nhau cần cho intent. Nếu Template Index thực tế có template
+`two_subject_comparison` đúng khung đó, kết quả chỉ điền binding, không lặp layout:
+{"action":"use_existing_surface_template","template_id":"two_subject_comparison","bindings":{"$block_1_content":"Cùng quan sát hai bạn mèo nhé!","$block_2_asset_id":"cat","$block_3_asset_id":"cat"}}
+
+Ví dụ patch một surface đang mở, khi active_surface_summary cho biết anchor "b"
+là ảnh mèo và revision là 3:
+{"action":"patch_surface_plan","surface_id":"s12","base_revision":3,"operations":[{"op":"update_props","anchor_id":"b","changes":{"asset_id":"dog","label":"Chó"}}]}
+
+QUY TẮC BÀI TẬP CÓ ĐÁP ÁN ẨN
+
+`initial_visibility: "hidden"` chỉ quyết định trạng thái hiển thị ban đầu của block.
+Nó không thay đổi dữ liệu thật trong `props`.
+
+Với widget `answer` hoặc `number_display` dùng để công bố kết quả:
+- `props.value` bắt buộc là đáp án thật, chính xác của hoạt động.
+- Tuyệt đối không đặt `props.value` là `"?"`, `"…"`, `"ẩn"` hoặc placeholder khác.
+- Khi block đang hidden, frontend tự hiển thị dấu `?` và backend không gửi giá trị thật
+  xuống browser. Khi Gemini Live gọi update_surface_state để đổi visibility thành
+  visible, frontend mới nhận và hiển thị `props.value` thật.
+- Vì vậy, nếu bài là `2 + 3`, block đáp án phải chứa `props: {"value":"5"}`
+  ngay từ lúc tạo surface, dù `initial_visibility` là `"hidden"`.
+
+Với phép tính được trình bày theo hàng ngang, các toán hạng, ký hiệu phép tính,
+dấu bằng và block đáp án phải cùng một hàng grid. Không đặt đáp án xuống hàng bên
+dưới dấu bằng, trừ khi intent yêu cầu rõ một bố cục dọc.
+
+VÍ DỤ — PHÉP CỘNG NGANG, ĐÁP ÁN BAN ĐẦU ẨN
+
+Intent: “Tạo bài tập phép cộng 2 + 3 cho trẻ.”
+
+Mục tiêu: trẻ quan sát hai số, trả lời kết quả; số kết quả chỉ xuất hiện khi
+Gemini Live quyết định công bố.
+
+Sau khi đã có widget contract phù hợp, trả final JSON như sau:
+
 {
-  "decision":"use_existing_plan",
-  "template_id":"two_subject_comparison",
-  "bindings":{
-    "$block_1_content":"Cùng quan sát bạn Chó và bạn Mèo nhé!",
-    "$block_2_asset_id":"dog",
-    "$block_2_label":"Bạn Chó",
-    "$block_3_asset_id":"cat",
-    "$block_3_label":"Bạn Mèo"
-  }
-}
-Nếu sau khi nhận biding contract, thấy template không có đủ slot để biểu đạt intent, thì không chọn template này. Cần tạo plan mới.
-
-VÍ DỤ 2:
-
-Intent: “Dạy trẻ phép cộng 1 con mèo + 2 con mèo.”
-
-Template catalog có:
-{"id":"two_subject_comparison","purpose":"So sánh trực quan hai đối tượng ngang hàng.","supports":["2 ảnh","nhãn","mô tả ngắn"]}
-
-Trước khi chọn template, tự đánh giá nhu cầu của panel:
-- cần hai nhóm đối tượng có số lượng 1 mèo và 2 mèo;
-- cần dấu cộng và dấu bằng;
-- cần một nhóm kết quả mèo có thể ban đầu ẩn;
-- cần một đáp án số có thể ban đầu ẩn.
-
-Template two_subject_comparison là so sánh giữa hai đối tượng nên không phù hợp với intent này.
-Nó không biểu đạt được nhóm đối tượng, phép tính, trạng thái ẩn hay đáp án.
-Không chọn template này và không gọi describe_template cho nó.
-
-Cần tạo plan mới. Trước hết gọi:
-describe_widgets({"widget_ids":["text","object_group","image","answer"]})
-
-Sau khi nhận widget contract, kết quả cuối có thể là:
-{
-  "decision":"create_plan",
-  "template_description":"Một phép tính trực quan nằm ngang: hai nhóm đối tượng, dấu phép tính và vùng kết quả xếp dọc ở bên phải.",
-  "plan":{
-    "blocks":[
+  "action": "create_surface_plan",
+  "template_description": "Phép tính ngang gồm hai số, dấu cộng, dấu bằng và đáp án ở cuối hàng.",
+  "surface": {
+    "blocks": [
       {
-        "widget_id":"text",
-        "grid":{"col":1,"row":1,"col_span":16,"row_span":1},
-        "props":{"content":"Cùng tính với những bạn mèo nhé!","role":"title"}
+        "widget_id": "text",
+        "grid": { "col": 1, "row": 1, "col_span": 16, "row_span": 1 },
+        "props": { "content": "Cùng làm phép cộng nhé!", "role": "title" }
       },
       {
-        "widget_id":"object_group",
-        "grid":{"col":1,"row":3,"col_span":4,"row_span":4},
-        "props":{"asset_id":"cat","count":1,"label":"1 bạn mèo"}
+        "widget_id": "number_display",
+        "grid": { "col": 3, "row": 3, "col_span": 2, "row_span": 2 },
+        "props": { "value": "2" }
       },
       {
-        "widget_id":"image",
-        "grid":{"col":5,"row":4,"col_span":2,"row_span":2},
-        "props":{"asset_id":"plus"}
+        "widget_id": "text",
+        "grid": { "col": 6, "row": 3, "col_span": 2, "row_span": 2 },
+        "props": { "content": "+", "role": "label" }
       },
       {
-        "widget_id":"object_group",
-        "grid":{"col":7,"row":3,"col_span":4,"row_span":4},
-        "props":{"asset_id":"cat","count":2,"label":"2 bạn mèo"}
+        "widget_id": "number_display",
+        "grid": { "col": 9, "row": 3, "col_span": 2, "row_span": 2 },
+        "props": { "value": "3" }
       },
       {
-        "widget_id":"image",
-        "grid":{"col":11,"row":4,"col_span":2,"row_span":2},
-        "props":{"asset_id":"equals"}
+        "widget_id": "text",
+        "grid": { "col": 12, "row": 3, "col_span": 2, "row_span": 2 },
+        "props": { "content": "=", "role": "label" }
       },
       {
-        "widget_id":"object_group",
-        "initial_visibility":"hidden",
-        "grid":{"col":13,"row":3,"col_span":4,"row_span":3},
-        "props":{"asset_id":"cat","count":3,"label":"3 bạn mèo"}
-      },
-      {
-        "widget_id":"answer",
-        "initial_visibility":"hidden",
-        "grid":{"col":13,"row":6,"col_span":4,"row_span":2},
-        "props":{"value":"3"}
+        "widget_id": "answer",
+        "initial_visibility": "hidden",
+        "grid": { "col": 15, "row": 3, "col_span": 2, "row_span": 2 },
+        "props": { "value": "5" }
       }
     ]
   }
 }
-
 """.strip()
 
 
@@ -271,6 +254,7 @@ class PlanAgentRequest:
     intent: str
     recent_history: tuple[dict[str, str], ...] = ()
     initial_bundle: DataBundle | None = None
+    active_surface_summary: ActiveSurfaceSummary | None = None
     validation_feedback: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
@@ -282,6 +266,11 @@ class PlanAgentRequest:
                 raise PlanAgentError("initial_bundle must be a DataBundle.")
             if self.initial_bundle.domain_id != self.domain_id:
                 raise PlanAgentError("initial_bundle must match domain_id.")
+        if self.active_surface_summary is not None:
+            if not isinstance(self.active_surface_summary, ActiveSurfaceSummary):
+                raise PlanAgentError("active_surface_summary must be an ActiveSurfaceSummary.")
+            if self.active_surface_summary.domain_id != self.domain_id:
+                raise PlanAgentError("active_surface_summary must match domain_id.")
         if self.validation_feedback is not None:
             if not isinstance(self.validation_feedback, Mapping):
                 raise PlanAgentError("validation_feedback must be an object.")
@@ -289,61 +278,10 @@ class PlanAgentRequest:
 
 
 @dataclass(frozen=True, slots=True)
-class UseExistingPlanDecision:
-    template_id: str
-    bindings: Mapping[str, Any] = field(default_factory=dict)
-    decision: str = "use_existing_plan"
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "template_id", _text(self.template_id, "template_id"))
-        if not isinstance(self.bindings, Mapping):
-            raise PlanAgentError("use_existing_plan.bindings must be an object.")
-        normalized_bindings: dict[str, Any] = {}
-        for key, value in self.bindings.items():
-            binding_key = _text(key, "binding key")
-            if not binding_key.startswith("$block_"):
-                raise PlanAgentError("binding keys must start with '$block_'.")
-            normalized_bindings[binding_key] = value
-        object.__setattr__(self, "bindings", normalized_bindings)
-
-    def to_dict(self) -> dict[str, Any]:
-        data: dict[str, Any] = {"decision": self.decision, "template_id": self.template_id}
-        if self.bindings:
-            data["bindings"] = dict(self.bindings)
-        return data
-
-
-@dataclass(frozen=True, slots=True)
-class CreatePlanDecision:
-    plan: PresentationPlan
-    template_description: str
-    decision: str = "create_plan"
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.plan, PresentationPlan):
-            raise PlanAgentError("create_plan.plan must be a PresentationPlan.")
-        object.__setattr__(
-            self,
-            "template_description",
-            _text(self.template_description, "create_plan.template_description"),
-        )
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "decision": self.decision,
-            "template_description": self.template_description,
-            "plan": self.plan.to_dict(),
-        }
-
-
-PlanDecision: TypeAlias = UseExistingPlanDecision | CreatePlanDecision
-
-
-@dataclass(frozen=True, slots=True)
 class PlanAgentResult:
-    """A final decision together with the verified data used to plan it."""
+    """A lifecycle command together with the verified data used to plan it."""
 
-    decision: PlanDecision
+    command: SurfacePlanCommand
     data_bundle: DataBundle
 
 
@@ -351,31 +289,11 @@ ClientFactory = Callable[..., Any]
 CerebrasClientFactory = Callable[..., Any]
 
 
-def _parse_decision(value: object, *, domain_id: str) -> PlanDecision:
-    data = _mapping(value, "Plan Agent final response")
-    decision = data.get("decision")
-    if decision == "use_existing_plan":
-        if set(data) not in ({"decision", "template_id"}, {"decision", "template_id", "bindings"}):
-            raise PlanAgentError("use_existing_plan requires decision, template_id and optional bindings.")
-        return UseExistingPlanDecision(
-            template_id=_text(data.get("template_id"), "template_id"),
-            bindings=_mapping(data.get("bindings", {}), "use_existing_plan.bindings"),
-        )
-    if decision == "create_plan":
-        if set(data) != {"decision", "template_description", "plan"}:
-            raise PlanAgentError("create_plan requires decision, template_description and plan.")
-        plan_data = _mapping(data.get("plan"), "create_plan.plan")
-        if set(plan_data) != {"blocks"}:
-            raise PlanAgentError("create_plan.plan requires exactly blocks.")
-        try:
-            plan = PresentationPlan.from_dict({"domain_id": domain_id, "blocks": plan_data["blocks"]})
-        except ContractValidationError as exc:
-            raise PlanAgentError(str(exc)) from exc
-        return CreatePlanDecision(
-            plan=plan,
-            template_description=_text(data.get("template_description"), "create_plan.template_description"),
-        )
-    raise PlanAgentError("final response must choose use_existing_plan or create_plan.")
+def _parse_command(value: object) -> SurfacePlanCommand:
+    try:
+        return surface_plan_command_from_dict(value)
+    except ContractValidationError as exc:
+        raise PlanAgentError(str(exc)) from exc
 
 
 def _native_tools(capabilities: tuple[CapabilityDescriptor, ...]) -> types.Tool:
@@ -551,7 +469,12 @@ class PlanAgent:
                 resources.manifest.allowed_widget_ids
             ),
             "capabilities": [capability.for_plan_agent() for capability in capabilities],
-            "verified_data": _bundle_for_agent(bundle),
+        "verified_data": _bundle_for_agent(bundle),
+        "active_surface_summary": (
+            request.active_surface_summary.to_dict()
+            if request.active_surface_summary is not None
+            else None
+        ),
         }
         if request.validation_feedback is not None:
             payload["compiler_feedback"] = dict(request.validation_feedback)
@@ -560,7 +483,7 @@ class PlanAgent:
         ]
         client = self._client_factory(api_key=self._settings.plan_agent_api_key)
         config = types.GenerateContentConfig(
-            system_instruction=_SYSTEM_INSTRUCTION,
+            system_instruction=_SURFACE_LIFECYCLE_INSTRUCTION,
             tools=[_native_tools(capabilities)],
             automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
         )
@@ -650,11 +573,16 @@ class PlanAgent:
             "widget_index": self._widget_registry.widget_index(resources.manifest.allowed_widget_ids),
             "capabilities": [capability.for_plan_agent() for capability in capabilities],
             "verified_data": _bundle_for_agent(bundle),
+            "active_surface_summary": (
+                request.active_surface_summary.to_dict()
+                if request.active_surface_summary is not None
+                else None
+            ),
         }
         if request.validation_feedback is not None:
             payload["compiler_feedback"] = dict(request.validation_feedback)
         messages: list[dict[str, Any]] = [
-            {"role": "system", "content": _SYSTEM_INSTRUCTION},
+            {"role": "system", "content": _SURFACE_LIFECYCLE_INSTRUCTION},
             {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
         ]
         client = self._cerebras_client_factory(
@@ -763,7 +691,7 @@ class PlanAgent:
                 widget = self._widget_registry.get(widget_id)
             except WidgetPropsError as exc:
                 raise PlanAgentError(str(exc)) from exc
-            widgets.append({
+            widget_description: dict[str, Any] = {
                 "id": widget.widget_id,
                 "purpose": widget.purpose,
                 "props": widget.public_props_contract(),
@@ -777,7 +705,12 @@ class PlanAgent:
                         "Gemini Live decides when a hidden block is revealed."
                     ),
                 },
-            })
+            }
+            if widget.allowed_child_widget_ids:
+                widget_description["allowed_child_widget_ids"] = list(widget.allowed_child_widget_ids)
+            if widget.interaction_event is not None:
+                widget_description["interaction_event"] = widget.interaction_event
+            widgets.append(widget_description)
         return {"widgets": widgets}
 
     @staticmethod
@@ -790,6 +723,7 @@ class PlanAgent:
         return {
             "template_id": template.template_id,
             "description": template.description,
+            "blocks": [block.to_dict() for block in template.blocks],
             "bindings": [binding.to_dict() for binding in template.bindings],
         }
 
@@ -843,26 +777,25 @@ class PlanAgent:
             raise PlanAgentError("Plan Agent returned neither a function call nor a final JSON decision.")
         logger.info("[PLAN_AGENT_RAW_DECISION] chars=%d output=%s", len(response_text), response_text)
         try:
-            decision = _parse_decision(json.loads(response_text), domain_id=domain_id)
+            command = _parse_command(json.loads(response_text))
         except (json.JSONDecodeError, PlanAgentError) as exc:
             logger.warning("[PLAN_AGENT_INVALID_DECISION] error_type=%s detail=%s", type(exc).__name__, str(exc)[:500])
             raise PlanAgentError("Plan Agent returned an invalid final decision.") from exc
-        if isinstance(decision, UseExistingPlanDecision):
-            if not resources.templates.contains(decision.template_id):
-                raise PlanAgentError("Plan Agent selected a template_id that is not in the domain template catalog.")
-            if decision.template_id not in described_template_ids:
-                raise PlanAgentError("Plan Agent must call describe_template before using a layout template.")
-            template = resources.templates.load_layout_template(decision.template_id)
-            expected_binding_keys = {binding.key for binding in template.bindings}
-            actual_binding_keys = set(decision.bindings)
-            if actual_binding_keys != expected_binding_keys:
-                raise PlanAgentError("use_existing_plan bindings must exactly match the layout template contract.")
-        if isinstance(decision, CreatePlanDecision):
-            used_widget_ids = {block.widget_id for block in decision.plan.blocks}
+        if isinstance(command, CreateSurfacePlan):
+            used_widget_ids = {
+                widget_id
+                for block in command.blocks
+                for widget_id in (block.widget_id, *(child.widget_id for child in block.children))
+            }
             missing_widget_ids = sorted(used_widget_ids - described_widget_ids)
             if missing_widget_ids:
                 raise PlanAgentError(
                     "Plan Agent must call describe_widgets before using: "
                     + ", ".join(missing_widget_ids)
                 )
-        return PlanAgentResult(decision=decision, data_bundle=bundle)
+        elif isinstance(command, UseExistingSurfaceTemplate):
+            if command.template_id not in described_template_ids:
+                raise PlanAgentError(
+                    "Plan Agent must call describe_template before using: " + command.template_id
+                )
+        return PlanAgentResult(command=command, data_bundle=bundle)

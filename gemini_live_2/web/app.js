@@ -1,5 +1,5 @@
 import { AnimationController } from "/assets/presentation/animation_controller.js?v=circle-effect-20260822";
-import { renderPanelIR } from "/assets/panel_renderer.js?v=number-display-20260824";
+import { renderPanelIR } from "/assets/panel_renderer.js?v=choice-anchor-20260825";
 
 const form = document.querySelector("#chatForm");
 const queryInput = document.querySelector("#queryInput");
@@ -33,6 +33,7 @@ let socket = null;
 let socketReady = false;
 let liveState = "idle";
 let readyWaiters = [];
+let panelInteractionRoot = null;
 let audioContext = null, sampleRate = null, nextAudioAt = 0, pendingAudioMarker = null;
 let pendingAudioChunkTurnId = null, activeAudioTurnId = null;
 let activePanelRevision = null;
@@ -154,6 +155,34 @@ function hiddenBlockIdsInCurrentPanel() {
   );
 }
 
+function sendPanelInteraction(event) {
+  const detail = event?.detail;
+  if (!detail || socket?.readyState !== WebSocket.OPEN) {
+    reportVisualDiagnostic("panel_interaction_ignored", { reason: "socket_not_open" });
+    return;
+  }
+  const surfaceId = typeof detail.surface_id === "string" ? detail.surface_id.trim() : "";
+  const anchorId = typeof detail.anchor_id === "string" ? detail.anchor_id.trim() : "";
+  const action = typeof detail.action === "string" ? detail.action.trim() : "";
+  if (!surfaceId || !anchorId || !action || !Number.isInteger(activePanelRevision)) {
+    reportVisualDiagnostic("panel_interaction_ignored", { reason: "invalid_event", detail });
+    return;
+  }
+  socket.send(JSON.stringify({
+    type: "panel:interaction",
+    surface_id: surfaceId,
+    revision: activePanelRevision,
+    anchor_id: anchorId,
+    action,
+  }));
+  reportVisualDiagnostic("panel_interaction_sent", {
+    surface_id: surfaceId,
+    revision: activePanelRevision,
+    anchor_id: anchorId,
+    action,
+  });
+}
+
 function renderPanel(panel, { isUpdate = false } = {}) {
   const isPanelIR = panel?.ui_type === "panel_ir" && panel?.panel && Array.isArray(panel.panel.blocks);
   if (!isPanelIR) return;
@@ -164,12 +193,17 @@ function renderPanel(panel, { isUpdate = false } = {}) {
   workspace.classList.remove("no-dashboard"); workspace.classList.add("has-dashboard");
   contentTitle.textContent = panel.ui_type === "weather" ? "Thông tin thời tiết" : "Nội dung trực quan";
   const root = templateHost.shadowRoot || templateHost.attachShadow({ mode: "open" });
+  if (panelInteractionRoot !== root) {
+    panelInteractionRoot?.removeEventListener("panel:interaction", sendPanelInteraction);
+    root.addEventListener("panel:interaction", sendPanelInteraction);
+    panelInteractionRoot = root;
+  }
   root.replaceChildren();
   const widgetStyles = document.createElement("link");
   widgetStyles.rel = "stylesheet";
-  widgetStyles.href = "/assets/widgets/styles.css?v=answer-fit-block-20260825";
+  widgetStyles.href = "/assets/widgets/styles.css?v=anchor-id-20260825";
   const style = document.createElement("style");
-  style.textContent = `[data-present-id]{transition:outline .18s,box-shadow .18s,transform .18s}.lumi-highlight{outline:3px solid #0ea5e9!important;outline-offset:4px;box-shadow:0 0 0 8px #0ea5e922!important}.lumi-pulse{animation:lumi-pulse 720ms cubic-bezier(.2,.8,.3,1) 2}@keyframes lumi-pulse{0%,100%{transform:scale(1);filter:none}50%{transform:scale(1.035);filter:drop-shadow(0 0 8px rgba(14,165,233,.7))}}`;
+  style.textContent = `[data-anchor-id]{transition:outline .18s,box-shadow .18s,transform .18s}.lumi-highlight{outline:3px solid #0ea5e9!important;outline-offset:4px;box-shadow:0 0 0 8px #0ea5e922!important}.lumi-pulse{animation:lumi-pulse 720ms cubic-bezier(.2,.8,.3,1) 2}@keyframes lumi-pulse{0%,100%{transform:scale(1);filter:none}50%{transform:scale(1.035);filter:drop-shadow(0 0 8px rgba(14,165,233,.7))}}`;
   const content = document.createElement("div");
   content.style.cssText = "width:100%; height:100%;";
   content.append(renderPanelIR(
@@ -183,6 +217,19 @@ function renderPanel(panel, { isUpdate = false } = {}) {
   widgetStyles.addEventListener("load", () => fitPresentationToHost(content), { once: true });
   fitPresentationToHost(content);
   animationController.clear();
+}
+function clearPanel({ surface_id: surfaceId, revision } = {}) {
+  const nextRevision = Number(revision);
+  if (!Number.isInteger(nextRevision) || nextRevision <= 0) return;
+  templateHost.shadowRoot?.replaceChildren();
+  activePanelRevision = null;
+  contentPanel.hidden = true;
+  weatherView.hidden = true;
+  welcome.hidden = false;
+  workspace.classList.remove("has-dashboard");
+  workspace.classList.add("no-dashboard");
+  animationController.clear();
+  reportVisualDiagnostic("panel_cleared", { surface_id: surfaceId || null, revision: nextRevision });
 }
 function showText(text) {
   // The trace bubble is the single visible assistant output for this mode.
@@ -292,8 +339,9 @@ function handleMessage(event) {
       reportVisualDiagnostic("panel_update_rendered", { revision });
     }
   }
+  if (payload.type === "panel_clear") clearPanel(payload);
   if (payload.type === "scene") animationController.queue({
-    target_id: payload.scene.target_id,
+    anchor_id: payload.scene.anchor_id,
     effect: payload.scene.effect,
     actions: payload.scene.actions || [],
     animation_delay_ms: Number(payload.animation_delay_ms) || 0,
@@ -315,6 +363,9 @@ function handleMessage(event) {
   }
   if (payload.type === "audio_format") sampleRate = Number(payload.sample_rate_hz);
   if (payload.type === "live:debug_trace") showLiveTrace(payload);
+  if (payload.type === "panel:interaction_rejected") {
+    reportVisualDiagnostic("panel_interaction_rejected", { message: payload.message || "rejected" });
+  }
   if (payload.type === "text") showText(payload.text);
   if (payload.type === "live:turn_complete") {
     avatar.dataset.avatarState = "idle";

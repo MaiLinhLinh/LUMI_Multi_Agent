@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 from gemini_live_2.panel.contracts import (
+    ChoiceChild,
     ContractValidationError,
     PlanBlock,
     PresentationPlan,
@@ -40,6 +41,7 @@ class TemplateBinding:
     required: bool
     description: str
     source: str | None = None
+    child_index: int | None = None
 
     def __post_init__(self) -> None:
         key = _text(self.key, "template binding.key")
@@ -55,6 +57,9 @@ class TemplateBinding:
         object.__setattr__(self, "description", _text(self.description, "template binding.description"))
         if self.source is not None:
             object.__setattr__(self, "source", _text(self.source, "template binding.source"))
+        if self.child_index is not None:
+            if isinstance(self.child_index, bool) or not isinstance(self.child_index, int) or self.child_index < 1:
+                raise LayoutTemplateError("template binding.child_index must be a positive integer.")
 
     def to_dict(self) -> dict[str, Any]:
         data: dict[str, Any] = {
@@ -67,6 +72,8 @@ class TemplateBinding:
         }
         if self.source is not None:
             data["source"] = self.source
+        if self.child_index is not None:
+            data["child_index"] = self.child_index
         return data
 
     @classmethod
@@ -81,6 +88,7 @@ class TemplateBinding:
             required=value.get("required"),
             description=value.get("description"),
             source=value.get("source"),
+            child_index=value.get("child_index"),
         )
 
 
@@ -108,7 +116,8 @@ class LayoutTemplate:
         placeholder_keys = {
             prop_value
             for block in self.blocks
-            for prop_value in block.props.values()
+            for props in (block.props, *(child.props for child in block.children))
+            for prop_value in props.values()
             if isinstance(prop_value, str) and prop_value.startswith("$block_")
         }
         if placeholder_keys != set(keys):
@@ -165,8 +174,9 @@ class LayoutTemplateMaterializer:
             raise LayoutTemplateError("template bindings must be an object.")
 
         expected = {binding.key for binding in template.bindings}
+        required = {binding.key for binding in template.bindings if binding.required}
         actual = set(bindings)
-        missing = sorted(expected - actual)
+        missing = sorted(required - actual)
         unexpected = sorted(actual - expected)
         if missing or unexpected:
             details: list[str] = []
@@ -183,10 +193,27 @@ class LayoutTemplateMaterializer:
             props: dict[str, Any] = {}
             for prop_name, prop_value in block.props.items():
                 if isinstance(prop_value, str) and prop_value in expected:
-                    props[prop_name] = bindings[prop_value]
+                    if prop_value in bindings:
+                        props[prop_name] = bindings[prop_value]
                 else:
                     props[prop_name] = prop_value
-            blocks.append(PlanBlock(widget_id=block.widget_id, grid=block.grid, props=props))
+            children = []
+            for child in block.children:
+                child_props: dict[str, Any] = {}
+                for prop_name, prop_value in child.props.items():
+                    if isinstance(prop_value, str) and prop_value in expected:
+                        if prop_value in bindings:
+                            child_props[prop_name] = bindings[prop_value]
+                    else:
+                        child_props[prop_name] = prop_value
+                children.append(ChoiceChild(widget_id=child.widget_id, props=child_props))
+            blocks.append(PlanBlock(
+                widget_id=block.widget_id,
+                grid=block.grid,
+                props=props,
+                initial_visibility=block.initial_visibility,
+                children=tuple(children),
+            ))
 
         return PresentationPlan(
             domain_id=template.domain_id,
@@ -237,7 +264,40 @@ class TemplateExtractor:
                     description=prop.description,
                     source=prop.source,
                 ))
-            blocks.append(PlanBlock(widget_id=block.widget_id, grid=block.grid, props=template_props))
+            template_children = []
+            for child_index, child in enumerate(block.children, start=1):
+                try:
+                    child_widget = self.widget_registry.get(child.widget_id)
+                    normalized_child_props = child_widget.validate(child.props)
+                except WidgetPropsError as exc:
+                    raise LayoutTemplateError(str(exc)) from exc
+                child_definitions = {prop.name: prop for prop in child_widget.props}
+                child_template_props: dict[str, Any] = {}
+                for prop_name, prop_value in normalized_child_props.items():
+                    prop = child_definitions[prop_name]
+                    if prop.template_value_kind == "structural":
+                        child_template_props[prop_name] = prop_value
+                        continue
+                    binding_key = f"$block_{block_index}_child_{child_index}_{prop_name}"
+                    child_template_props[prop_name] = binding_key
+                    bindings.append(TemplateBinding(
+                        key=binding_key,
+                        block_index=block_index,
+                        child_index=child_index,
+                        prop_name=prop_name,
+                        value_type=prop.value_type,
+                        required=prop.required,
+                        description=prop.description,
+                        source=prop.source,
+                    ))
+                template_children.append(ChoiceChild(widget_id=child.widget_id, props=child_template_props))
+            blocks.append(PlanBlock(
+                widget_id=block.widget_id,
+                grid=block.grid,
+                props=template_props,
+                initial_visibility=block.initial_visibility,
+                children=tuple(template_children),
+            ))
 
         return LayoutTemplate(
             template_id=template_id,

@@ -6,7 +6,7 @@ export function renderTextWidget(block, { anchorsByKey = {} } = {}) {
   // A short standalone token (result number, operator, flash-card word) uses
   // its grid cell instead of looking like ordinary body copy.
   if (/^.{1,3}$/u.test(content.trim())) element.classList.add("lumi-widget-text-token");
-  if (anchorsByKey.text?.target_id) element.dataset.presentId = anchorsByKey.text.target_id;
+  if (anchorsByKey.text?.anchor_id) element.dataset.anchorId = anchorsByKey.text.anchor_id;
   element.textContent = content;
   return element;
 }

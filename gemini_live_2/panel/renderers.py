@@ -19,7 +19,8 @@ def panel_client_payload(panel: PanelIR, *, asset_urls: Mapping[str, str]) -> di
     used_asset_ids = {
         asset_id
         for block in panel.blocks
-        if block.visibility == "visible" and isinstance((asset_id := block.props.get("asset_id")), str)
+        if block.visibility == "visible"
+        for asset_id in _block_asset_ids(block)
     }
     return {
         "ui_type": "panel_ir",
@@ -32,7 +33,6 @@ def panel_client_payload(panel: PanelIR, *, asset_urls: Mapping[str, str]) -> di
                     "anchor_id": anchor.anchor_id,
                     "block_id": anchor.block_id,
                     "anchor_key": anchor.anchor_key,
-                    "target_id": anchor.target_id,
                     "allowed_effect_ids": list(anchor.allowed_effect_ids),
                 }
                 for anchor in panel.anchors
@@ -52,7 +52,22 @@ def _client_block(block: PanelBlock) -> dict[str, Any]:
     data = block.to_dict()
     if block.visibility == "hidden":
         data["props"] = {}
+        data.pop("children", None)
     return data
+
+
+def _block_asset_ids(block: PanelBlock) -> tuple[str, ...]:
+    """Collect only assets visible inside this top-level panel block."""
+
+    values: list[str] = []
+    asset_id = block.props.get("asset_id")
+    if isinstance(asset_id, str):
+        values.append(asset_id)
+    for child in block.children:
+        asset_id = child.props.get("asset_id")
+        if isinstance(asset_id, str):
+            values.append(asset_id)
+    return tuple(values)
 
 
 def render_visual_stage_map(panel: PanelIR) -> str:
@@ -163,10 +178,32 @@ def _region_lines(block: PanelBlock, anchor_ids: tuple[str, ...], width: int) ->
 
     if block.widget_id == "object_group":
         return _object_group_lines(block, anchor_ids, width)
+    if block.widget_id == "choice":
+        return _choice_lines(block, anchor_ids, width)
 
     lines: list[str] = []
     for value in _visible_region_content(block):
         lines.extend(_wrapped_lines(str(value), width))
+    return lines + _anchor_lines(anchor_ids, width)
+
+
+def _choice_lines(block: PanelBlock, anchor_ids: tuple[str, ...], width: int) -> list[str]:
+    """Serialize the visible child widgets, then anchor the whole choice card."""
+
+    lines: list[str] = []
+    for child in block.children:
+        if child.widget_id == "image":
+            lines.extend(_wrapped_lines(f"ẢNH: {child.props.get('asset_id', '')}", width))
+        elif child.widget_id == "text":
+            lines.extend(_wrapped_lines(str(child.props.get("content", "")), width))
+        elif child.widget_id == "object_group":
+            lines.extend(_wrapped_lines(
+                f"NHÓM: {child.props.get('count', 0)} × {child.props.get('asset_id', '')}", width,
+            ))
+        elif child.widget_id in {"answer", "number_display"}:
+            lines.extend(_wrapped_lines(str(child.props.get("value", "")), width))
+        else:
+            lines.extend(_wrapped_lines(f"[{child.widget_id}]", width))
     return lines + _anchor_lines(anchor_ids, width)
 
 

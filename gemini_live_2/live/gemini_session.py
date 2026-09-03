@@ -18,7 +18,8 @@ from gemini_live_2.settings import Settings
 from gemini_live_2.trace import begin_turn, trace, warning
 
 from .orchestrator import LiveSessionOrchestrator
-from .panel_action import PANEL_ACTION_TOOL
+from .delete_surface import DELETE_SURFACE_TOOL
+from .update_surface_state import UPDATE_SURFACE_STATE_TOOL
 from .persistent_transport import PersistentLiveTransport
 from .session_protocol import LiveSessionState
 from .visual_presentation import PRESENT_VISUAL_TOOL
@@ -49,11 +50,21 @@ Khi chọn nói về một vùng có [anchor: ...] trong VISUAL STAGE MAP, gọi
 Không đọc, nhắc hoặc diễn giải tên tool, anchor_id, effect_id, JSON, template hay dữ liệu kỹ thuật cho người dùng. Giữ câu hỏi làm rõ ngắn gọn.
 """.strip()
 
-_PANEL_ACTION_GUIDANCE = """
+_SURFACE_STATE_GUIDANCE = """
 Khi VISUAL STAGE MAP ghi một vùng đang ẩn và bạn muốn công bố vùng đó, gọi
-panel_action với action_id="reveal" và anchor_ids của một hoặc nhiều vùng cần hiện.
-Sau tool response, chỉ dùng VISUAL STAGE MAP mới trả về. Không gọi reveal lại cho
-vùng đã hiện.
+update_surface_state với surface_id, base_revision hiện tại và updates. Mỗi update
+gồm anchor_id của vùng cần đổi cùng changes={"visibility":"visible"}. Sau tool
+response, chỉ dùng VISUAL STAGE MAP mới trả về. Không cập nhật lại vùng đã hiện.
+""".strip()
+
+_PANEL_INTERACTION_GUIDANCE = """
+Khi nhận một client event bắt đầu bằng `PANEL_INTERACTION_EVENT`, phần JSON theo
+sau là dữ kiện tương tác giao diện đáng tin cậy, không phải lời người dùng nói.
+Event `surface_interaction` cho biết trẻ vừa thực hiện `action` trên vùng có
+`anchor_id` tương ứng trong VISUAL STAGE MAP. `content` chỉ mô tả các thành phần
+hiển thị của vùng đó, không phải kết luận đúng/sai. Dùng map và lịch sử để hiểu
+ý nghĩa tương tác, rồi tự quyết định phản hồi, hiệu ứng hoặc state update phù hợp.
+Không đọc hoặc nhắc lại JSON, event, anchor_id hay dữ liệu kỹ thuật.
 """.strip()
 
 
@@ -87,7 +98,12 @@ class GeminiLiveSession:
             for item in memory.history[-6:]
             if item.get("role") in {"user", "assistant"} and item.get("content")
         ]
-        sections = [_CORE_INSTRUCTION, _PANEL_ACTION_GUIDANCE, self._registry.prompt_guidance()]
+        sections = [
+            _CORE_INSTRUCTION,
+            _SURFACE_STATE_GUIDANCE,
+            _PANEL_INTERACTION_GUIDANCE,
+            self._registry.prompt_guidance(),
+        ]
         if history:
             sections.append("Recent conversation (context only):\n" + "\n".join(history))
         panel_context = self._orchestrator.active_panel_presentation_context(session_id)
@@ -95,6 +111,8 @@ class GeminiLiveSession:
             effects = json.dumps(panel_context["visual_effects"], ensure_ascii=False)
             sections.append(
                 "PANEL HIỆN TẠI — tiếp tục dùng panel này nếu yêu cầu là câu hỏi tiếp nối:\n"
+                f"surface_id: {panel_context['surface_id']}\n"
+                f"base_revision: {panel_context['revision']}\n\n"
                 f"presentation_instruction:\n{panel_context['presentation_instruction']}\n\n"
                 f"VISUAL STAGE MAP:\n{panel_context['visual_stage_map']}\n\n"
                 f"visual_effects:\n{effects}"
@@ -108,7 +126,12 @@ class GeminiLiveSession:
             types.FunctionDeclaration(
                 name=item["name"], description=item["description"], parameters_json_schema=item["parameters"]
             )
-            for item in [*self._registry.tool_declarations(), PANEL_ACTION_TOOL, PRESENT_VISUAL_TOOL]
+            for item in [
+                *self._registry.tool_declarations(),
+                UPDATE_SURFACE_STATE_TOOL,
+                DELETE_SURFACE_TOOL,
+                PRESENT_VISUAL_TOOL,
+            ]
         ]
         return types.LiveConnectConfig(
             response_modalities=["AUDIO"],
@@ -233,6 +256,31 @@ class PersistentGeminiLiveConversation:
         self._text_barge_in_pending = True
         trace("TEXT_BARGE_IN_SENT chars=%s", len(query))
         await self._transport.send_text(query)
+
+    async def submit_panel_interaction(self, interaction: dict[str, Any]) -> dict[str, Any]:
+        """Submit one trusted browser interaction when no receiver is active."""
+
+        payload = self._panel_interaction_payload(interaction)
+        await self._set_state(LiveSessionState.LISTENING)
+        self._begin_turn("<panel interaction>")
+        trace("PANEL_INTERACTION_SENT anchor=%s", interaction.get("anchor_id"))
+        await self._transport.send_text(payload)
+        await self._set_state(LiveSessionState.WAITING_FOR_TOOL)
+        return await self._consume_until_settled()
+
+    async def interrupt_with_panel_interaction(self, interaction: dict[str, Any]) -> None:
+        """Inject one trusted browser interaction into an active receiver."""
+
+        payload = self._panel_interaction_payload(interaction)
+        await self._set_state(LiveSessionState.LISTENING)
+        self._begin_turn("<panel interaction>")
+        self._text_barge_in_pending = True
+        trace("PANEL_INTERACTION_BARGE_IN_SENT anchor=%s", interaction.get("anchor_id"))
+        await self._transport.send_text(payload)
+
+    @staticmethod
+    def _panel_interaction_payload(interaction: dict[str, Any]) -> str:
+        return "PANEL_INTERACTION_EVENT\n" + json.dumps(interaction, ensure_ascii=False, separators=(",", ":"))
 
     async def begin_audio(self) -> None:
         """Enter listening when the persistent browser microphone begins."""
@@ -438,10 +486,18 @@ class PersistentGeminiLiveConversation:
                 response_tool_names.append(name)
                 await self._on_event({"type": "tool_result", "name": name, "response": response})
                 continue
-            if name == "panel_action":
-                response, panel_update = await self._handle_panel_action(args)
+            if name == "update_surface_state":
+                response, panel_update = await self._handle_update_surface_state(args)
                 if panel_update is not None:
                     await self._on_event({"type": "panel_update", "panel": panel_update})
+                responses.append(types.FunctionResponse(id=call_id, name=name, response={"result": response}))
+                response_tool_names.append(name)
+                await self._on_event({"type": "tool_result", "name": name, "response": response})
+                continue
+            if name == "delete_surface":
+                response, panel_clear = await self._handle_delete_surface(args)
+                if panel_clear is not None:
+                    await self._on_event({"type": "panel_clear", **panel_clear})
                 responses.append(types.FunctionResponse(id=call_id, name=name, response={"result": response}))
                 response_tool_names.append(name)
                 await self._on_event({"type": "tool_result", "name": name, "response": response})
@@ -501,12 +557,7 @@ class PersistentGeminiLiveConversation:
             warning("PRESENT_VISUAL_REJECTED reason=%s", exc)
             return {"status": "rejected", "message": str(exc)}
         self._animation_calls += 1
-        trace(
-            "PRESENT_VISUAL_ACCEPTED anchor=%s effect=%s target=%s",
-            anchor_id,
-            effect_id,
-            cue["target_id"],
-        )
+        trace("PRESENT_VISUAL_ACCEPTED anchor=%s effect=%s", anchor_id, effect_id)
         if self._pending_visual_marker is not None:
             warning(
                 "VISUAL_MARKER_REPLACED previous_anchor=%s next_anchor=%s",
@@ -521,34 +572,71 @@ class PersistentGeminiLiveConversation:
         trace("VISUAL_MARKER_PENDING anchor=%s effect=%s", anchor_id, effect_id)
         return {"status": "completed", "anchor_id": anchor_id, "effect_id": effect_id}
 
-    async def _handle_panel_action(self, args: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    async def _handle_update_surface_state(
+        self, args: dict[str, Any]
+    ) -> tuple[dict[str, Any], dict[str, Any] | None]:
         """Apply one validated state transition without rerouting the request."""
 
-        action_id = args.get("action_id")
-        anchor_ids = args.get("anchor_ids")
-        if not isinstance(action_id, str) or not isinstance(anchor_ids, list) or not all(
-            isinstance(anchor_id, str) for anchor_id in anchor_ids
+        surface_id = args.get("surface_id")
+        base_revision = args.get("base_revision")
+        updates = args.get("updates")
+        if (
+            not isinstance(surface_id, str)
+            or isinstance(base_revision, bool)
+            or not isinstance(base_revision, int)
+            or not isinstance(updates, list)
         ):
             return {
                 "status": "rejected",
-                "message": "action_id must be a string and anchor_ids must be a list of strings",
+                "message": "surface_id, base_revision and updates are required",
             }, None
         try:
-            result = self._orchestrator.panel_action(
+            result = self._orchestrator.update_surface_state(
                 session_id=self._session_id,
-                action_id=action_id,
-                anchor_ids=anchor_ids,
+                surface_id=surface_id,
+                base_revision=base_revision,
+                updates=updates,
             )
         except ValueError as exc:
-            warning("PANEL_ACTION_REJECTED action=%s reason=%s", action_id, exc)
+            warning("UPDATE_SURFACE_STATE_REJECTED reason=%s", exc)
             return {"status": "rejected", "message": str(exc)}, None
         trace(
-            "PANEL_ACTION_ACCEPTED action=%s anchors=%s revision=%s",
-            action_id,
-            ",".join(anchor_ids),
+            "UPDATE_SURFACE_STATE_ACCEPTED anchors=%s revision=%s",
+            ",".join(result.response["updated_anchor_ids"]),
             result.response["revision"],
         )
         return result.response, result.panel_update
+
+    async def _handle_delete_surface(
+        self, args: dict[str, Any]
+    ) -> tuple[dict[str, Any], dict[str, Any] | None]:
+        """Close a panel after validating the active surface revision."""
+
+        surface_id = args.get("surface_id")
+        base_revision = args.get("base_revision")
+        if (
+            not isinstance(surface_id, str)
+            or isinstance(base_revision, bool)
+            or not isinstance(base_revision, int)
+        ):
+            return {
+                "status": "rejected",
+                "message": "surface_id and base_revision are required",
+            }, None
+        try:
+            result = self._orchestrator.delete_surface(
+                session_id=self._session_id,
+                surface_id=surface_id,
+                base_revision=base_revision,
+            )
+        except ValueError as exc:
+            warning("DELETE_SURFACE_REJECTED reason=%s", exc)
+            return {"status": "rejected", "message": str(exc)}, None
+        trace("DELETE_SURFACE_COMPLETED surface=%s revision=%s", surface_id, result.response["revision"])
+        return result.response, {
+            "surface_id": result.response["surface_id"],
+            "revision": result.response["revision"],
+        }
 
     async def _handle_model_turn(self, server: Any) -> None:
         model_turn = getattr(server, "model_turn", None) if server else None
