@@ -1,9 +1,9 @@
-export function renderImageWidget(block, { anchorsByKey = {} } = {}) {
+export function renderImageWidget(component, { anchorsByKey = {} } = {}) {
   const figure = document.createElement("figure");
   figure.className = "lumi-widget lumi-widget-image";
   if (anchorsByKey.image?.anchor_id) figure.dataset.anchorId = anchorsByKey.image.anchor_id;
 
-  if (block.visibility === "hidden") {
+  if (component.state?.visibility === "hidden") {
     figure.classList.add("lumi-widget-hidden-content");
     const placeholder = document.createElement("span");
     placeholder.className = "lumi-widget-hidden-placeholder";
@@ -13,8 +13,8 @@ export function renderImageWidget(block, { anchorsByKey = {} } = {}) {
   }
 
   const image = document.createElement("img");
-  image.src = block.props?.asset_url || "";
-  image.alt = block.props?.label || "";
+  image.src = component.props?.asset_url || "";
+  image.alt = component.props?.label || "";
   image.draggable = false;
   figure.append(image);
   return figure;

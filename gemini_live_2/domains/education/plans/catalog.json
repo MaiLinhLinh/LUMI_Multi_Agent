@@ -8,28 +8,8 @@
     },
     {
       "id": "tm1",
-      "description": "Bài học cộng học sinh xem hai nhóm động vật (chó và mèo) với dấu cộng và dấu bằng, đáp án ẩn sẽ hiển thị khi Gemini Live bật.",
+      "description": "Bố cục đơn giản gồm tiêu đề ở trên, hình ảnh trung tâm, và đoạn văn kể chuyện ở dưới, phù hợp cho câu chuyện về động vật cho trẻ em.",
       "layout_path": "layouts/tm1.layout.json"
-    },
-    {
-      "id": "tm2",
-      "description": "Tiêu đề ở hàng đầu, sau đó là ba phần dọc; mỗi phần gồm một ảnh bên trái và đoạn văn mô tả câu chuyện bên phải, các phần sắp xếp theo chiều dọc.",
-      "layout_path": "layouts/tm2.layout.json"
-    },
-    {
-      "id": "tm3",
-      "description": "Ba hình ảnh của động vật được sắp xếp thành hình tam giác: một hình ở trên, hai hình ở dưới phía trái và phải.",
-      "layout_path": "layouts/tm3.layout.json"
-    },
-    {
-      "id": "tm4",
-      "description": "Một trò chơi trốn tìm với mèo Miu: tiêu đề ở trên cùng, hình ảnh mèo ẩn ban đầu sẽ được hiển thị khi Gemini Live bật.",
-      "layout_path": "layouts/tm4.layout.json"
-    },
-    {
-      "id": "tm5",
-      "description": "A title at the top, followed by two large animal images side‑by‑side in the middle, and a hidden answer block below that reveals the correct English name when shown.",
-      "layout_path": "layouts/tm5.layout.json"
     }
   ]
 }

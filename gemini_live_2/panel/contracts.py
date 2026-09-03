@@ -7,14 +7,14 @@ the contracts rather than changing their meaning.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from typing import Any, Mapping, TypeAlias
 
 
 JsonValue: TypeAlias = str | int | float | bool | None | list["JsonValue"] | dict[str, "JsonValue"]
 _VISIBILITY_STATES = frozenset({"visible", "hidden"})
 _PATCH_OPERATION_NAMES = frozenset(
-    {"add_block", "remove_block", "replace_block", "move_block", "update_props"}
+    {"add_block", "remove_block", "replace_block", "move_block", "update_props", "replace_children"}
 )
 
 
@@ -125,6 +125,7 @@ class PlanBlock:
     grid: GridRect
     props: Mapping[str, JsonValue] = field(default_factory=dict)
     initial_visibility: str = "visible"
+    initial_state: Mapping[str, JsonValue] = field(default_factory=dict)
     children: tuple[ChoiceChild, ...] = ()
 
     def __post_init__(self) -> None:
@@ -136,6 +137,15 @@ class PlanBlock:
         object.__setattr__(self, "props", dict(self.props))
         if self.initial_visibility not in _VISIBILITY_STATES:
             raise ContractValidationError("block.initial_visibility must be 'visible' or 'hidden'.")
+        if not isinstance(self.initial_state, Mapping):
+            raise ContractValidationError("block.initial_state must be an object.")
+        normalized_initial_state = dict(self.initial_state)
+        declared_visibility = normalized_initial_state.get("visibility")
+        if declared_visibility is not None and declared_visibility != self.initial_visibility:
+            raise ContractValidationError(
+                "block.initial_state.visibility must match block.initial_visibility when both are provided."
+            )
+        object.__setattr__(self, "initial_state", normalized_initial_state)
         if not isinstance(self.children, tuple) or not all(
             isinstance(child, ChoiceChild) for child in self.children
         ):
@@ -146,13 +156,16 @@ class PlanBlock:
         data = _mapping(value, "block")
         props = data.get("props", {})
         children = data.get("children", [])
+        initial_state = _mapping(data.get("initial_state", {}), "block.initial_state")
         if not isinstance(children, list):
             raise ContractValidationError("block.children must be an array.")
+        initial_visibility = data.get("initial_visibility", initial_state.get("visibility", "visible"))
         return cls(
             widget_id=data.get("widget_id"),
             grid=GridRect.from_dict(data.get("grid")),
             props=_mapping(props, "block.props"),
-            initial_visibility=data.get("initial_visibility", "visible"),
+            initial_visibility=initial_visibility,
+            initial_state=initial_state,
             children=tuple(ChoiceChild.from_dict(item) for item in children),
         )
 
@@ -163,6 +176,8 @@ class PlanBlock:
             "props": dict(self.props),
             "initial_visibility": self.initial_visibility,
         }
+        if self.initial_state:
+            data["initial_state"] = dict(self.initial_state)
         if self.children:
             data["children"] = [child.to_dict() for child in self.children]
         return data
@@ -379,12 +394,40 @@ class UpdatePropsOperation:
         return {"op": "update_props", "anchor_id": self.anchor_id, "changes": dict(self.changes)}
 
 
+@dataclass(frozen=True, slots=True)
+class ReplaceChildrenOperation:
+    """Replace all renderer-owned child widgets of one existing component.
+
+    The parent component retains its runtime identity, grid, anchors and state.
+    Runtime recompiles the supplied child declarations, so parent child-policy
+    and every child widget's props remain validated before rendering.
+    """
+
+    anchor_id: str
+    children: tuple[ChoiceChild, ...]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "anchor_id", _required_text(self.anchor_id, "replace_children.anchor_id"))
+        if not isinstance(self.children, tuple) or not all(
+            isinstance(child, ChoiceChild) for child in self.children
+        ):
+            raise ContractValidationError("replace_children.children must contain ChoiceChild values.")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "op": "replace_children",
+            "anchor_id": self.anchor_id,
+            "children": [child.to_dict() for child in self.children],
+        }
+
+
 PatchOperation: TypeAlias = (
     AddBlockOperation
     | RemoveBlockOperation
     | ReplaceBlockOperation
     | MoveBlockOperation
     | UpdatePropsOperation
+    | ReplaceChildrenOperation
 )
 
 
@@ -403,9 +446,17 @@ def _patch_operation_from_dict(value: object) -> PatchOperation:
         )
     if operation == "move_block":
         return MoveBlockOperation(anchor_id=data.get("anchor_id"), grid=GridRect.from_dict(data.get("grid")))
-    return UpdatePropsOperation(
+    if operation == "update_props":
+        return UpdatePropsOperation(
+            anchor_id=data.get("anchor_id"),
+            changes=_mapping(data.get("changes"), "update_props.changes"),
+        )
+    children = data.get("children")
+    if not isinstance(children, list):
+        raise ContractValidationError("replace_children.children must be an array.")
+    return ReplaceChildrenOperation(
         anchor_id=data.get("anchor_id"),
-        changes=_mapping(data.get("changes"), "update_props.changes"),
+        children=tuple(ChoiceChild.from_dict(child) for child in children),
     )
 
 
@@ -424,7 +475,7 @@ class PatchSurfacePlan:
         if not isinstance(self.operations, tuple) or not self.operations:
             raise ContractValidationError("patch surface.operations must not be empty.")
         if not all(isinstance(operation, (AddBlockOperation, RemoveBlockOperation, ReplaceBlockOperation,
-                                          MoveBlockOperation, UpdatePropsOperation)) for operation in self.operations):
+                                          MoveBlockOperation, UpdatePropsOperation, ReplaceChildrenOperation)) for operation in self.operations):
             raise ContractValidationError("patch surface.operations contains an invalid operation.")
 
     @classmethod
@@ -489,56 +540,31 @@ def surface_plan_command_from_dict(value: object) -> SurfacePlanCommand:
 
 
 @dataclass(frozen=True, slots=True)
-class PanelChoiceChild:
-    """Trusted materialized child rendered inside a choice panel block."""
+class ComponentChild:
+    """A widget rendered by a parent component, without a panel-grid layout.
 
-    widget_id: str
+    Children are deliberately generic rather than choice-specific.  The Widget
+    Registry decides which component types may contain them in a later
+    checkpoint.  This contract only preserves their safe, renderer-facing
+    widget type and props.
+    """
+
+    type: str
     props: Mapping[str, JsonValue] = field(default_factory=dict)
+    children: tuple["ComponentChild", ...] = ()
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "widget_id", _required_text(self.widget_id, "panel choice child.widget_id"))
+        object.__setattr__(self, "type", _required_text(self.type, "component child.type"))
         if not isinstance(self.props, Mapping):
-            raise ContractValidationError("panel choice child.props must be an object.")
+            raise ContractValidationError("component child.props must be an object.")
         object.__setattr__(self, "props", dict(self.props))
-
-    def to_dict(self) -> dict[str, Any]:
-        return {"widget_id": self.widget_id, "props": dict(self.props)}
-
-
-@dataclass(frozen=True, slots=True)
-class PanelBlock:
-    """Trusted materialized block with an identifier created by the Compiler."""
-
-    id: str
-    widget_id: str
-    grid: GridRect
-    props: Mapping[str, JsonValue] = field(default_factory=dict)
-    visibility: str = "visible"
-    children: tuple[PanelChoiceChild, ...] = ()
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "id", _required_text(self.id, "panel block.id"))
-        object.__setattr__(self, "widget_id", _required_text(self.widget_id, "panel block.widget_id"))
-        if not isinstance(self.grid, GridRect):
-            raise ContractValidationError("panel block.grid must be a GridRect.")
-        if not isinstance(self.props, Mapping):
-            raise ContractValidationError("panel block.props must be an object.")
-        object.__setattr__(self, "props", dict(self.props))
-        if self.visibility not in _VISIBILITY_STATES:
-            raise ContractValidationError("panel block.visibility must be 'visible' or 'hidden'.")
         if not isinstance(self.children, tuple) or not all(
-            isinstance(child, PanelChoiceChild) for child in self.children
+            isinstance(child, ComponentChild) for child in self.children
         ):
-            raise ContractValidationError("panel block.children must contain PanelChoiceChild values.")
+            raise ContractValidationError("component child.children must contain ComponentChild values.")
 
     def to_dict(self) -> dict[str, Any]:
-        data: dict[str, Any] = {
-            "id": self.id,
-            "widget_id": self.widget_id,
-            "grid": self.grid.to_dict(),
-            "props": dict(self.props),
-            "visibility": self.visibility,
-        }
+        data: dict[str, Any] = {"type": self.type, "props": dict(self.props)}
         if self.children:
             data["children"] = [child.to_dict() for child in self.children]
         return data
@@ -604,13 +630,13 @@ class AnchorBinding:
     """Compiler-owned visual permission. Plan Agent never creates this directly."""
 
     anchor_id: str
-    block_id: str
+    component_id: str
     anchor_key: str
     allowed_effect_ids: tuple[str, ...]
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "anchor_id", _required_text(self.anchor_id, "anchor.anchor_id"))
-        object.__setattr__(self, "block_id", _required_text(self.block_id, "anchor.block_id"))
+        object.__setattr__(self, "component_id", _required_text(self.component_id, "anchor.component_id"))
         object.__setattr__(self, "anchor_key", _required_text(self.anchor_key, "anchor.anchor_key"))
         if not isinstance(self.allowed_effect_ids, tuple) or not self.allowed_effect_ids:
             raise ContractValidationError("anchor.allowed_effect_ids must not be empty.")
@@ -619,42 +645,49 @@ class AnchorBinding:
             raise ContractValidationError("anchor.allowed_effect_ids contains duplicates.")
         object.__setattr__(self, "allowed_effect_ids", effects)
 
-
 @dataclass(frozen=True, slots=True)
-class SurfaceBlock:
-    """One stable UI component without any mutable runtime state.
+class ComponentNode:
+    """One component on a generated surface's top-level CSS Grid.
 
-    Structure owns component identity, widget choice, layout, public props and
-    nested children.  Visibility and other interaction values live in
-    :class:`BlockState`, so Runtime can change state without rewriting the
-    surface structure.
+    The component's ``state`` is intentionally an open mapping.  SD2 will
+    make Widget Registry responsible for which keys and transitions are valid;
+    this contract enforces only the universal visible/hidden baseline.
     """
 
     id: str
-    widget_id: str
-    grid: GridRect
+    type: str
+    layout: GridRect
     props: Mapping[str, JsonValue] = field(default_factory=dict)
-    children: tuple[PanelChoiceChild, ...] = ()
+    state: Mapping[str, JsonValue] = field(default_factory=lambda: {"visibility": "visible"})
+    children: tuple[ComponentChild, ...] = ()
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "id", _required_text(self.id, "surface block.id"))
-        object.__setattr__(self, "widget_id", _required_text(self.widget_id, "surface block.widget_id"))
-        if not isinstance(self.grid, GridRect):
-            raise ContractValidationError("surface block.grid must be a GridRect.")
+        object.__setattr__(self, "id", _required_text(self.id, "component.id"))
+        object.__setattr__(self, "type", _required_text(self.type, "component.type"))
+        if not isinstance(self.layout, GridRect):
+            raise ContractValidationError("component.layout must be a GridRect.")
         if not isinstance(self.props, Mapping):
-            raise ContractValidationError("surface block.props must be an object.")
+            raise ContractValidationError("component.props must be an object.")
         object.__setattr__(self, "props", dict(self.props))
+        if not isinstance(self.state, Mapping):
+            raise ContractValidationError("component.state must be an object.")
+        normalized_state = dict(self.state)
+        visibility = normalized_state.get("visibility")
+        if visibility not in _VISIBILITY_STATES:
+            raise ContractValidationError("component.state.visibility must be 'visible' or 'hidden'.")
+        object.__setattr__(self, "state", normalized_state)
         if not isinstance(self.children, tuple) or not all(
-            isinstance(child, PanelChoiceChild) for child in self.children
+            isinstance(child, ComponentChild) for child in self.children
         ):
-            raise ContractValidationError("surface block.children must contain PanelChoiceChild values.")
+            raise ContractValidationError("component.children must contain ComponentChild values.")
 
     def to_dict(self) -> dict[str, Any]:
         data: dict[str, Any] = {
             "id": self.id,
-            "widget_id": self.widget_id,
-            "grid": self.grid.to_dict(),
+            "type": self.type,
+            "layout": self.layout.to_dict(),
             "props": dict(self.props),
+            "state": dict(self.state),
         }
         if self.children:
             data["children"] = [child.to_dict() for child in self.children]
@@ -662,105 +695,53 @@ class SurfaceBlock:
 
 
 @dataclass(frozen=True, slots=True)
-class BlockState:
-    """Runtime values for one component.
-
-    All six fields are intentionally present from SA1.  Widget Registry will
-    later declare which fields and transitions each widget actually allows.
-    """
-
-    visibility: str = "visible"
-    selected: bool = False
-    flipped: bool = False
-    position: Mapping[str, JsonValue] | None = None
-    feedback: str | None = None
-    progress: int | float | None = None
-
-    def __post_init__(self) -> None:
-        if self.visibility not in _VISIBILITY_STATES:
-            raise ContractValidationError("block state.visibility must be 'visible' or 'hidden'.")
-        for field_name in ("selected", "flipped"):
-            if not isinstance(getattr(self, field_name), bool):
-                raise ContractValidationError(f"block state.{field_name} must be a boolean.")
-        if self.position is not None:
-            if not isinstance(self.position, Mapping):
-                raise ContractValidationError("block state.position must be an object or None.")
-            object.__setattr__(self, "position", dict(self.position))
-        if self.feedback is not None:
-            object.__setattr__(self, "feedback", _required_text(self.feedback, "block state.feedback"))
-        if self.progress is not None:
-            if isinstance(self.progress, bool) or not isinstance(self.progress, (int, float)):
-                raise ContractValidationError("block state.progress must be a number or None.")
-
-    def to_dict(self) -> dict[str, JsonValue]:
-        data: dict[str, JsonValue] = {
-            "visibility": self.visibility,
-            "selected": self.selected,
-            "flipped": self.flipped,
-        }
-        if self.position is not None:
-            data["position"] = dict(self.position)
-        if self.feedback is not None:
-            data["feedback"] = self.feedback
-        if self.progress is not None:
-            data["progress"] = self.progress
-        return data
-
-
-@dataclass(frozen=True, slots=True)
-class SurfaceStructure:
-    """Stable structure of one active surface, independent of runtime state."""
+class SurfaceDocument:
+    """The single authoritative structure and runtime state of a surface."""
 
     surface_id: str
     domain_id: str
-    blocks: tuple[SurfaceBlock, ...]
+    revision: int
+    components: tuple[ComponentNode, ...]
     anchors: tuple[AnchorBinding, ...] = ()
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "surface_id", _required_text(self.surface_id, "surface.surface_id"))
-        object.__setattr__(self, "domain_id", _required_text(self.domain_id, "surface.domain_id"))
-        if not isinstance(self.blocks, tuple) or not self.blocks:
-            raise ContractValidationError("surface.blocks must contain at least one block.")
-        if not all(isinstance(block, SurfaceBlock) for block in self.blocks):
-            raise ContractValidationError("surface.blocks must contain SurfaceBlock values.")
+        object.__setattr__(self, "surface_id", _required_text(self.surface_id, "surface document.surface_id"))
+        object.__setattr__(self, "domain_id", _required_text(self.domain_id, "surface document.domain_id"))
+        if isinstance(self.revision, bool) or not isinstance(self.revision, int) or self.revision < 1:
+            raise ContractValidationError("surface document.revision must be a positive integer.")
+        if not isinstance(self.components, tuple) or not self.components:
+            raise ContractValidationError("surface document.components must contain at least one ComponentNode.")
+        if not all(isinstance(component, ComponentNode) for component in self.components):
+            raise ContractValidationError("surface document.components must contain ComponentNode values.")
         if not isinstance(self.anchors, tuple) or not all(isinstance(anchor, AnchorBinding) for anchor in self.anchors):
-            raise ContractValidationError("surface.anchors must contain AnchorBinding values.")
-        block_ids = [block.id for block in self.blocks]
-        if len(block_ids) != len(set(block_ids)):
-            raise ContractValidationError("surface.blocks contains duplicate block ids.")
+            raise ContractValidationError("surface document.anchors must contain AnchorBinding values.")
+        component_ids = [component.id for component in self.components]
+        if len(component_ids) != len(set(component_ids)):
+            raise ContractValidationError("surface document.components contains duplicate component ids.")
         anchor_ids = [anchor.anchor_id for anchor in self.anchors]
         if len(anchor_ids) != len(set(anchor_ids)):
-            raise ContractValidationError("surface.anchors contains duplicate anchor ids.")
-        if any(anchor.block_id not in set(block_ids) for anchor in self.anchors):
-            raise ContractValidationError("surface.anchor references an unknown block.")
+            raise ContractValidationError("surface document.anchors contains duplicate anchor ids.")
+        if any(anchor.component_id not in set(component_ids) for anchor in self.anchors):
+            raise ContractValidationError("surface document.anchor references an unknown component.")
 
-    @classmethod
-    def from_panel_ir(cls, panel: "PanelIR") -> "SurfaceStructure":
-        return cls(
-            surface_id=panel.panel_id,
-            domain_id=panel.domain_id,
-            blocks=tuple(
-                SurfaceBlock(
-                    id=block.id,
-                    widget_id=block.widget_id,
-                    grid=block.grid,
-                    props=block.props,
-                    children=block.children,
-                )
-                for block in panel.blocks
-            ),
-            anchors=panel.anchors,
-        )
+    @property
+    def component_map(self) -> dict[str, ComponentNode]:
+        return {component.id: component for component in self.components}
+
+    @property
+    def anchor_map(self) -> dict[str, AnchorBinding]:
+        return {anchor.anchor_id: anchor for anchor in self.anchors}
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "surface_id": self.surface_id,
             "domain_id": self.domain_id,
-            "blocks": [block.to_dict() for block in self.blocks],
+            "revision": self.revision,
+            "components": [component.to_dict() for component in self.components],
             "anchors": [
                 {
                     "anchor_id": anchor.anchor_id,
-                    "block_id": anchor.block_id,
+                    "component_id": anchor.component_id,
                     "anchor_key": anchor.anchor_key,
                     "allowed_effect_ids": list(anchor.allowed_effect_ids),
                 }
@@ -770,193 +751,27 @@ class SurfaceStructure:
 
 
 @dataclass(frozen=True, slots=True)
-class SurfaceState:
-    """All mutable per-block state of a surface, keyed by stable block ID."""
-
-    block_states: Mapping[str, BlockState]
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.block_states, Mapping):
-            raise ContractValidationError("surface state.block_states must be an object.")
-        normalized: dict[str, BlockState] = {}
-        for block_id, state in self.block_states.items():
-            normalized[_required_text(block_id, "surface state block id")] = state
-            if not isinstance(state, BlockState):
-                raise ContractValidationError("surface state.block_states must contain BlockState values.")
-        object.__setattr__(self, "block_states", normalized)
-
-    @classmethod
-    def from_panel_ir(cls, panel: "PanelIR") -> "SurfaceState":
-        return cls({block.id: BlockState(visibility=block.visibility) for block in panel.blocks})
-
-    def state_for(self, block_id: str) -> BlockState:
-        try:
-            return self.block_states[block_id]
-        except KeyError as error:
-            raise ContractValidationError("surface state references an unknown block.") from error
-
-    def to_dict(self) -> dict[str, dict[str, JsonValue]]:
-        return {block_id: state.to_dict() for block_id, state in self.block_states.items()}
-
-    def replace_block_states(self, replacements: Mapping[str, BlockState]) -> "SurfaceState":
-        """Return a state value with an atomic set of per-block replacements."""
-
-        if not isinstance(replacements, Mapping) or not replacements:
-            raise ContractValidationError("surface state replacements must not be empty.")
-        updated = dict(self.block_states)
-        for block_id, block_state in replacements.items():
-            normalized_id = _required_text(block_id, "surface state block id")
-            if normalized_id not in updated:
-                raise ContractValidationError("surface state replacement references an unknown block.")
-            if not isinstance(block_state, BlockState):
-                raise ContractValidationError("surface state replacements must contain BlockState values.")
-            updated[normalized_id] = block_state
-        return SurfaceState(updated)
-
-
-def materialize_panel_ir(*, structure: SurfaceStructure, state: SurfaceState) -> "PanelIR":
-    """Build the existing renderer contract from separated structure and state."""
-
-    structure_ids = {block.id for block in structure.blocks}
-    state_ids = set(state.block_states)
-    if structure_ids != state_ids:
-        raise ContractValidationError("surface structure and state must contain the same block ids.")
-    return PanelIR(
-        panel_id=structure.surface_id,
-        domain_id=structure.domain_id,
-        blocks=tuple(
-            PanelBlock(
-                id=block.id,
-                widget_id=block.widget_id,
-                grid=block.grid,
-                props=block.props,
-                visibility=state.state_for(block.id).visibility,
-                children=block.children,
-            )
-            for block in structure.blocks
-        ),
-        anchors=structure.anchors,
-    )
-
-
-@dataclass(frozen=True, slots=True)
-class PanelIR:
-    """The sole source of truth for rendered UI, ASCII map and visual validation."""
-
-    panel_id: str
-    domain_id: str
-    blocks: tuple[PanelBlock, ...]
-    anchors: tuple[AnchorBinding, ...] = ()
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "panel_id", _required_text(self.panel_id, "panel.panel_id"))
-        object.__setattr__(self, "domain_id", _required_text(self.domain_id, "panel.domain_id"))
-        if not isinstance(self.blocks, tuple) or not self.blocks:
-            raise ContractValidationError("panel.blocks must contain at least one block.")
-        if not all(isinstance(block, PanelBlock) for block in self.blocks):
-            raise ContractValidationError("panel.blocks must contain PanelBlock values.")
-        if not isinstance(self.anchors, tuple) or not all(isinstance(anchor, AnchorBinding) for anchor in self.anchors):
-            raise ContractValidationError("panel.anchors must contain AnchorBinding values.")
-        anchor_ids = [anchor.anchor_id for anchor in self.anchors]
-        if len(anchor_ids) != len(set(anchor_ids)):
-            raise ContractValidationError("panel.anchors contains duplicate anchor ids.")
-
-    @property
-    def anchor_map(self) -> dict[str, AnchorBinding]:
-        return {anchor.anchor_id: anchor for anchor in self.anchors}
-
-    @property
-    def block_map(self) -> dict[str, PanelBlock]:
-        return {block.id: block for block in self.blocks}
-
-    def with_block_visibility(self, *, block_ids: set[str], visibility: str) -> "PanelIR":
-        """Return this panel with only selected blocks changing visibility.
-
-        The panel, block, anchor and target identities remain stable: reveal
-        replaces the placeholder in place rather than creating another panel.
-        """
-
-        if visibility not in _VISIBILITY_STATES:
-            raise ContractValidationError("panel visibility must be 'visible' or 'hidden'.")
-        unknown_ids = block_ids.difference(self.block_map)
-        if unknown_ids:
-            raise ContractValidationError("panel update references an unknown block.")
-        return PanelIR(
-            panel_id=self.panel_id,
-            domain_id=self.domain_id,
-            blocks=tuple(
-                replace(block, visibility=visibility) if block.id in block_ids else block
-                for block in self.blocks
-            ),
-            anchors=self.anchors,
-        )
-
-
-@dataclass(frozen=True, slots=True)
 class ActivePanelState:
-    """Per-session active surface with separated structure and runtime state.
+    """Per-session active surface persisted as exactly one SurfaceDocument."""
 
-    ``panel_ir=...`` remains accepted while callers migrate.  It is converted
-    immediately, so the persisted source of truth is still structure + state.
-    """
-
-    structure: SurfaceStructure
-    state: SurfaceState
+    document: SurfaceDocument
     purpose: str
-    revision: int = 1
-
-    def __init__(
-        self,
-        *,
-        structure: SurfaceStructure | None = None,
-        state: SurfaceState | None = None,
-        panel_ir: PanelIR | None = None,
-        purpose: str | None = None,
-        revision: int = 1,
-    ) -> None:
-        if panel_ir is not None:
-            if structure is not None or state is not None:
-                raise ContractValidationError("active panel accepts either panel_ir or structure/state, not both.")
-            structure = SurfaceStructure.from_panel_ir(panel_ir)
-            state = SurfaceState.from_panel_ir(panel_ir)
-        if not isinstance(structure, SurfaceStructure) or not isinstance(state, SurfaceState):
-            raise ContractValidationError("active panel requires SurfaceStructure and SurfaceState.")
-        purpose = _required_text(purpose, "active panel purpose")
-        materialize_panel_ir(structure=structure, state=state)
-        if isinstance(revision, bool) or not isinstance(revision, int) or revision < 1:
-            raise ContractValidationError("active panel revision must be a positive integer.")
-        object.__setattr__(self, "structure", structure)
-        object.__setattr__(self, "state", state)
-        object.__setattr__(self, "purpose", purpose)
-        object.__setattr__(self, "revision", revision)
-
-    @property
-    def panel_ir(self) -> PanelIR:
-        """Compatibility view for current renderer and presentation callers."""
-
-        return materialize_panel_ir(structure=self.structure, state=self.state)
 
     def __post_init__(self) -> None:
-        if isinstance(self.revision, bool) or not isinstance(self.revision, int) or self.revision < 1:
-            raise ContractValidationError("active panel revision must be a positive integer.")
+        if not isinstance(self.document, SurfaceDocument):
+            raise ContractValidationError("active panel requires a SurfaceDocument.")
+        object.__setattr__(self, "purpose", _required_text(self.purpose, "active panel purpose"))
 
-    def replace(self, panel_ir: PanelIR, *, purpose: str | None = None) -> "ActivePanelState":
+    @property
+    def revision(self) -> int:
+        return self.document.revision
+
+    def replace(self, document: SurfaceDocument, *, purpose: str | None = None) -> "ActivePanelState":
         """Replace the surface while retaining purpose unless a new route supplies one."""
 
         return ActivePanelState(
-            panel_ir=panel_ir,
+            document=document,
             purpose=self.purpose if purpose is None else purpose,
-            revision=self.revision + 1,
-        )
-
-    def replace_state(self, state: SurfaceState) -> "ActivePanelState":
-        """Persist a validated runtime-state change without altering structure."""
-
-        return ActivePanelState(
-            structure=self.structure,
-            state=state,
-            purpose=self.purpose,
-            revision=self.revision + 1,
         )
 
 
@@ -997,33 +812,33 @@ class ActiveSurfaceSummary:
 
     @classmethod
     def from_active_panel(cls, active: ActivePanelState) -> "ActiveSurfaceSummary":
-        anchors_by_block: dict[str, list[AnchorBinding]] = {}
-        for anchor in active.structure.anchors:
-            anchors_by_block.setdefault(anchor.block_id, []).append(anchor)
+        anchors_by_component: dict[str, list[AnchorBinding]] = {}
+        for anchor in active.document.anchors:
+            anchors_by_component.setdefault(anchor.component_id, []).append(anchor)
 
         items: list[dict[str, str]] = []
         state_summary: dict[str, JsonValue] = {}
-        for block in active.structure.blocks:
-            anchors = anchors_by_block.get(block.id, [])
+        for component in active.document.components:
+            anchors = anchors_by_component.get(component.id, [])
             if not anchors:
                 continue
-            description = _surface_block_description(block, active.state.state_for(block.id))
+            description = _component_description(component)
             for anchor in anchors:
                 items.append({
                     "anchor_id": anchor.anchor_id,
-                    "widget": block.widget_id,
+                    "widget": component.type,
                     "description": description,
                 })
             primary_anchor = anchors[0].anchor_id
-            _append_nondefault_state(
+            _append_nondefault_component_state(
                 state_summary,
                 anchor_id=primary_anchor,
-                state=active.state.state_for(block.id),
+                state=component.state,
             )
         return cls(
-            surface_id=active.structure.surface_id,
+            surface_id=active.document.surface_id,
             revision=active.revision,
-            domain_id=active.structure.domain_id,
+            domain_id=active.document.domain_id,
             purpose=active.purpose,
             structure_summary=tuple(items),
             state_summary=state_summary,
@@ -1040,45 +855,39 @@ class ActiveSurfaceSummary:
         }
 
 
-def _surface_block_description(block: SurfaceBlock, state: BlockState) -> str:
-    """Describe public visible meaning without exposing rendering implementation."""
+def _component_description(component: ComponentNode) -> str:
+    """Describe document content for the Plan Agent without layout internals."""
 
-    if state.visibility == "hidden":
+    if component.state.get("visibility") == "hidden":
         return "Nội dung đang ẩn"
-    props = block.props
-    if block.widget_id == "text":
+    props = component.props
+    if component.type == "text":
         return f'Nội dung chữ: "{str(props.get("content", ""))[:240]}"'
-    if block.widget_id == "image":
+    if component.type == "image":
         label = props.get("label")
         return str(label)[:240] if isinstance(label, str) and label.strip() else f'Hình ảnh "{props.get("asset_id", "")}"'
-    if block.widget_id == "object_group":
+    if component.type == "object_group":
         return f'Nhóm {props.get("count", 0)} × "{props.get("asset_id", "")}"'
-    if block.widget_id in {"answer", "number_display"}:
+    if component.type in {"answer", "number_display"}:
         return f'Giá trị "{props.get("value", "")}"'
-    if block.widget_id == "choice":
+    if component.type == "choice":
         child_labels = [
             str(child.props.get("label") or child.props.get("content") or child.props.get("asset_id") or "")
-            for child in block.children
+            for child in component.children
         ]
         visible = ", ".join(label for label in child_labels if label)[:240]
         return f"Lựa chọn: {visible}" if visible else "Lựa chọn tương tác"
-    return block.widget_id
+    return component.type
 
 
-def _append_nondefault_state(
-    summary: dict[str, JsonValue], *, anchor_id: str, state: BlockState
+def _append_nondefault_component_state(
+    summary: dict[str, JsonValue], *, anchor_id: str, state: Mapping[str, JsonValue]
 ) -> None:
-    """State absent from a summary means the widget's declared default value."""
+    """Keep non-default document state visible to a later structural planner."""
 
-    if state.visibility != "visible":
-        summary[f"{anchor_id}.visibility"] = state.visibility
-    if state.selected:
-        summary[f"{anchor_id}.selected"] = True
-    if state.flipped:
-        summary[f"{anchor_id}.flipped"] = True
-    if state.position is not None:
-        summary[f"{anchor_id}.position"] = dict(state.position)
-    if state.feedback is not None:
-        summary[f"{anchor_id}.feedback"] = state.feedback
-    if state.progress is not None:
-        summary[f"{anchor_id}.progress"] = state.progress
+    for field_name, value in state.items():
+        if field_name == "visibility" and value == "visible":
+            continue
+        if value is False or value is None:
+            continue
+        summary[f"{anchor_id}.{field_name}"] = value

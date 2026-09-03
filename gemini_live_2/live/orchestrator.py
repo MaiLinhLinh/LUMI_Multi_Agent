@@ -1,8 +1,8 @@
-"""Runtime boundary between Gemini Live routing and PanelIR materialization."""
+"""Runtime boundary between Gemini Live routing and SurfaceDocument mutation."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from gemini_live_2.catalogs.domains import DomainRegistry, ManifestError
@@ -16,7 +16,6 @@ from gemini_live_2.panel import (
     AddBlockOperation,
     ActivePanelState,
     ActiveSurfaceSummary,
-    BlockState,
     ChoiceChild,
     CreateSurfacePlan,
     DataBundle,
@@ -29,13 +28,12 @@ from gemini_live_2.panel import (
     PlanBlock,
     RemoveBlockOperation,
     ReplaceBlockOperation,
+    ReplaceChildrenOperation,
     RouteRequest,
-    SurfaceState,
-    SurfaceStructure,
     UseExistingSurfaceTemplate,
     UpdatePropsOperation,
-    panel_client_payload,
     render_visual_stage_map,
+    surface_document_client_payload,
 )
 from gemini_live_2.plan_agent import PlanAgent, PlanAgentError, PlanAgentRequest
 from gemini_live_2.trace import trace
@@ -60,6 +58,14 @@ class PanelActionResult:
 
 
 @dataclass
+class PanelInteractionResult:
+    """A trusted browser interaction, optionally with a committed state snapshot."""
+
+    interaction: dict[str, Any]
+    panel_update: dict[str, Any] | None = None
+
+
+@dataclass
 class SurfaceDeleteResult:
     """A validated surface close and the response returned to Gemini Live."""
 
@@ -67,7 +73,7 @@ class SurfaceDeleteResult:
 
 
 class LiveSessionOrchestrator:
-    """Create a new PanelIR only when Gemini Live explicitly routes a request."""
+    """Create a new SurfaceDocument only when Gemini Live explicitly routes a request."""
 
     _MAX_PLAN_REPAIR_ATTEMPTS = 2
 
@@ -117,13 +123,17 @@ class LiveSessionOrchestrator:
         state = self._active_panels.get(session_id)
         if state is None or self._domain_registry is None:
             return None
-        resources = self._domain_registry.load(state.panel_ir.domain_id)
+        resources = self._domain_registry.load(state.document.domain_id)
         return {
-            "surface_id": state.panel_ir.panel_id,
+            "surface_id": state.document.surface_id,
             "revision": state.revision,
             "presentation_instruction": resources.presentation_instruction,
-            "visual_stage_map": render_visual_stage_map(state.panel_ir),
-            "visual_effects": _visual_effects(state.panel_ir),
+            "visual_stage_map": render_visual_stage_map(
+                state.document,
+                widget_registry=self._panel_compiler.widget_registry,
+                asset_catalog=resources.assets,
+            ),
+            "visual_effects": _visual_effects(state.document),
         }
 
     async def execute_tool_call_result(
@@ -164,7 +174,6 @@ class LiveSessionOrchestrator:
                         data_bundle=planned.data_bundle,
                         domain_resources=resources,
                     )
-                    panel = state.panel_ir
                     if repair_attempt:
                         trace("PLAN_COMPILE_REPAIR_SUCCEEDED attempt=%s", repair_attempt + 1)
                     break
@@ -194,23 +203,25 @@ class LiveSessionOrchestrator:
                 command=planned.command,
                 domain_resources=resources,
             )
-        payload = panel_client_payload(
-            panel,
+        payload = surface_document_client_payload(
+            state.document,
             asset_urls={
-                asset.id: f"/assets/domains/{panel.domain_id}/{asset.id}"
+                asset.id: f"/assets/domains/{state.document.domain_id}/{asset.id}"
                 for asset in resources.assets.assets
             },
         )
-        # Browser uses this to discard a delayed cue from a replaced panel.
-        payload["revision"] = state.revision
         response = {
             "status": "completed",
-            "domain_id": panel.domain_id,
-            "panel_id": panel.panel_id,
+            "domain_id": state.document.domain_id,
+            "panel_id": state.document.surface_id,
             "revision": state.revision,
             "presentation_instruction": resources.presentation_instruction,
-            "visual_stage_map": render_visual_stage_map(panel),
-            "visual_effects": _visual_effects(panel),
+            "visual_stage_map": render_visual_stage_map(
+                state.document,
+                widget_registry=self._panel_compiler.widget_registry,
+                asset_catalog=resources.assets,
+            ),
+            "visual_effects": _visual_effects(state.document),
         }
         return OrchestratedToolResult(response=response, presentation=RenderedPresentation(panel=payload))
 
@@ -233,16 +244,17 @@ class LiveSessionOrchestrator:
         if self._panel_compiler is None:  # pragma: no cover - guarded by caller.
             raise RuntimeError("panel compiler is required for surface commands")
         if isinstance(command, CreateSurfacePlan):
-            panel = self._panel_compiler.compile(
+            document = self._panel_compiler.compile_surface_document(
                 plan=PresentationPlan(domain_id=route.domain_id, blocks=command.blocks),
                 data_bundle=data_bundle,
                 domain_resources=domain_resources,
             )
             previous = self._active_panels.get(session_id)
+            if previous is not None:
+                document = replace(document, revision=previous.revision + 1)
             return ActivePanelState(
-                panel_ir=panel,
+                document=document,
                 purpose=route.intent,
-                revision=1 if previous is None else previous.revision + 1,
             )
         if isinstance(command, UseExistingSurfaceTemplate):
             try:
@@ -250,16 +262,17 @@ class LiveSessionOrchestrator:
                 plan = LayoutTemplateMaterializer().materialize(template=template, bindings=command.bindings)
             except (TemplateCatalogError, LayoutTemplateError) as exc:
                 raise PanelCompilationError(str(exc), code="invalid_template_bindings") from exc
-            panel = self._panel_compiler.compile(
+            document = self._panel_compiler.compile_surface_document(
                 plan=plan,
                 data_bundle=data_bundle,
                 domain_resources=domain_resources,
             )
             previous = self._active_panels.get(session_id)
+            if previous is not None:
+                document = replace(document, revision=previous.revision + 1)
             return ActivePanelState(
-                panel_ir=panel,
+                document=document,
                 purpose=route.intent,
-                revision=1 if previous is None else previous.revision + 1,
             )
         return self._apply_patch_surface_plan(
             session_id=session_id,
@@ -302,127 +315,129 @@ class LiveSessionOrchestrator:
         active = self._active_panels.get(session_id)
         if active is None:
             raise PanelCompilationError("patch_surface_plan requires an active surface.", code="missing_surface")
-        if command.surface_id != active.structure.surface_id:
+        if command.surface_id != active.document.surface_id:
             raise PanelCompilationError("patch_surface_plan targets a different active surface.", code="stale_surface")
         if command.base_revision != active.revision:
             raise PanelCompilationError("patch_surface_plan.base_revision is stale.", code="stale_revision")
-        if route.domain_id != active.structure.domain_id:
+        if route.domain_id != active.document.domain_id:
             raise PanelCompilationError("patch_surface_plan cannot change the active surface domain.", code="domain_mismatch")
 
-        blocks: list[tuple[str, PlanBlock]] = [
+        planned_blocks: list[tuple[str, PlanBlock]] = [
             (
-                block.id,
+                component.id,
                 PlanBlock(
-                    widget_id=block.widget_id,
-                    grid=block.grid,
-                    props=block.props,
-                    initial_visibility=active.state.state_for(block.id).visibility,
+                    widget_id=component.type,
+                    grid=component.layout,
+                    props=component.props,
+                    initial_visibility=str(component.state["visibility"]),
+                    initial_state=component.state,
                     children=tuple(
-                        ChoiceChild(widget_id=child.widget_id, props=child.props)
-                        for child in block.children
+                        ChoiceChild(widget_id=child.type, props=child.props)
+                        for child in component.children
                     ),
                 ),
             )
-            for block in active.structure.blocks
+            for component in active.document.components
         ]
-        existing_anchors = {anchor.anchor_id: anchor.block_id for anchor in active.structure.anchors}
-        reset_state_ids: set[str] = set()
-        next_id = _next_runtime_block_id(block_id for block_id, _ in blocks)
+        existing_anchors = {anchor.anchor_id: anchor.component_id for anchor in active.document.anchors}
+        next_id = _next_runtime_component_id(component_id for component_id, _ in planned_blocks)
 
         def find_index(anchor_id: str) -> int:
-            block_id = existing_anchors.get(anchor_id)
-            if block_id is None:
+            component_id = existing_anchors.get(anchor_id)
+            if component_id is None:
                 raise PanelCompilationError(
                     f"patch operation references unknown anchor_id '{anchor_id}'.",
                     code="unknown_anchor",
                 )
-            for index, (candidate_id, _) in enumerate(blocks):
-                if candidate_id == block_id:
+            for index, (candidate_id, _) in enumerate(planned_blocks):
+                if candidate_id == component_id:
                     return index
             raise PanelCompilationError(
-                f"patch operation references a block already removed through anchor_id '{anchor_id}'.",
-                code="removed_block",
+                f"patch operation references a component already removed through anchor_id '{anchor_id}'.",
+                code="removed_component",
             )
 
         for operation in command.operations:
             if isinstance(operation, AddBlockOperation):
-                block_id = str(next_id)
+                component_id = str(next_id)
                 next_id += 1
-                blocks.append((block_id, operation.block))
-                reset_state_ids.add(block_id)
+                planned_blocks.append((component_id, operation.block))
                 continue
             if isinstance(operation, RemoveBlockOperation):
-                blocks.pop(find_index(operation.anchor_id))
+                planned_blocks.pop(find_index(operation.anchor_id))
                 continue
             if isinstance(operation, ReplaceBlockOperation):
                 index = find_index(operation.anchor_id)
-                block_id, _ = blocks[index]
-                blocks[index] = (block_id, operation.block)
-                reset_state_ids.add(block_id)
+                component_id, _ = planned_blocks[index]
+                planned_blocks[index] = (component_id, operation.block)
                 continue
             if isinstance(operation, MoveBlockOperation):
                 index = find_index(operation.anchor_id)
-                block_id, block = blocks[index]
-                blocks[index] = (block_id, PlanBlock(
+                component_id, block = planned_blocks[index]
+                planned_blocks[index] = (component_id, PlanBlock(
                     widget_id=block.widget_id,
                     grid=operation.grid,
                     props=block.props,
                     initial_visibility=block.initial_visibility,
+                    initial_state=block.initial_state,
                     children=block.children,
                 ))
                 continue
             if isinstance(operation, UpdatePropsOperation):
                 index = find_index(operation.anchor_id)
-                block_id, block = blocks[index]
-                blocks[index] = (block_id, PlanBlock(
+                component_id, block = planned_blocks[index]
+                planned_blocks[index] = (component_id, PlanBlock(
                     widget_id=block.widget_id,
                     grid=block.grid,
                     props={**block.props, **operation.changes},
                     initial_visibility=block.initial_visibility,
+                    initial_state=block.initial_state,
                     children=block.children,
+                ))
+                continue
+            if isinstance(operation, ReplaceChildrenOperation):
+                index = find_index(operation.anchor_id)
+                component_id, block = planned_blocks[index]
+                planned_blocks[index] = (component_id, PlanBlock(
+                    widget_id=block.widget_id,
+                    grid=block.grid,
+                    props=block.props,
+                    initial_visibility=block.initial_visibility,
+                    initial_state=block.initial_state,
+                    children=operation.children,
                 ))
                 continue
             raise PanelCompilationError("patch_surface_plan contains an unsupported operation.")
 
-        if not blocks:
+        if not planned_blocks:
             raise PanelCompilationError("patch_surface_plan cannot remove every block.", code="empty_surface")
 
-        retained_ids = {block_id for block_id, _ in blocks}
-        anchor_ids_by_block_key = {
-            (anchor.block_id, anchor.anchor_key): anchor.anchor_id
-            for anchor in active.structure.anchors
-            if anchor.block_id in retained_ids
+        retained_ids = {component_id for component_id, _ in planned_blocks}
+        anchor_ids_by_component_key = {
+            (anchor.component_id, anchor.anchor_key): anchor.anchor_id
+            for anchor in active.document.anchors
+            if anchor.component_id in retained_ids
         }
-        panel = self._panel_compiler.compile(
-            plan=PresentationPlan(domain_id=route.domain_id, blocks=tuple(block for _, block in blocks)),
+        document = self._panel_compiler.compile_surface_document(
+            plan=PresentationPlan(domain_id=route.domain_id, blocks=tuple(block for _, block in planned_blocks)),
             data_bundle=data_bundle,
             domain_resources=domain_resources,
-            panel_id=active.structure.surface_id,
-            block_ids=tuple(block_id for block_id, _ in blocks),
-            anchor_ids_by_block_key=anchor_ids_by_block_key,
+            surface_id=active.document.surface_id,
+            component_ids=tuple(component_id for component_id, _ in planned_blocks),
+            anchor_ids_by_component_key=anchor_ids_by_component_key,
         )
-        next_block_states = {
-            block.id: (
-                BlockState(visibility=block.visibility)
-                if block.id in reset_state_ids or block.id not in active.state.block_states
-                else active.state.state_for(block.id)
-            )
-            for block in panel.blocks
-        }
         return ActivePanelState(
-            structure=SurfaceStructure.from_panel_ir(panel),
-            state=SurfaceState(next_block_states),
+            document=replace(document, revision=active.revision + 1),
             purpose=route.intent,
-            revision=active.revision + 1,
         )
 
     def present_visual(self, *, session_id: str, anchor_id: str, effect_id: str) -> dict[str, Any]:
-        """Resolve a visual cue exclusively from the currently active PanelIR."""
+        """Resolve a temporary visual cue from the active SurfaceDocument."""
 
         state = self._active_panels.get(session_id)
         if state is None:
             raise ValueError("no active panel")
-        anchor = state.panel_ir.anchor_map.get(anchor_id)
+        anchor = state.document.anchor_map.get(anchor_id)
         if anchor is None:
             raise ValueError("unknown anchor_id for the active panel")
         if effect_id not in anchor.allowed_effect_ids:
@@ -431,8 +446,8 @@ class LiveSessionOrchestrator:
             "anchor_id": anchor.anchor_id,
             "effect_id": effect_id,
             "effect": effect_id,
-            "panel_id": state.panel_ir.panel_id,
-            "panel_revision": state.revision,
+            "panel_id": state.document.surface_id,
+            "panel_revision": state.document.revision,
         }
 
     def resolve_panel_interaction(
@@ -456,28 +471,79 @@ class LiveSessionOrchestrator:
         state = self._active_panels.get(session_id)
         if state is None:
             raise ValueError("no active panel")
-        if surface_id != state.panel_ir.panel_id:
+        document = state.document
+        if surface_id != document.surface_id:
             raise ValueError("surface_id does not match the active panel")
         if isinstance(revision, bool) or not isinstance(revision, int) or revision < 1:
             raise ValueError("revision must be a positive integer")
-        if revision != state.revision:
+        if revision != document.revision:
             raise ValueError("revision does not match the active surface")
-        anchor = state.panel_ir.anchor_map.get(anchor_id)
+        anchor = document.anchor_map.get(anchor_id)
         if anchor is None:
             raise ValueError("unknown anchor_id for the active panel")
-        block = state.panel_ir.block_map.get(anchor.block_id)
-        widget = self._panel_compiler.widget_registry.get(block.widget_id) if block and self._panel_compiler else None
-        if block is None or widget is None or widget.interaction_event != action:
+        component = document.component_map.get(anchor.component_id)
+        widget = self._panel_compiler.widget_registry.get(component.type) if component and self._panel_compiler else None
+        if component is None or widget is None or not widget.allows_interaction(action):
             raise ValueError("action is not allowed for this anchor")
         return {
             "event": "surface_interaction",
-            "surface_id": state.panel_ir.panel_id,
-            "revision": state.revision,
+            "surface_id": document.surface_id,
+            "revision": document.revision,
             "anchor_id": anchor.anchor_id,
-            "widget_id": block.widget_id,
+            "widget_id": component.type,
             "action": action,
-            "content": [child.to_dict() for child in block.children],
+            "content": [child.to_dict() for child in component.children],
         }
+
+    def apply_panel_interaction(
+        self,
+        *,
+        session_id: str,
+        surface_id: str,
+        revision: object,
+        anchor_id: str,
+        action: str,
+    ) -> PanelInteractionResult:
+        """Validate one browser action and apply its declared generic state rule.
+
+        Widgets without a state rule (currently ``choice.select``) preserve
+        SD7 behaviour: Runtime only forwards the trusted event.  A widget such
+        as flashcard declares its own rule in the Registry; the Runtime merely
+        validates and commits the resulting state through the existing atomic
+        ``update_surface_state`` path.
+        """
+
+        interaction = self.resolve_panel_interaction(
+            session_id=session_id,
+            surface_id=surface_id,
+            revision=revision,
+            anchor_id=anchor_id,
+            action=action,
+        )
+        state = self._active_panels.get(session_id)
+        if state is None or self._panel_compiler is None:  # defensive; resolve already checked active state.
+            raise RuntimeError("panel compiler and active panel are required for interactions")
+        document = state.document
+        anchor = document.anchor_map[anchor_id]
+        component = document.component_map[anchor.component_id]
+        widget = self._panel_compiler.widget_registry.get(component.type)
+        changes = widget.interaction_state_changes(action=action, current_state=component.state)
+        if not changes:
+            return PanelInteractionResult(interaction=interaction)
+
+        mutation = self.update_surface_state(
+            session_id=session_id,
+            surface_id=document.surface_id,
+            base_revision=document.revision,
+            updates=[{"anchor_id": anchor.anchor_id, "changes": changes}],
+        )
+        interaction = {
+            **interaction,
+            "revision": mutation.response["revision"],
+            "visual_stage_map": mutation.response["visual_stage_map"],
+            "visual_effects": mutation.response["visual_effects"],
+        }
+        return PanelInteractionResult(interaction=interaction, panel_update=mutation.panel_update)
 
     def update_surface_state(
         self,
@@ -499,13 +565,14 @@ class LiveSessionOrchestrator:
         state = self._active_panels.get(session_id)
         if state is None:
             raise ValueError("no active panel")
-        if surface_id != state.panel_ir.panel_id:
+        document = state.document
+        if surface_id != document.surface_id:
             raise ValueError("surface_id does not match the active panel")
-        if base_revision != state.revision:
+        if base_revision != document.revision:
             raise ValueError("base_revision does not match the active panel revision")
-        anchor_map = state.panel_ir.anchor_map
-        block_map = state.panel_ir.block_map
-        block_replacements: dict[str, BlockState] = {}
+        anchor_map = document.anchor_map
+        component_map = document.component_map
+        component_replacements: dict[str, dict[str, Any]] = {}
         updated_anchor_ids: list[str] = []
         for update in updates:
             if not isinstance(update, dict):
@@ -519,41 +586,55 @@ class LiveSessionOrchestrator:
             anchor = anchor_map.get(anchor_id)
             if anchor is None:
                 raise ValueError("unknown anchor_id for the active panel")
-            if anchor.block_id in block_replacements:
-                raise ValueError("updates must not target the same block more than once")
-            block = block_map[anchor.block_id]
+            if anchor.component_id in component_replacements:
+                raise ValueError("updates must not target the same component more than once")
+            component = component_map[anchor.component_id]
             try:
-                widget = self._panel_compiler.widget_registry.get(block.widget_id) if self._panel_compiler else None
+                widget = self._panel_compiler.widget_registry.get(component.type) if self._panel_compiler else None
                 if widget is None:
                     raise RuntimeError("panel compiler is required for state updates")
                 next_values = widget.validate_state_changes(
-                    current_state=state.state.state_for(block.id).to_dict(),
+                    current_state=component.state,
                     changes=changes,
                 )
-                block_replacements[block.id] = BlockState(**next_values)
+                component_replacements[component.id] = next_values
             except ValueError as exc:
                 raise ValueError(str(exc)) from exc
             updated_anchor_ids.append(anchor_id)
         if self._domain_registry is None:
             raise RuntimeError("domain registry is required for panel updates")
-        resources = self._domain_registry.load(state.panel_ir.domain_id)
+        resources = self._domain_registry.load(document.domain_id)
         trace(
             "UPDATE_SURFACE_STATE_MAP_BEFORE:\n%s",
-            render_visual_stage_map(state.panel_ir),
+            render_visual_stage_map(
+                state.document,
+                widget_registry=self._panel_compiler.widget_registry,
+                asset_catalog=resources.assets,
+            ),
         )
 
-        updated_state = state.replace_state(state.state.replace_block_states(block_replacements))
-        updated_panel = updated_state.panel_ir
+        updated_document = replace(
+            document,
+            revision=document.revision + 1,
+            components=tuple(
+                replace(component, state=component_replacements.get(component.id, component.state))
+                for component in document.components
+            ),
+        )
+        updated_state = state.replace(updated_document)
         self._active_panels[session_id] = updated_state
-        payload = panel_client_payload(
-            updated_panel,
+        payload = surface_document_client_payload(
+            updated_state.document,
             asset_urls={
-                asset.id: f"/assets/domains/{updated_panel.domain_id}/{asset.id}"
+                asset.id: f"/assets/domains/{updated_document.domain_id}/{asset.id}"
                 for asset in resources.assets.assets
             },
         )
-        payload["revision"] = updated_state.revision
-        visual_stage_map = render_visual_stage_map(updated_panel)
+        visual_stage_map = render_visual_stage_map(
+            updated_state.document,
+            widget_registry=self._panel_compiler.widget_registry,
+            asset_catalog=resources.assets,
+        )
         trace(
             "UPDATE_SURFACE_STATE_MAP_AFTER:\n%s",
             visual_stage_map,
@@ -561,11 +642,11 @@ class LiveSessionOrchestrator:
         response = {
             "status": "completed",
             "updated_anchor_ids": updated_anchor_ids,
-            "panel_id": updated_panel.panel_id,
-            "surface_id": updated_panel.panel_id,
-            "revision": updated_state.revision,
+            "panel_id": updated_document.surface_id,
+            "surface_id": updated_document.surface_id,
+            "revision": updated_document.revision,
             "visual_stage_map": visual_stage_map,
-            "visual_effects": _visual_effects(updated_panel),
+            "visual_effects": _visual_effects(updated_state.document),
         }
         return PanelActionResult(response=response, panel_update=payload)
 
@@ -582,9 +663,9 @@ class LiveSessionOrchestrator:
         state = self._active_panels.get(session_id)
         if state is None:
             raise ValueError("no active panel")
-        if command.surface_id != state.panel_ir.panel_id:
+        if command.surface_id != state.document.surface_id:
             raise ValueError("surface_id does not match the active panel")
-        if command.base_revision != state.revision:
+        if command.base_revision != state.document.revision:
             raise ValueError("base_revision does not match the active panel revision")
 
         del self._active_panels[session_id]
@@ -617,8 +698,8 @@ def _visual_effects(panel: Any) -> list[dict[str, str]]:
     ]
 
 
-def _next_runtime_block_id(block_ids: Any) -> int:
-    """Allocate the next opaque numeric block ID without exposing it to agents."""
+def _next_runtime_component_id(component_ids: Any) -> int:
+    """Allocate the next opaque numeric component ID without exposing it to agents."""
 
-    numeric_ids = [int(item) for item in block_ids if isinstance(item, str) and item.isdigit()]
+    numeric_ids = [int(item) for item in component_ids if isinstance(item, str) and item.isdigit()]
     return max(numeric_ids, default=0) + 1

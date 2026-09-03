@@ -33,6 +33,7 @@ from gemini_live_2.panel.contracts import (
 )
 from gemini_live_2.settings import Settings
 from gemini_live_2.widgets import WidgetPropsError, WidgetRegistry
+from .prompts import SurfacePlanPromptBuilder
 
 
 logger = logging.getLogger("lumi.plan_agent")
@@ -41,157 +42,6 @@ _CALL_CAPABILITY_NAME = "call_capability"
 _DESCRIBE_WIDGETS_NAME = "describe_widgets"
 _DESCRIBE_TEMPLATE_NAME = "describe_template"
 
-
-_SURFACE_LIFECYCLE_INSTRUCTION = """
-Bạn là Plan Agent của Lumi. Hãy lập kế hoạch surface trực quan từ intent,
-recent_history, domain, asset catalog, template catalog, widget index, verified_data
-và canvas 16 cột × 10 hàng mà backend cung cấp. Không tạo HTML, CSS, DOM, block ID,
-anchor ID hoặc dữ kiện/asset không có trong input.
-
-Trước hết, phân tích intent và recent_history thành hoạt động, dữ liệu, trạng thái
-khởi tạo và các thành phần trực quan thật sự cần có. Nếu verified_data chưa đủ, gọi
-call_capability thuộc capabilities được cấp quyền; có thể gọi nhiều lần và phải đọc
-lại verified_data sau mỗi response.
-
-Sau đó so sánh các yêu cầu này với Template Index. Nếu có template có vẻ đáp ứng đủ,
-gọi describe_template(template_id) để đọc khung và binding thật. Chỉ dùng template
-nếu sau khi describe nó đáp ứng ĐỦ widget, vùng, bố cục, trạng thái khởi tạo và dữ
-liệu cần cho intent; template chỉ gần giống không đủ. Mỗi block mới phải nằm trọn
-canvas và không chồng lấn block khác.
-
-
-Nếu compiler_feedback có mặt, plan trước đã bị Runtime từ chối. Hãy sửa đúng lỗi đã
-nêu; không lặp lại plan cũ.
-
-Đầu ra cuối cùng chỉ là đúng một JSON object có action, theo MỘT trong ba dạng:
-
-1. Dùng nguyên một template đã describe, chỉ điền dữ liệu biến đổi:
-{"action":"use_existing_surface_template","template_id":"tm1","bindings":{"$block_1_content":"..."}}
-
-2. Tạo một surface mới hoàn toàn, đồng thời mô tả ngắn khung để Runtime lưu tái sử dụng:
-{"action":"create_surface_plan","template_description":"...","surface":{"blocks":[...]}}
-
-3. Chỉnh cấu trúc surface đang mở:
-{"action":"patch_surface_plan","surface_id":"...","base_revision":1,"operations":[...]}
-
-Không được trả decision, use_existing_plan, create_plan hay domain_id ở output cuối.
-
-Khi không có active_surface_summary, chỉ được tạo surface mới: dùng
-use_existing_surface_template hoặc create_surface_plan; không được patch.
-Khi có active_surface_summary, trước hết so sánh intent với purpose và các vùng
-đang có. Chỉ dùng patch khi phần lớn surface hiện tại vẫn phù hợp và thay đổi cần
-thiết thực sự là thêm, bớt, đổi props hoặc đổi vị trí một vài block. Nếu hoạt động,
-nội dung chính hoặc bố cục cốt lõi thay đổi, tạo surface mới thay vì patch.
-
-Patch dùng đúng surface_id và revision trong active_surface_summary. Mỗi operation
-chỉ là một trong: add_block, remove_block, replace_block, move_block, update_props.
-Các operation nhắm block đang có bằng anchor_id từ active_surface_summary. Với
-update_props, chỉ trả changes cần đổi; Runtime tự gộp chúng vào props cũ.
-
-Template catalog là kho khung bố cục tái sử dụng. Sau khi describe_template, nếu
-template đó đáp ứng đủ, trả use_existing_surface_template với đúng template_id và
-CHỈ các binding biến đổi của lượt này. Không lặp lại blocks, grid, widget hay props
-cấu trúc của template. Dùng đúng binding key backend trả về; gửi mọi binding required,
-có thể bỏ binding optional không cần hiển thị. Nếu template thiếu bất kỳ vùng, widget
-hoặc bố cục thiết yếu nào, tạo surface mới thay vì ép dùng template gần giống.
-
-QUY TẮC BẮT BUỘC:
-Chỉ chọn template có sẵn khi nó đáp ứng đầy đủ:
-- loại hoạt động;
-- các đối tượng/nội dung trọng tâm;
-- số lượng hoặc quan hệ cần minh hoạ;
-- bố cục và trạng thái tương tác cần thiết.
-Nếu thiếu một trong các phần trên, tạo surface plan mới.
-
-Khi tạo surface mới, bắt buộc gọi describe_widgets cho MỌI widget_id sẽ xuất hiện
-trong block mới, kể cả widget con trong children. Widget index chỉ là danh mục ngắn;
-không tự đoán props chi tiết. Không cần describe_widgets cho widget đã nằm trong
-template vừa describe. Với patch, chỉ bắt buộc describe_widgets cho widget mới xuất
-hiện trong add_block hoặc replace_block; update_props/move/remove trên vùng cũ không
-cần gọi lại.
-
-template_description của create phải mô tả KHUNG tái sử dụng, không mô tả asset hay
-nội dung riêng của lượt hiện tại. Runtime chỉ lưu template sau khi Compiler thành công.
-
-Ví dụ tạo mới sau khi đã describe_widgets(["text", "image"]):
-{"action":"create_surface_plan","template_description":"Một ảnh lớn ở giữa, có tiêu đề phía trên.","surface":{"blocks":[{"widget_id":"text","grid":{"col":1,"row":1,"col_span":16,"row_span":1},"props":{"content":"Cùng xem bạn Chó nhé!","role":"title"}},{"widget_id":"image","grid":{"col":4,"row":3,"col_span":9,"row_span":6},"props":{"asset_id":"dog","label":"Chó"}}]}}
-
-Ví dụ dùng template sau khi đã gọi describe_template("tm1") và template đó có đúng
-tiêu đề + hai ảnh cạnh nhau cần cho intent. Nếu Template Index thực tế có template
-`two_subject_comparison` đúng khung đó, kết quả chỉ điền binding, không lặp layout:
-{"action":"use_existing_surface_template","template_id":"two_subject_comparison","bindings":{"$block_1_content":"Cùng quan sát hai bạn mèo nhé!","$block_2_asset_id":"cat","$block_3_asset_id":"cat"}}
-
-Ví dụ patch một surface đang mở, khi active_surface_summary cho biết anchor "b"
-là ảnh mèo và revision là 3:
-{"action":"patch_surface_plan","surface_id":"s12","base_revision":3,"operations":[{"op":"update_props","anchor_id":"b","changes":{"asset_id":"dog","label":"Chó"}}]}
-
-QUY TẮC BÀI TẬP CÓ ĐÁP ÁN ẨN
-
-`initial_visibility: "hidden"` chỉ quyết định trạng thái hiển thị ban đầu của block.
-Nó không thay đổi dữ liệu thật trong `props`.
-
-Với widget `answer` hoặc `number_display` dùng để công bố kết quả:
-- `props.value` bắt buộc là đáp án thật, chính xác của hoạt động.
-- Tuyệt đối không đặt `props.value` là `"?"`, `"…"`, `"ẩn"` hoặc placeholder khác.
-- Khi block đang hidden, frontend tự hiển thị dấu `?` và backend không gửi giá trị thật
-  xuống browser. Khi Gemini Live gọi update_surface_state để đổi visibility thành
-  visible, frontend mới nhận và hiển thị `props.value` thật.
-- Vì vậy, nếu bài là `2 + 3`, block đáp án phải chứa `props: {"value":"5"}`
-  ngay từ lúc tạo surface, dù `initial_visibility` là `"hidden"`.
-
-Với phép tính được trình bày theo hàng ngang, các toán hạng, ký hiệu phép tính,
-dấu bằng và block đáp án phải cùng một hàng grid. Không đặt đáp án xuống hàng bên
-dưới dấu bằng, trừ khi intent yêu cầu rõ một bố cục dọc.
-
-VÍ DỤ — PHÉP CỘNG NGANG, ĐÁP ÁN BAN ĐẦU ẨN
-
-Intent: “Tạo bài tập phép cộng 2 + 3 cho trẻ.”
-
-Mục tiêu: trẻ quan sát hai số, trả lời kết quả; số kết quả chỉ xuất hiện khi
-Gemini Live quyết định công bố.
-
-Sau khi đã có widget contract phù hợp, trả final JSON như sau:
-
-{
-  "action": "create_surface_plan",
-  "template_description": "Phép tính ngang gồm hai số, dấu cộng, dấu bằng và đáp án ở cuối hàng.",
-  "surface": {
-    "blocks": [
-      {
-        "widget_id": "text",
-        "grid": { "col": 1, "row": 1, "col_span": 16, "row_span": 1 },
-        "props": { "content": "Cùng làm phép cộng nhé!", "role": "title" }
-      },
-      {
-        "widget_id": "number_display",
-        "grid": { "col": 3, "row": 3, "col_span": 2, "row_span": 2 },
-        "props": { "value": "2" }
-      },
-      {
-        "widget_id": "text",
-        "grid": { "col": 6, "row": 3, "col_span": 2, "row_span": 2 },
-        "props": { "content": "+", "role": "label" }
-      },
-      {
-        "widget_id": "number_display",
-        "grid": { "col": 9, "row": 3, "col_span": 2, "row_span": 2 },
-        "props": { "value": "3" }
-      },
-      {
-        "widget_id": "text",
-        "grid": { "col": 12, "row": 3, "col_span": 2, "row_span": 2 },
-        "props": { "content": "=", "role": "label" }
-      },
-      {
-        "widget_id": "answer",
-        "initial_visibility": "hidden",
-        "grid": { "col": 15, "row": 3, "col_span": 2, "row_span": 2 },
-        "props": { "value": "5" }
-      }
-    ]
-  }
-}
-""".strip()
 
 
 class PlanAgentError(RuntimeError):
@@ -302,7 +152,10 @@ def _native_tools(capabilities: tuple[CapabilityDescriptor, ...]) -> types.Tool:
     declarations = [
         types.FunctionDeclaration(
             name=_DESCRIBE_WIDGETS_NAME,
-            description="Lấy contract props chi tiết cho các widget được phép dùng trong panel mới.",
+            description=(
+                "Lấy contract đầy đủ (props, initial_state, children và interaction) "
+                "cho các widget được phép dùng trong surface mới."
+            ),
             parametersJsonSchema={
                 "type": "object",
                 "additionalProperties": False,
@@ -350,7 +203,10 @@ def _cerebras_tools(capabilities: tuple[CapabilityDescriptor, ...]) -> list[dict
         "type": "function",
         "function": {
             "name": _DESCRIBE_WIDGETS_NAME,
-            "description": "Lấy contract props chi tiết cho các widget được phép dùng trong panel mới.",
+            "description": (
+                "Lấy contract đầy đủ (props, initial_state, children và interaction) "
+                "cho các widget được phép dùng trong surface mới."
+            ),
             "parameters": {
                 "type": "object",
                 "additionalProperties": False,
@@ -440,6 +296,7 @@ class PlanAgent:
         self._client_factory = client_factory
         self._cerebras_client_factory = cerebras_client_factory
         self._max_tool_steps = max_tool_steps
+        self._prompt_builder = SurfacePlanPromptBuilder()
 
     async def plan(self, request: PlanAgentRequest) -> PlanAgentResult:
         """Return the final decision plus the trusted bundle for the Compiler."""
@@ -483,7 +340,7 @@ class PlanAgent:
         ]
         client = self._client_factory(api_key=self._settings.plan_agent_api_key)
         config = types.GenerateContentConfig(
-            system_instruction=_SURFACE_LIFECYCLE_INSTRUCTION,
+            system_instruction=self._prompt_builder.build(domain_instruction=resources.plan_instruction),
             tools=[_native_tools(capabilities)],
             automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
         )
@@ -582,7 +439,10 @@ class PlanAgent:
         if request.validation_feedback is not None:
             payload["compiler_feedback"] = dict(request.validation_feedback)
         messages: list[dict[str, Any]] = [
-            {"role": "system", "content": _SURFACE_LIFECYCLE_INSTRUCTION},
+            {
+                "role": "system",
+                "content": self._prompt_builder.build(domain_instruction=resources.plan_instruction),
+            },
             {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
         ]
         client = self._cerebras_client_factory(
@@ -691,25 +551,26 @@ class PlanAgent:
                 widget = self._widget_registry.get(widget_id)
             except WidgetPropsError as exc:
                 raise PlanAgentError(str(exc)) from exc
+            public_contract = widget.public_contract()
+            state_fields = public_contract.pop("state_fields", {})
             widget_description: dict[str, Any] = {
                 "id": widget.widget_id,
                 "purpose": widget.purpose,
-                "props": widget.public_props_contract(),
-                "initial_visibility": {
-                    "type": "string",
+                "props": public_contract.pop("props"),
+                "initial_state": {
+                    "type": "object",
                     "required": False,
-                    "default": "visible",
-                    "allowed_values": ["visible", "hidden"],
+                    "default": widget.default_state,
+                    "fields": state_fields,
                     "description": (
-                        "Initial display state for this block. The Plan Agent chooses it; "
-                        "Gemini Live decides when a hidden block is revealed."
+                        "State khởi tạo của block. Chỉ dùng field do widget khai báo; "
+                        "Gemini Live quyết định các state update tiếp theo."
                     ),
                 },
             }
-            if widget.allowed_child_widget_ids:
-                widget_description["allowed_child_widget_ids"] = list(widget.allowed_child_widget_ids)
-            if widget.interaction_event is not None:
-                widget_description["interaction_event"] = widget.interaction_event
+            for field_name in ("allowed_child_widget_ids", "interactions"):
+                if field_name in public_contract:
+                    widget_description[field_name] = public_contract[field_name]
             widgets.append(widget_description)
         return {"widgets": widgets}
 

@@ -3,23 +3,20 @@ import unittest
 from gemini_live_2.panel.contracts import (
     ActivePanelState,
     AnchorBinding,
-    BlockState,
     ChoiceChild,
+    ComponentChild,
+    ComponentNode,
     CreateSurfacePlan,
     DeleteSurface,
     PatchSurfacePlan,
-    PanelBlock,
     PlanBlock,
     ContractValidationError,
     DataAlias,
     DataBundle,
     GridRect,
-    PanelIR,
     PresentationPlan,
     RouteRequest,
-    SurfaceState,
-    SurfaceStructure,
-    materialize_panel_ir,
+    SurfaceDocument,
     surface_plan_command_from_dict,
 )
 from gemini_live_2.widgets import build_default_widget_registry
@@ -33,16 +30,85 @@ def sample_plan_block() -> PlanBlock:
     )
 
 
-def sample_panel_block(block_id: str = "1") -> PanelBlock:
-    return PanelBlock(
-        id=block_id,
-        widget_id="image",
-        grid=GridRect(col=1, row=2, col_span=5, row_span=5),
+def sample_component(component_id: str = "1") -> ComponentNode:
+    return ComponentNode(
+        id=component_id,
+        type="image",
+        layout=GridRect(col=1, row=2, col_span=5, row_span=5),
         props={"asset_id": "dog"},
+        state={"visibility": "visible"},
     )
 
 
 class PanelContractsTests(unittest.TestCase):
+    def test_surface_document_serializes_components_state_children_and_document_anchors(self) -> None:
+        document = SurfaceDocument(
+            surface_id="surface-1",
+            domain_id="education",
+            revision=1,
+            components=(
+                ComponentNode(
+                    id="1",
+                    type="choice",
+                    layout=GridRect(col=1, row=1, col_span=4, row_span=4),
+                    props={"choice_id": "cat"},
+                    state={"visibility": "visible", "selected": False},
+                    children=(
+                        ComponentChild(type="image", props={"asset_id": "cat"}),
+                        ComponentChild(type="text", props={"content": "Mèo", "role": "label"}),
+                    ),
+                ),
+            ),
+            anchors=(AnchorBinding("a", "1", "choice", ("highlight", "circle")),),
+        )
+
+        payload = document.to_dict()
+        self.assertEqual(payload["components"][0]["type"], "choice")
+        self.assertEqual(payload["components"][0]["state"], {"visibility": "visible", "selected": False})
+        self.assertEqual(payload["components"][0]["children"][0]["type"], "image")
+        self.assertEqual(payload["anchors"][0]["component_id"], "1")
+        self.assertEqual(document.component_map["1"].type, "choice")
+        self.assertEqual(document.anchor_map["a"].component_id, "1")
+
+    def test_component_node_requires_layout_and_visibility_state(self) -> None:
+        with self.assertRaisesRegex(ContractValidationError, "component.layout"):
+            ComponentNode(
+                id="1", type="image", layout=None, state={"visibility": "visible"}  # type: ignore[arg-type]
+            )
+        with self.assertRaisesRegex(ContractValidationError, "state.visibility"):
+            ComponentNode(id="1", type="image", layout=GridRect(1, 1, 1, 1), state={})
+        with self.assertRaisesRegex(ContractValidationError, "state.visibility"):
+            ComponentNode(
+                id="1", type="image", layout=GridRect(1, 1, 1, 1), state={"visibility": "pending"}
+            )
+
+    def test_surface_document_rejects_duplicate_component_ids_and_unknown_anchor_reference(self) -> None:
+        with self.assertRaisesRegex(ContractValidationError, "duplicate component ids"):
+            SurfaceDocument(
+                surface_id="surface-1",
+                domain_id="education",
+                revision=1,
+                components=(sample_component("1"), sample_component("1")),
+            )
+        with self.assertRaisesRegex(ContractValidationError, "unknown component"):
+            SurfaceDocument(
+                surface_id="surface-1",
+                domain_id="education",
+                revision=1,
+                components=(sample_component("1"),),
+                anchors=(AnchorBinding("a", "missing", "image", ("highlight",)),),
+            )
+
+    def test_surface_document_requires_positive_revision(self) -> None:
+        for revision in (0, -1, False):
+            with self.subTest(revision=revision), self.assertRaisesRegex(ContractValidationError, "revision"):
+                SurfaceDocument(
+                    surface_id="surface-1",
+                    domain_id="education",
+                    revision=revision,  # type: ignore[arg-type]
+                    components=(sample_component(),),
+                )
+
     def test_route_request_normalizes_and_serializes(self) -> None:
         request = RouteRequest.from_dict({"domain_id": " education ", "intent": " Cho be xem cho "})
         self.assertEqual(request.to_dict(), {"domain_id": "education", "intent": "Cho be xem cho"})
@@ -60,6 +126,22 @@ class PanelContractsTests(unittest.TestCase):
                 widget_id="image",
                 grid=GridRect(col=1, row=1, col_span=1, row_span=1),
                 initial_visibility="pending",
+            )
+
+    def test_plan_block_initial_state_is_optional_and_visibility_is_compatible(self) -> None:
+        restored = PlanBlock.from_dict({
+            "widget_id": "image",
+            "grid": {"col": 1, "row": 1, "col_span": 1, "row_span": 1},
+            "initial_state": {"visibility": "hidden"},
+        })
+        self.assertEqual(restored.initial_visibility, "hidden")
+        self.assertEqual(restored.initial_state, {"visibility": "hidden"})
+        with self.assertRaisesRegex(ContractValidationError, "must match"):
+            PlanBlock(
+                widget_id="image",
+                grid=GridRect(col=1, row=1, col_span=1, row_span=1),
+                initial_visibility="hidden",
+                initial_state={"visibility": "visible"},
             )
 
     def test_choice_children_serialize_without_an_inner_grid(self) -> None:
@@ -82,72 +164,28 @@ class PanelContractsTests(unittest.TestCase):
         bundle = DataBundle(domain_id="education", data={"subjects": [{"name": "Cho"}]}, aliases=(alias,))
         self.assertEqual(bundle.alias_catalog, (alias,))
 
-    def test_active_panel_replacement_advances_revision(self) -> None:
-        panel = PanelIR(
-            panel_id="p1",
-            domain_id="education",
-            blocks=(sample_panel_block(),),
-            anchors=(AnchorBinding("a", "1", "image", ("highlight",)),),
+    def test_active_panel_replacement_keeps_surface_document_as_the_only_state(self) -> None:
+        state = ActivePanelState(
+            document=SurfaceDocument(
+                surface_id="p1",
+                domain_id="education",
+                revision=1,
+                components=(sample_component(),),
+                anchors=(AnchorBinding("a", "1", "image", ("highlight",)),),
+            ),
+            purpose="So sánh hai con vật",
         )
-        state = ActivePanelState(panel_ir=panel, purpose="So sánh hai con vật")
         updated = state.replace(
-            PanelIR(panel_id="p2", domain_id="education", blocks=(sample_panel_block("1"),))
+            SurfaceDocument(
+                surface_id="p2",
+                domain_id="education",
+                revision=2,
+                components=(sample_component("2"),),
+            )
         )
         self.assertEqual((state.revision, updated.revision), (1, 2))
-        self.assertEqual(updated.panel_ir.panel_id, "p2")
-
-    def test_panel_ir_visibility_update_preserves_ids_and_anchors(self) -> None:
-        panel = PanelIR(
-            panel_id="p1",
-            domain_id="education",
-            blocks=(
-                PanelBlock(
-                    id="1", widget_id="image", grid=GridRect(1, 1, 2, 2),
-                    props={"asset_id": "dog"}, visibility="hidden",
-                ),
-            ),
-            anchors=(AnchorBinding("a", "1", "image", ("highlight",)),),
-        )
-        updated = panel.with_block_visibility(block_ids={"1"}, visibility="visible")
-        self.assertEqual(updated.panel_id, panel.panel_id)
-        self.assertEqual(updated.anchors, panel.anchors)
-        self.assertEqual(updated.blocks[0].id, "1")
-        self.assertEqual(updated.blocks[0].visibility, "visible")
-
-    def test_structure_and_state_materialize_the_existing_panel_ir_contract(self) -> None:
-        panel = PanelIR(
-            panel_id="p1",
-            domain_id="education",
-            blocks=(
-                PanelBlock(
-                    id="1", widget_id="image", grid=GridRect(1, 1, 2, 2),
-                    props={"asset_id": "dog"}, visibility="hidden",
-                ),
-            ),
-            anchors=(AnchorBinding("a", "1", "image", ("highlight",)),),
-        )
-        structure = SurfaceStructure.from_panel_ir(panel)
-        state = SurfaceState({"1": BlockState(visibility="visible", selected=True)})
-
-        materialized = materialize_panel_ir(structure=structure, state=state)
-
-        self.assertEqual(materialized.blocks[0].visibility, "visible")
-        self.assertEqual(materialized.blocks[0].props, {"asset_id": "dog"})
-        self.assertEqual(materialized.anchors, panel.anchors)
-        self.assertEqual(state.to_dict()["1"]["selected"], True)
-        self.assertEqual(structure.to_dict()["surface_id"], "p1")
-
-    def test_active_panel_converts_legacy_panel_ir_to_separated_structure_and_state(self) -> None:
-        panel = PanelIR(
-            panel_id="p1",
-            domain_id="education",
-            blocks=(sample_panel_block(),),
-        )
-        active = ActivePanelState(panel_ir=panel, purpose="Hiển thị hình chó")
-
-        self.assertEqual(active.structure.surface_id, "p1")
-        self.assertEqual(active.state.state_for("1").visibility, "visible")
-        self.assertEqual(active.panel_ir, panel)
+        self.assertEqual(updated.document.surface_id, "p2")
+        self.assertEqual(updated.document.components[0].id, "2")
 
     def test_grid_requires_positive_integers(self) -> None:
         with self.assertRaisesRegex(ContractValidationError, "positive"):
@@ -157,14 +195,14 @@ class PanelContractsTests(unittest.TestCase):
         image = build_default_widget_registry().get("image")
         self.assertEqual(
             image.validate_state_changes(
-                current_state=BlockState(visibility="hidden").to_dict(),
+                current_state={"visibility": "hidden"},
                 changes={"visibility": "visible"},
             )["visibility"],
             "visible",
         )
         with self.assertRaisesRegex(ValueError, "cannot transition"):
             image.validate_state_changes(
-                current_state=BlockState(visibility="visible").to_dict(),
+                current_state={"visibility": "visible"},
                 changes={"visibility": "visible"},
             )
 
@@ -201,15 +239,23 @@ class PanelContractsTests(unittest.TestCase):
                         "anchor_id": "d",
                         "changes": {"asset_id": "cat", "label": "MÃ¨o"},
                     },
+                    {
+                        "op": "replace_children",
+                        "anchor_id": "e",
+                        "children": [{"widget_id": "image", "props": {"asset_id": "cat"}}],
+                    },
                 ],
             }
         )
 
         self.assertIsInstance(command, PatchSurfacePlan)
         self.assertEqual([item["op"] for item in command.to_dict()["operations"]], [
-            "add_block", "remove_block", "replace_block", "move_block", "update_props",
+            "add_block", "remove_block", "replace_block", "move_block", "update_props", "replace_children",
         ])
-        self.assertEqual(command.to_dict()["operations"][-1]["changes"], {"asset_id": "cat", "label": "MÃ¨o"})
+        self.assertEqual(command.to_dict()["operations"][-2]["changes"], {"asset_id": "cat", "label": "MÃ¨o"})
+        self.assertEqual(command.to_dict()["operations"][-1]["children"], [
+            {"widget_id": "image", "props": {"asset_id": "cat"}},
+        ])
 
     def test_patch_surface_plan_rejects_unknown_operation_and_empty_prop_changes(self) -> None:
         with self.assertRaisesRegex(ContractValidationError, "not supported"):

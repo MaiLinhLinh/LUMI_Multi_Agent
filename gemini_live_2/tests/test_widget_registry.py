@@ -12,14 +12,73 @@ class WidgetRegistryTests(unittest.TestCase):
         self.assertEqual(choice.anchors_for({})[0].key, "choice")
         self.assertEqual(choice.allowed_child_widget_ids, ("image", "text", "number_display", "object_group"))
         self.assertEqual(choice.interaction_event, "select")
+        self.assertTrue(choice.allows_interaction("select"))
+        self.assertFalse(choice.allows_interaction("flip"))
+
+    def test_registry_materializes_only_widget_declared_initial_state(self) -> None:
+        choice = self.registry.get("choice")
+        self.assertEqual(choice.default_state, {"visibility": "visible", "selected": False})
+        self.assertEqual(
+            choice.materialize_initial_state({"visibility": "hidden", "selected": True}),
+            {"visibility": "hidden", "selected": True},
+        )
+        with self.assertRaisesRegex(WidgetPropsError, "initial state fields"):
+            choice.materialize_initial_state({"flipped": True})
+        with self.assertRaisesRegex(WidgetPropsError, "state.selected"):
+            choice.materialize_initial_state({"selected": "yes"})
+
+    def test_registry_validates_container_child_widget_policy(self) -> None:
+        choice = self.registry.get("choice")
+        self.assertEqual(choice.validate_child_widget_ids(("image", "text")), ("image", "text"))
+        with self.assertRaisesRegex(WidgetPropsError, "does not allow child widget ids"):
+            choice.validate_child_widget_ids(("choice",))
+        with self.assertRaisesRegex(WidgetPropsError, "does not allow child widgets"):
+            self.registry.get("image").validate_child_widget_ids(("text",))
+
+    def test_registry_exposes_structured_stage_map_policies(self) -> None:
+        image_policy = self.registry.get("image").stage_map_policy
+        self.assertIsNotNone(image_policy)
+        self.assertEqual(image_policy.asset_source, "props.asset_id")
+        self.assertEqual(image_policy.asset_text_source, "asset.caption")
+        self.assertFalse(image_policy.text_rendered)
+        self.assertEqual(
+            self.registry.get("choice").stage_map_policy.to_public_contract(),
+            {
+                "kind": "container",
+                "text_rendered": True,
+                "quote_text": False,
+                "anchor_key": "choice",
+                "children_layout": "vertical",
+            },
+        )
     def setUp(self) -> None:
         self.registry = build_default_widget_registry()
 
     def test_default_widget_ids(self) -> None:
         self.assertEqual(
             self.registry.widget_ids(),
-            ("text", "image", "object_group", "answer", "number_display", "choice"),
+            ("text", "image", "object_group", "answer", "number_display", "choice", "flashcard"),
         )
+
+    def test_flashcard_declares_two_faces_flip_rule_and_card_anchor(self) -> None:
+        flashcard = self.registry.get("flashcard")
+        props = {
+            "front": {"asset_id": "cat", "text": "Con mèo"},
+            "back": {"word": "CAT", "phonetic": "/kæt/", "meaning": "con mèo"},
+        }
+        self.assertEqual(flashcard.validate(props), props)
+        self.assertEqual(flashcard.default_state, {"visibility": "visible", "flipped": False})
+        self.assertEqual(flashcard.anchors_for(props)[0].key, "card")
+        self.assertTrue(flashcard.allows_interaction("flip"))
+        self.assertEqual(
+            flashcard.interaction_state_changes(
+                action="flip", current_state={"visibility": "visible", "flipped": False},
+            ),
+            {"flipped": True},
+        )
+        self.assertEqual(flashcard.asset_references[0].path, "props.front.asset_id")
+        with self.assertRaisesRegex(WidgetPropsError, "exactly front and back"):
+            flashcard.validate({"front": props["front"]})
 
     def test_widget_index_is_short_and_respects_domain_allow_list(self) -> None:
         self.assertEqual(
@@ -27,6 +86,24 @@ class WidgetRegistryTests(unittest.TestCase):
             (
                 {"id": "text", "purpose": "Hiển thị văn bản tự do như tiêu đề, nhãn hoặc nội dung ngắn."},
                 {"id": "image", "purpose": "Hiển thị một ảnh hoặc minh hoạ từ Asset Catalog."},
+            ),
+        )
+
+    def test_widget_index_marks_discoverable_composite_and_interactive_widgets(self) -> None:
+        self.assertEqual(
+            self.registry.widget_index(("choice", "flashcard")),
+            (
+                {
+                    "id": "choice",
+                    "purpose": "Tạo một lựa chọn có thể chạm/chọn; hiển thị ảnh hoặc nhóm ở trên và nhãn/chữ ở dưới.",
+                    "allows_children": True,
+                    "interaction_actions": ["select"],
+                },
+                {
+                    "id": "flashcard",
+                    "purpose": "Hiển thị thẻ từ vựng có thể lật giữa mặt ảnh và mặt kiến thức.",
+                    "interaction_actions": ["flip"],
+                },
             ),
         )
 

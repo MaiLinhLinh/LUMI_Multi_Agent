@@ -102,6 +102,7 @@ class PlanAgentTests(unittest.TestCase):
             self.assertEqual(len(client.models.calls), 2)
             config = client.models.calls[0]["config"]
             self.assertIn("create_surface_plan", config.system_instruction)
+            self.assertIn("Test plan prompt", config.system_instruction)
             self.assertNotIn('"decision":"create_plan"', config.system_instruction)
             self.assertEqual(
                 [item.name for item in config.tools[0].function_declarations],
@@ -249,7 +250,7 @@ class PlanAgentTests(unittest.TestCase):
                 "asset_catalog.id",
             )
 
-    def test_create_plan_accepts_initial_visibility_after_widget_discovery(self) -> None:
+    def test_create_plan_accepts_initial_state_after_widget_discovery(self) -> None:
         with _domain_root([], allowed_widget_ids=["answer"]) as root:
             client = _Client([
                 _Response(calls=[types.FunctionCall(
@@ -261,7 +262,7 @@ class PlanAgentTests(unittest.TestCase):
                     "surface": {
                         "blocks": [{
                             "widget_id": "answer",
-                            "initial_visibility": "hidden",
+                            "initial_state": {"visibility": "hidden"},
                             "grid": {"col": 5, "row": 4, "col_span": 3, "row_span": 2},
                             "props": {"value": "3"},
                         }],
@@ -273,9 +274,45 @@ class PlanAgentTests(unittest.TestCase):
             result = asyncio.run(agent.plan(PlanAgentRequest(domain_id="education", intent="Tạo đáp án ẩn.")))
 
             self.assertEqual(result.command.blocks[0].initial_visibility, "hidden")
+            self.assertEqual(result.command.blocks[0].initial_state, {"visibility": "hidden"})
             response = client.models.calls[1]["contents"][-1].parts[0].function_response.response
-            self.assertEqual(response["widgets"][0]["initial_visibility"]["default"], "visible")
-            self.assertEqual(response["widgets"][0]["initial_visibility"]["allowed_values"], ["visible", "hidden"])
+            self.assertEqual(response["widgets"][0]["initial_state"]["default"], {"visibility": "visible"})
+            self.assertEqual(
+                response["widgets"][0]["initial_state"]["fields"]["visibility"]["allowed_values"],
+                ["visible", "hidden"],
+            )
+
+    def test_describe_flashcard_returns_state_and_flip_contract(self) -> None:
+        with _domain_root([], allowed_widget_ids=["flashcard"]) as root:
+            client = _Client([
+                _Response(calls=[types.FunctionCall(
+                    id="native-widget-1", name="describe_widgets", args={"widget_ids": ["flashcard"]},
+                )]),
+                _Response(json.dumps({
+                    "action": "create_surface_plan",
+                    "template_description": "Một thẻ từ vựng lớn ở giữa.",
+                    "surface": {"blocks": [{
+                        "widget_id": "flashcard",
+                        "grid": {"col": 4, "row": 2, "col_span": 9, "row_span": 7},
+                        "props": {
+                            "front": {"asset_id": "dog", "text": "Chó"},
+                            "back": {"word": "DOG", "phonetic": "/dɒɡ/", "meaning": "con chó"},
+                        },
+                        "initial_state": {"flipped": False},
+                    }]},
+                }, ensure_ascii=False)),
+            ])
+            agent = _agent(root, DomainGateway(DomainRegistry(root)), client)
+
+            result = asyncio.run(agent.plan(PlanAgentRequest(
+                domain_id="education", intent="Học từ DOG bằng thẻ lật."
+            )))
+
+            self.assertEqual(result.command.blocks[0].initial_state, {"flipped": False})
+            response = client.models.calls[1]["contents"][-1].parts[0].function_response.response["widgets"][0]
+            self.assertEqual(response["initial_state"]["default"], {"visibility": "visible", "flipped": False})
+            self.assertEqual(response["interactions"][0]["action"], "flip")
+            self.assertEqual(response["interactions"][0]["state_rule"], {"flipped": {"op": "toggle"}})
 
     def test_create_plan_with_choice_requires_describing_the_choice_and_its_children(self) -> None:
         with _domain_root([], allowed_widget_ids=["choice", "image", "text"]) as root:
@@ -467,6 +504,7 @@ class _CerebrasProviderTests(unittest.TestCase):
             }])
             self.assertEqual(client.completions.calls[0]["model"], "gpt-oss-120b")
             self.assertEqual(client.completions.calls[0]["tools"][0]["function"]["name"], "describe_widgets")
+            self.assertIn("Test plan prompt", client.completions.calls[0]["messages"][0]["content"])
 
 
 def _create_plan_json() -> str:
@@ -509,6 +547,8 @@ def _domain_root(
             "asset_catalog_path": "assets/catalog.json",
             "presentation_prompt_path": "prompt.py",
             "presentation_prompt_constant": "PRESENTATION_INSTRUCTION",
+            "plan_prompt_path": "plan_prompt.py",
+            "plan_prompt_constant": "PLAN_INSTRUCTION",
             "allowed_widget_ids": allowed_widget_ids or ["text", "image"],
             "tool_capabilities": capabilities,
         }
@@ -537,6 +577,7 @@ def _domain_root(
             }), encoding="utf-8")
         (domain_root / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
         (domain_root / "prompt.py").write_text('PRESENTATION_INSTRUCTION = "Test prompt"\n', encoding="utf-8")
+        (domain_root / "plan_prompt.py").write_text('PLAN_INSTRUCTION = "Test plan prompt"\n', encoding="utf-8")
         (assets / "catalog.json").write_text(json.dumps({
             "domain_id": "education",
             "assets": [{

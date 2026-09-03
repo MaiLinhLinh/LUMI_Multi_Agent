@@ -1,41 +1,48 @@
-"""Render-neutral exports of a trusted PanelIR.
-
-Both functions read the same materialized PanelIR.  The browser receives a
-compact safe payload for its CSS Grid renderer, while Gemini Live receives an
-ASCII stage map.  Neither renderer reinterprets a plan or changes layout.
-"""
+"""Render-neutral exports of trusted SurfaceDocument values."""
 
 from __future__ import annotations
 
 import textwrap
 from typing import Any, Mapping
 
-from .contracts import PanelBlock, PanelIR
+from gemini_live_2.catalogs.assets import AssetCatalog
+from gemini_live_2.widgets import StageMapPolicy, WidgetRegistry
+
+from .contracts import ComponentChild, ComponentNode, SurfaceDocument
 
 
-def panel_client_payload(panel: PanelIR, *, asset_urls: Mapping[str, str]) -> dict[str, Any]:
-    """Return only browser-safe PanelIR data and URLs for assets it actually uses."""
+def surface_document_client_payload(
+    document: SurfaceDocument, *, asset_urls: Mapping[str, str]
+) -> dict[str, Any]:
+    """Return the browser-safe view of the active :class:`SurfaceDocument`.
+
+    The document remains the source of component identity, layout, props,
+    state and anchors. This envelope adds only URLs for assets that a visible
+    component is allowed to render. A hidden component never exposes its
+    props, children or non-visibility state to the browser.
+    """
 
     used_asset_ids = {
         asset_id
-        for block in panel.blocks
-        if block.visibility == "visible"
-        for asset_id in _block_asset_ids(block)
+        for component in document.components
+        if component.state["visibility"] == "visible"
+        for asset_id in _component_asset_ids(component)
     }
     return {
-        "ui_type": "panel_ir",
-        "panel": {
-            "panel_id": panel.panel_id,
-            "domain_id": panel.domain_id,
-            "blocks": [_client_block(block) for block in panel.blocks],
+        "ui_type": "surface_document",
+        "surface": {
+            "surface_id": document.surface_id,
+            "domain_id": document.domain_id,
+            "revision": document.revision,
+            "components": [_client_component(component) for component in document.components],
             "anchors": [
                 {
                     "anchor_id": anchor.anchor_id,
-                    "block_id": anchor.block_id,
+                    "component_id": anchor.component_id,
                     "anchor_key": anchor.anchor_key,
                     "allowed_effect_ids": list(anchor.allowed_effect_ids),
                 }
-                for anchor in panel.anchors
+                for anchor in document.anchors
             ],
         },
         "assets": [
@@ -46,31 +53,56 @@ def panel_client_payload(panel: PanelIR, *, asset_urls: Mapping[str, str]) -> di
     }
 
 
-def _client_block(block: PanelBlock) -> dict[str, Any]:
-    """Redact hidden values from the initial browser payload."""
+def _client_component(component: ComponentNode) -> dict[str, Any]:
+    """Redact a component before it crosses the browser boundary."""
 
-    data = block.to_dict()
-    if block.visibility == "hidden":
-        data["props"] = {}
-        data.pop("children", None)
-    return data
+    if component.state["visibility"] == "hidden":
+        return {
+            "id": component.id,
+            "type": component.type,
+            "layout": component.layout.to_dict(),
+            "props": {},
+            "state": {"visibility": "hidden"},
+        }
+    return component.to_dict()
 
 
-def _block_asset_ids(block: PanelBlock) -> tuple[str, ...]:
-    """Collect only assets visible inside this top-level panel block."""
-
-    values: list[str] = []
-    asset_id = block.props.get("asset_id")
-    if isinstance(asset_id, str):
-        values.append(asset_id)
-    for child in block.children:
-        asset_id = child.props.get("asset_id")
-        if isinstance(asset_id, str):
-            values.append(asset_id)
+def _component_asset_ids(component: ComponentNode) -> tuple[str, ...]:
+    values = _asset_ids_from_value(component.props)
+    for child in component.children:
+        values.extend(_child_asset_ids(child))
     return tuple(values)
 
 
-def render_visual_stage_map(panel: PanelIR) -> str:
+def _child_asset_ids(child: ComponentChild) -> list[str]:
+    values = _asset_ids_from_value(child.props)
+    for nested_child in child.children:
+        values.extend(_child_asset_ids(nested_child))
+    return values
+
+
+def _asset_ids_from_value(value: object) -> list[str]:
+    """Find declared asset references without inferring anything from text."""
+
+    if isinstance(value, Mapping):
+        values: list[str] = []
+        for key, nested_value in value.items():
+            if key == "asset_id" and isinstance(nested_value, str):
+                values.append(nested_value)
+            else:
+                values.extend(_asset_ids_from_value(nested_value))
+        return values
+    if isinstance(value, (list, tuple)):
+        return [asset_id for item in value for asset_id in _asset_ids_from_value(item)]
+    return []
+
+
+def render_visual_stage_map(
+    document: SurfaceDocument,
+    *,
+    widget_registry: WidgetRegistry,
+    asset_catalog: AssetCatalog,
+) -> str:
     """Render a spatial, text-only copy of the user-visible panel.
 
     This is intentionally not a character-art wireframe.  Borders and dense
@@ -79,12 +111,14 @@ def render_visual_stage_map(panel: PanelIR) -> str:
     directly below the thing it refers to.
     """
 
-    anchors_by_block = _anchors_by_block(panel)
+    anchors_by_component = _anchors_by_component(document)
     column_width = 8
     row_height = 4
     canvas = _draw_stage_canvas(
-        panel.blocks,
-        anchors_by_block,
+        document.components,
+        anchors_by_component,
+        widget_registry=widget_registry,
+        asset_catalog=asset_catalog,
         column_width=column_width,
         row_height=row_height,
     )
@@ -99,40 +133,45 @@ def render_visual_stage_map(panel: PanelIR) -> str:
     return "\n".join(rows).rstrip()
 
 
-def _anchors_by_block(panel: PanelIR) -> dict[str, tuple[str, ...]]:
-    bindings: dict[str, list[tuple[str, str]]] = {}
-    for anchor in panel.anchors:
-        bindings.setdefault(anchor.block_id, []).append((anchor.anchor_key, anchor.anchor_id))
-    return {
-        block_id: tuple(anchor_id for _, anchor_id in sorted(items))
-        for block_id, items in bindings.items()
-    }
+def _anchors_by_component(document: SurfaceDocument) -> dict[str, dict[str, str]]:
+    bindings: dict[str, dict[str, str]] = {}
+    for anchor in document.anchors:
+        bindings.setdefault(anchor.component_id, {})[anchor.anchor_key] = anchor.anchor_id
+    return bindings
 
 
 def _draw_stage_canvas(
-    blocks: tuple[PanelBlock, ...],
-    anchors_by_block: Mapping[str, tuple[str, ...]],
+    components: tuple[ComponentNode, ...],
+    anchors_by_component: Mapping[str, Mapping[str, str]],
     *,
     column_width: int,
     row_height: int,
+    widget_registry: WidgetRegistry,
+    asset_catalog: AssetCatalog,
 ) -> list[list[str]]:
     """Place compact visible content by its real GridRect, without borders."""
 
     canvas_width = 16 * column_width
     canvas = [[" "] * canvas_width for _ in range(10 * row_height)]
 
-    for block in sorted(blocks, key=lambda item: (item.grid.row, item.grid.col, item.id)):
-        x = (block.grid.col - 1) * column_width
-        y = (block.grid.row - 1) * row_height
-        width = block.grid.col_span * column_width
-        height = block.grid.row_span * row_height
+    for component in sorted(components, key=lambda item: (item.layout.row, item.layout.col, item.id)):
+        x = (component.layout.col - 1) * column_width
+        y = (component.layout.row - 1) * row_height
+        width = component.layout.col_span * column_width
+        height = component.layout.row_span * row_height
         _place_region(
             canvas,
             x=x,
             y=y,
             width=width,
             height=height,
-            content=_region_lines(block, anchors_by_block.get(block.id, ()), width),
+            content=_component_region_lines(
+                component,
+                anchors_by_component.get(component.id, {}),
+                width,
+                widget_registry=widget_registry,
+                asset_catalog=asset_catalog,
+            ),
         )
     return canvas
 
@@ -152,88 +191,150 @@ def _place_region(
             canvas[row][start_column + offset] = char
 
 
-def _visible_region_content(block: PanelBlock) -> list[str]:
-    """Return only information that the browser currently renders."""
-
-    if block.visibility == "hidden":
-        return ["ĐANG ẨN"]
-    if block.widget_id == "text":
-        return [str(block.props.get("content", ""))]
-    if block.widget_id == "image":
-        return ["ẢNH", str(block.props.get("asset_id", ""))]
-    if block.widget_id == "object_group":
-        return ["NHÓM", f"{block.props.get('count', 0)} × {block.props.get('asset_id', '')}"]
-    if block.widget_id == "answer":
-        return ["KẾT QUẢ", str(block.props.get("value", ""))]
-    if block.widget_id == "number_display":
-        return ["SỐ", str(block.props.get("value", ""))]
-    return [f"[{block.widget_id}]"]
-
-
-def _region_lines(block: PanelBlock, anchor_ids: tuple[str, ...], width: int) -> list[str]:
-    """Describe one region as it appears, with anchors directly underneath."""
-
-    if block.visibility == "hidden":
-        return _wrapped_lines("NỘI DUNG ĐANG ẨN", width) + _anchor_lines(anchor_ids, width)
-
-    if block.widget_id == "object_group":
-        return _object_group_lines(block, anchor_ids, width)
-    if block.widget_id == "choice":
-        return _choice_lines(block, anchor_ids, width)
-
-    lines: list[str] = []
-    for value in _visible_region_content(block):
-        lines.extend(_wrapped_lines(str(value), width))
-    return lines + _anchor_lines(anchor_ids, width)
+def _component_region_lines(
+    component: ComponentNode,
+    anchors_by_key: Mapping[str, str],
+    width: int,
+    *,
+    widget_registry: WidgetRegistry,
+    asset_catalog: AssetCatalog,
+) -> list[str]:
+    if component.state["visibility"] == "hidden":
+        return _wrapped_lines("NỘI DUNG ĐANG ẨN", width) + _anchor_lines(tuple(anchors_by_key.values()), width)
+    root_policy = _stage_map_policy(widget_registry, component.type)
+    policy = root_policy.for_state(component.state)
+    lines = _policy_lines(
+        policy=policy,
+        props=component.props,
+        children=component.children,
+        width=width,
+        widget_registry=widget_registry,
+        asset_catalog=asset_catalog,
+        anchors_by_key=anchors_by_key,
+    )
+    # A state view only selects content.  The compiler-owned anchor belongs to
+    # the component policy itself, so it remains stable across a card flip.
+    anchor_id = anchors_by_key.get(root_policy.anchor_key or "")
+    return lines + _anchor_lines((anchor_id,), width)
 
 
-def _choice_lines(block: PanelBlock, anchor_ids: tuple[str, ...], width: int) -> list[str]:
-    """Serialize the visible child widgets, then anchor the whole choice card."""
-
-    lines: list[str] = []
-    for child in block.children:
-        if child.widget_id == "image":
-            lines.extend(_wrapped_lines(f"ẢNH: {child.props.get('asset_id', '')}", width))
-        elif child.widget_id == "text":
-            lines.extend(_wrapped_lines(str(child.props.get("content", "")), width))
-        elif child.widget_id == "object_group":
-            lines.extend(_wrapped_lines(
-                f"NHÓM: {child.props.get('count', 0)} × {child.props.get('asset_id', '')}", width,
+def _policy_lines(
+    *,
+    policy: StageMapPolicy,
+    props: Mapping[str, Any],
+    children: tuple[ComponentChild, ...],
+    width: int,
+    widget_registry: WidgetRegistry,
+    asset_catalog: AssetCatalog,
+    anchors_by_key: Mapping[str, str],
+) -> list[str]:
+    if policy.children_layout is not None:
+        lines: list[str] = []
+        for child in children:
+            child_policy = _stage_map_policy(widget_registry, child.type)
+            lines.extend(_policy_lines(
+                policy=child_policy,
+                props=child.props,
+                children=child.children,
+                width=width,
+                widget_registry=widget_registry,
+                asset_catalog=asset_catalog,
+                anchors_by_key={},
             ))
-        elif child.widget_id in {"answer", "number_display"}:
-            lines.extend(_wrapped_lines(str(child.props.get("value", "")), width))
+        return lines
+
+    asset_caption = _asset_caption(policy, props, asset_catalog)
+    count = _resolve_path(props, policy.count_source)
+    if asset_caption is not None and isinstance(count, int):
+        return _object_group_policy_lines(policy, asset_caption, count, anchors_by_key, width)
+    lines: list[str] = []
+    if asset_caption is not None:
+        lines.extend(_prefixed_lines(policy.content_label, asset_caption, width))
+
+    text = _resolve_path(props, policy.text_source)
+    if text is not None:
+        rendered_text = str(text)
+        if policy.quote_text:
+            rendered_text = f"“{rendered_text}”"
+        lines.extend(_prefixed_lines(policy.content_label, rendered_text, width))
+    for source in policy.text_sources:
+        value = _resolve_path(props, source.text_source)
+        if value is None:
+            continue
+        rendered_value = str(value)
+        if source.quote_text:
+            rendered_value = f"“{rendered_value}”"
+        lines.extend(_prefixed_lines(source.content_label, rendered_value, width))
+    return lines
+
+
+def _stage_map_policy(widget_registry: WidgetRegistry, component_type: str) -> StageMapPolicy:
+    policy = widget_registry.get(component_type).stage_map_policy
+    if policy is None:
+        raise ValueError(f"widget '{component_type}' does not declare a stage map policy.")
+    return policy
+
+
+def _asset_caption(
+    policy: StageMapPolicy, props: Mapping[str, Any], asset_catalog: AssetCatalog
+) -> str | None:
+    asset_id = _resolve_path(props, policy.asset_source)
+    if not isinstance(asset_id, str):
+        return None
+    asset = asset_catalog.get(asset_id)
+    value = _resolve_path(asset, policy.asset_text_source)
+    return str(value) if value is not None else None
+
+
+def _resolve_path(root: object, path: str | None) -> object | None:
+    if path is None:
+        return None
+    current = root
+    parts = path.split(".")
+    if parts and parts[0] == "props":
+        parts = parts[1:]
+    if parts and parts[0] == "asset":
+        parts = parts[1:]
+    for part in parts:
+        if isinstance(current, Mapping):
+            current = current.get(part)
         else:
-            lines.extend(_wrapped_lines(f"[{child.widget_id}]", width))
-    return lines + _anchor_lines(anchor_ids, width)
+            current = getattr(current, part, None)
+        if current is None:
+            return None
+    return current
 
 
-def _object_group_lines(block: PanelBlock, anchor_ids: tuple[str, ...], width: int) -> list[str]:
-    """Show every object and its own anchor on the line immediately below it."""
+def _prefixed_lines(label: str | None, value: str, width: int) -> list[str]:
+    text = f"{label}: {value}" if label else value
+    return _wrapped_lines(text, width)
 
-    count = max(0, int(block.props.get("count", 0)))
-    asset_id = str(block.props.get("asset_id", ""))
-    group_anchor = anchor_ids[0] if anchor_ids else None
-    item_anchors = list(anchor_ids[1:])
 
-    lines = _wrapped_lines(f"NHÓM: {count} × {asset_id}", width)
+def _object_group_policy_lines(
+    policy: StageMapPolicy,
+    asset_caption: str,
+    count: int,
+    anchors_by_key: Mapping[str, str],
+    width: int,
+) -> list[str]:
+    lines = _prefixed_lines(policy.content_label, f"{count} × {asset_caption}", width)
     if count <= 0:
-        return lines + _anchor_lines((group_anchor,) if group_anchor else (), width)
-
-    item_text = f"ẢNH: {asset_id}"
-    anchor_texts = [f"[anchor: {anchor_id}]" for anchor_id in item_anchors[:count]]
-    while len(anchor_texts) < count:
-        anchor_texts.append("")
+        return lines
+    item_text = f"ẢNH: {asset_caption}"
+    item_anchor_prefix = policy.item_anchor_prefix or ""
+    anchor_texts = [
+        f"[anchor: {anchors_by_key.get(f'{item_anchor_prefix}{index}', '')}]"
+        if anchors_by_key.get(f"{item_anchor_prefix}{index}") else ""
+        for index in range(1, count + 1)
+    ]
     cell_width = max(len(item_text), *(len(item) for item in anchor_texts), 1) + 2
     items_per_row = max(1, width // cell_width)
-
     for start in range(0, count, items_per_row):
         visible_items = min(items_per_row, count - start)
-        item_row = "".join(item_text.center(cell_width) for _ in range(visible_items)).rstrip()
-        anchor_row = "".join(anchor_texts[start + index].center(cell_width) for index in range(visible_items)).rstrip()
-        lines.extend((item_row, anchor_row))
-
-    if group_anchor:
-        lines.append(f"Nhóm này: [anchor: {group_anchor}]")
+        lines.append("".join(item_text.center(cell_width) for _ in range(visible_items)).rstrip())
+        lines.append("".join(
+            anchor_texts[start + index].center(cell_width) for index in range(visible_items)
+        ).rstrip())
     return lines
 
 

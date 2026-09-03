@@ -121,6 +121,8 @@ class DomainGatewayTests(unittest.TestCase):
                     "asset_catalog_path": "assets/catalog.json",
                     "presentation_prompt_path": "prompt.py",
                     "presentation_prompt_constant": "PRESENTATION_INSTRUCTION",
+                    "plan_prompt_path": "plan_prompt.py",
+                    "plan_prompt_constant": "PLAN_INSTRUCTION",
                     "allowed_widget_ids": [],
                     "tool_capabilities": capabilities,
                 }
@@ -129,6 +131,9 @@ class DomainGatewayTests(unittest.TestCase):
         )
         (domain_root / "prompt.py").write_text(
             'PRESENTATION_INSTRUCTION = "Prompt tạm cho test."\n', encoding="utf-8"
+        )
+        (domain_root / "plan_prompt.py").write_text(
+            'PLAN_INSTRUCTION = "Plan prompt tạm cho test."\n', encoding="utf-8"
         )
         (asset_root / "catalog.json").write_text(
             json.dumps(

@@ -1,8 +1,4 @@
-"""Standalone web entrypoint for the PanelIR framework migration.
-
-CP1 intentionally exposes only the browser shell and Gemini Live transport.
-Domain routing, Plan Agent and PanelIR compiler are added in later checkpoints.
-"""
+"""Standalone web entrypoint for the SurfaceDocument application."""
 
 from __future__ import annotations
 
@@ -250,7 +246,7 @@ async def live_socket(websocket: WebSocket) -> None:
                         text_task = asyncio.create_task(conversation.submit_text(query))
                 elif kind == "panel:interaction":
                     try:
-                        interaction = orchestrator.resolve_panel_interaction(
+                        interaction_result = orchestrator.apply_panel_interaction(
                             session_id=session_id,
                             surface_id=str(command.get("surface_id") or ""),
                             revision=command.get("revision"),
@@ -261,6 +257,9 @@ async def live_socket(websocket: WebSocket) -> None:
                         trace("PANEL_INTERACTION_REJECTED reason=%s", exc)
                         await event({"type": "panel:interaction_rejected", "message": str(exc)})
                         continue
+                    interaction = interaction_result.interaction
+                    if interaction_result.panel_update is not None:
+                        await event({"type": "panel_update", "panel": interaction_result.panel_update})
                     await event({
                         "type": "live:debug_trace",
                         "timestamp": _trace_timestamp(),

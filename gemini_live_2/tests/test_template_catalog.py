@@ -42,8 +42,8 @@ class TemplateCatalogTests(unittest.TestCase):
                 "$block_3_label": "Mèo 2",
             },
         )
-        panel = PanelCompiler(build_default_widget_registry()).compile(
-            panel_id="catalogued-panel",
+        document = PanelCompiler(build_default_widget_registry()).compile_surface_document(
+            surface_id="catalogued-surface",
             plan=plan,
             data_bundle=DataBundle(domain_id="education", data={}),
             domain_resources=self.resources,
@@ -51,8 +51,8 @@ class TemplateCatalogTests(unittest.TestCase):
         self.assertEqual(plan.template_id, "two_subject_comparison")
         self.assertEqual(plan.blocks[1].props["asset_id"], "cat")
         self.assertEqual(plan.blocks[2].props["asset_id"], "cat")
-        self.assertEqual([block.id for block in panel.blocks], ["1", "2", "3"])
-        self.assertEqual(set(panel.anchor_map), {"a", "b", "c"})
+        self.assertEqual([component.id for component in document.components], ["1", "2", "3"])
+        self.assertEqual(set(document.anchor_map), {"a", "b", "c"})
 
     def test_unknown_template_id_is_rejected_at_the_trusted_loader_boundary(self) -> None:
         with self.assertRaisesRegex(TemplateCatalogError, "unknown template_id"):

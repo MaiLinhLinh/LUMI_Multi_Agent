@@ -1,4 +1,4 @@
-"""Present-tool contract retained while PanelIR is introduced in later CPs."""
+"""Present-tool contract for cues on the active SurfaceDocument."""
 
 from __future__ import annotations
 

@@ -1,5 +1,5 @@
 import { AnimationController } from "/assets/presentation/animation_controller.js?v=circle-effect-20260822";
-import { renderPanelIR } from "/assets/panel_renderer.js?v=choice-anchor-20260825";
+import { renderSurfaceDocument } from "/assets/panel_renderer.js?v=surface-document-sd8";
 
 const form = document.querySelector("#chatForm");
 const queryInput = document.querySelector("#queryInput");
@@ -138,19 +138,19 @@ function playPcm(bytes) {
 }
 
 function fitPresentationToHost(content) {
-  // PanelIR owns the available panel rectangle directly. Scaling a whole grid
+  // SurfaceDocument owns the available panel rectangle directly. Scaling a whole grid
   // to fit its height makes a 16-column panel look narrow and centred.
   content.style.transform = "none";
   content.style.width = "100%";
   content.style.height = "100%";
 }
 
-function hiddenBlockIdsInCurrentPanel() {
+function hiddenComponentIdsInCurrentSurface() {
   const root = templateHost.shadowRoot;
   if (!root) return new Set();
   return new Set(
-    [...root.querySelectorAll('[data-block-id][data-visibility="hidden"]')]
-      .map((node) => node.dataset.blockId)
+    [...root.querySelectorAll('[data-component-id][data-visibility="hidden"]')]
+      .map((node) => node.dataset.componentId)
       .filter(Boolean),
   );
 }
@@ -184,10 +184,11 @@ function sendPanelInteraction(event) {
 }
 
 function renderPanel(panel, { isUpdate = false } = {}) {
-  const isPanelIR = panel?.ui_type === "panel_ir" && panel?.panel && Array.isArray(panel.panel.blocks);
-  if (!isPanelIR) return;
-  const revealedBlockIds = isUpdate ? hiddenBlockIdsInCurrentPanel() : new Set();
-  const revision = Number(panel?.revision);
+  const isSurfaceDocument = panel?.ui_type === "surface_document" && panel?.surface
+    && Array.isArray(panel.surface.components);
+  if (!isSurfaceDocument) return;
+  const revealedComponentIds = isUpdate ? hiddenComponentIdsInCurrentSurface() : new Set();
+  const revision = Number(panel.surface?.revision);
   activePanelRevision = Number.isInteger(revision) && revision > 0 ? revision : null;
   contentPanel.hidden = false; weatherView.hidden = false; welcome.hidden = true;
   workspace.classList.remove("no-dashboard"); workspace.classList.add("has-dashboard");
@@ -201,15 +202,15 @@ function renderPanel(panel, { isUpdate = false } = {}) {
   root.replaceChildren();
   const widgetStyles = document.createElement("link");
   widgetStyles.rel = "stylesheet";
-  widgetStyles.href = "/assets/widgets/styles.css?v=anchor-id-20260825";
+  widgetStyles.href = "/assets/widgets/styles.css?v=text-fit-20260903";
   const style = document.createElement("style");
   style.textContent = `[data-anchor-id]{transition:outline .18s,box-shadow .18s,transform .18s}.lumi-highlight{outline:3px solid #0ea5e9!important;outline-offset:4px;box-shadow:0 0 0 8px #0ea5e922!important}.lumi-pulse{animation:lumi-pulse 720ms cubic-bezier(.2,.8,.3,1) 2}@keyframes lumi-pulse{0%,100%{transform:scale(1);filter:none}50%{transform:scale(1.035);filter:drop-shadow(0 0 8px rgba(14,165,233,.7))}}`;
   const content = document.createElement("div");
   content.style.cssText = "width:100%; height:100%;";
-  content.append(renderPanelIR(
-    panel.panel,
+  content.append(renderSurfaceDocument(
+    panel.surface,
     Array.isArray(panel.assets) ? panel.assets : [],
-    { revealedBlockIds },
+    { revealedComponentIds },
   ));
   root.append(widgetStyles, style, content);
   // The first layout pass can happen before the shadow stylesheet arrives.
@@ -325,13 +326,13 @@ function handleMessage(event) {
   }
   if (payload.type === "panel") renderPanel(payload.panel);
   if (payload.type === "panel_update") {
-    const revision = Number(payload.panel?.revision);
+    const revision = Number(payload.panel?.surface?.revision);
     if (!Number.isInteger(revision) || revision <= 0 || (
       Number.isInteger(activePanelRevision) && revision <= activePanelRevision
     )) {
       reportVisualDiagnostic("panel_update_ignored", {
         reason: "missing_or_stale_revision",
-        received_revision: payload.panel?.revision,
+        received_revision: payload.panel?.surface?.revision,
         active_revision: activePanelRevision,
       });
     } else {

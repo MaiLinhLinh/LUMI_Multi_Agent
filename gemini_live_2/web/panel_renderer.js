@@ -1,8 +1,8 @@
-import { widgetRendererFor } from "./widgets/registry.js?v=choice-anchor-20260825";
+import { widgetRendererFor } from "./widgets/registry.js?v=text-fit-20260903";
 
-export function renderPanelIR(panel, assets = [], { revealedBlockIds = new Set() } = {}) {
+export function renderSurfaceDocument(surface, assets = [], { revealedComponentIds = new Set() } = {}) {
   const grid = document.createElement("main");
-  grid.className = "panel-ir-grid";
+  grid.className = "surface-document-grid";
   grid.setAttribute("aria-label", "Nội dung trực quan");
 
   const assetUrls = new Map(
@@ -10,51 +10,58 @@ export function renderPanelIR(panel, assets = [], { revealedBlockIds = new Set()
       .filter((asset) => typeof asset?.id === "string" && typeof asset?.url === "string")
       .map((asset) => [asset.id, asset.url]),
   );
-  const anchorsByBlock = new Map();
-  for (const anchor of Array.isArray(panel?.anchors) ? panel.anchors : []) {
+  const anchorsByComponent = new Map();
+  for (const anchor of Array.isArray(surface?.anchors) ? surface.anchors : []) {
     if (
       typeof anchor?.anchor_id !== "string" ||
-      typeof anchor?.block_id !== "string" ||
+      typeof anchor?.component_id !== "string" ||
       typeof anchor?.anchor_key !== "string"
     ) continue;
-    if (!anchorsByBlock.has(anchor.block_id)) anchorsByBlock.set(anchor.block_id, {});
-    anchorsByBlock.get(anchor.block_id)[anchor.anchor_key] = anchor;
+    if (!anchorsByComponent.has(anchor.component_id)) anchorsByComponent.set(anchor.component_id, {});
+    anchorsByComponent.get(anchor.component_id)[anchor.anchor_key] = anchor;
   }
 
-  for (const block of Array.isArray(panel?.blocks) ? panel.blocks : []) {
-    const gridSpec = block?.grid;
-    const renderer = widgetRendererFor(block?.widget_id);
-    if (!renderer || !validGrid(gridSpec) || typeof block?.id !== "string") continue;
+  for (const component of Array.isArray(surface?.components) ? surface.components : []) {
+    const layout = component?.layout;
+    const renderer = widgetRendererFor(component?.type);
+    if (!renderer || !validGrid(layout) || typeof component?.id !== "string") continue;
 
-    const materializedBlock = withAssetUrl(block, assetUrls);
-    const node = renderer(materializedBlock, {
-      anchorsByKey: anchorsByBlock.get(block.id) || {},
-      // A PanelIR panel_id is the Runtime surface identity.  The browser only
-      // uses the surface name at the interaction boundary.
-      surfaceId: panel?.panel_id || "",
-      renderChild: (child) => renderChoiceChild(child, assetUrls),
+    const materializedComponent = withAssetUrl(component, assetUrls);
+    const node = renderer(materializedComponent, {
+      anchorsByKey: anchorsByComponent.get(component.id) || {},
+      surfaceId: surface?.surface_id || "",
+      renderChild: (child) => renderComponentChild(child, assetUrls),
     });
     if (!node) continue;
-    node.dataset.blockId = block.id;
-    node.dataset.visibility = block.visibility === "hidden" ? "hidden" : "visible";
-    if (revealedBlockIds.has(block.id)) node.classList.add("lumi-widget-revealed");
-    node.style.gridColumn = `${gridSpec.col} / span ${gridSpec.col_span}`;
-    node.style.gridRow = `${gridSpec.row} / span ${gridSpec.row_span}`;
+    node.dataset.componentId = component.id;
+    node.dataset.visibility = component.state?.visibility === "hidden" ? "hidden" : "visible";
+    if (revealedComponentIds.has(component.id)) node.classList.add("lumi-widget-revealed");
+    node.style.gridColumn = `${layout.col} / span ${layout.col_span}`;
+    node.style.gridRow = `${layout.row} / span ${layout.row_span}`;
     grid.append(node);
   }
   return grid;
 }
 
-function withAssetUrl(block, assetUrls) {
-  const props = { ...(block?.props || {}) };
-  if (typeof props.asset_id === "string") props.asset_url = assetUrls.get(props.asset_id) || "";
-  return { ...block, props };
+function withAssetUrl(component, assetUrls) {
+  return { ...component, props: withAssetUrls(component?.props || {}, assetUrls) };
 }
 
-function renderChoiceChild(child, assetUrls) {
-  const renderer = widgetRendererFor(child?.widget_id);
+function withAssetUrls(value, assetUrls) {
+  if (Array.isArray(value)) return value.map((item) => withAssetUrls(item, assetUrls));
+  if (!value || typeof value !== "object") return value;
+  const copy = Object.fromEntries(Object.entries(value).map(([key, item]) => [key, withAssetUrls(item, assetUrls)]));
+  if (typeof copy.asset_id === "string") copy.asset_url = assetUrls.get(copy.asset_id) || "";
+  return copy;
+}
+
+function renderComponentChild(child, assetUrls) {
+  const renderer = widgetRendererFor(child?.type);
   if (!renderer) return null;
-  return renderer(withAssetUrl({ ...child, visibility: "visible" }, assetUrls), { anchorsByKey: {} });
+  return renderer(withAssetUrl({ ...child, state: { visibility: "visible" } }, assetUrls), {
+    anchorsByKey: {},
+    renderChild: (nestedChild) => renderComponentChild(nestedChild, assetUrls),
+  });
 }
 
 function validGrid(grid) {

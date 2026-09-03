@@ -6,7 +6,7 @@
       "kind": "image",
       "path": "assets/dog.jpg",
       "mime_type": "image/jpeg",
-      "caption": "Minh họa một chú chó thân thiện dành cho trẻ em.",
+      "caption": "Minh họa một chú chó",
       "tags": ["chó", "dog", "động vật", "giáo dục"]
     },
     {
@@ -14,7 +14,7 @@
       "kind": "image",
       "path": "assets/cat.jpg",
       "mime_type": "image/jpeg",
-      "caption": "Minh họa một chú mèo thân thiện dành cho trẻ em.",
+      "caption": "Minh họa một chú mèo",
       "tags": ["mèo", "cat", "động vật", "giáo dục"]
     },
     {
@@ -22,7 +22,7 @@
       "kind": "image",
       "path": "assets/cachua.jpg",
       "mime_type": "image/jpeg",
-      "caption": "Minh họa một quả cà chua đỏ dùng cho hoạt động học tập của trẻ em.",
+      "caption": "Một quả cà chua đỏ",
       "tags": ["cà chua", "tomato", "rau quả", "thực phẩm", "giáo dục"]
     },
     {
@@ -30,7 +30,7 @@
       "kind": "image",
       "path": "assets/canhcut.jpg",
       "mime_type": "image/jpeg",
-      "caption": "Minh họa một chú chim cánh cụt dùng cho hoạt động học tập của trẻ em.",
+      "caption": "Một chú chim cánh cụt",
       "tags": ["cánh cụt", "chim cánh cụt", "penguin", "động vật", "giáo dục"]
     },
     {
@@ -38,7 +38,7 @@
       "kind": "image",
       "path": "assets/xoai.jpg",
       "mime_type": "image/jpeg",
-      "caption": "Minh họa một quả xoài dùng cho hoạt động học tập của trẻ em.",
+      "caption": "Một quả xoài",
       "tags": ["xoài", "mango", "trái cây", "hoa quả", "giáo dục"]
     },
     {
@@ -46,7 +46,7 @@
       "kind": "image",
       "path": "assets/dua.jpg",
       "mime_type": "image/jpeg",
-      "caption": "Minh họa một quả dừa dùng cho hoạt động học tập của trẻ em.",
+      "caption": "Một quả dừa",
       "tags": ["dừa", "coconut", "trái cây", "hoa quả", "giáo dục"]
     },
     {
@@ -54,7 +54,7 @@
       "kind": "image",
       "path": "assets/gautruc.jpg",
       "mime_type": "image/jpeg",
-      "caption": "Minh họa một chú gấu trúc dùng cho hoạt động học tập của trẻ em.",
+      "caption": "Một chú gấu trúc",
       "tags": ["gấu trúc", "panda", "động vật", "giáo dục"]
     },
     {

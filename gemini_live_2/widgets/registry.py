@@ -101,6 +101,7 @@ class WidgetStateDefinition:
 
     name: str
     value_type: str
+    default_value: Any
     allowed_values: tuple[str, ...] = ()
     transitions: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
 
@@ -120,26 +121,216 @@ class WidgetStateDefinition:
                 _text(target, "widget state transition target") for target in targets
             )
         object.__setattr__(self, "transitions", normalized_transitions)
+        # Validate the default through the same public type/value contract. A
+        # transition is about a later mutation, not initial construction.
+        self.validate_value(self.default_value)
 
-    def validate_change(self, *, current_value: Any, next_value: Any) -> Any:
+    def validate_value(self, value: Any) -> Any:
+        """Validate one state value without evaluating a state transition."""
+
         if self.value_type == "string":
-            if not isinstance(next_value, str):
+            if not isinstance(value, str):
                 raise WidgetPropsError(f"state.{self.name} must be a string.")
-            if self.allowed_values and next_value not in self.allowed_values:
+            if self.allowed_values and value not in self.allowed_values:
                 raise WidgetPropsError(
                     f"state.{self.name} must be one of {list(self.allowed_values)}."
                 )
         elif self.value_type == "boolean":
-            if not isinstance(next_value, bool):
+            if not isinstance(value, bool):
                 raise WidgetPropsError(f"state.{self.name} must be a boolean.")
-        else:  # Future fields must add an explicit validator instead of guessing.
+        else:  # A future widget supplies a supported type in the same registry change.
             raise WidgetPropsError(f"unsupported state type '{self.value_type}'.")
+        return value
+
+    def validate_change(self, *, current_value: Any, next_value: Any) -> Any:
+        self.validate_value(next_value)
         allowed_targets = self.transitions.get(str(current_value))
         if allowed_targets is not None and next_value not in allowed_targets:
             raise WidgetPropsError(
                 f"state.{self.name} cannot transition from '{current_value}' to '{next_value}'."
             )
         return next_value
+
+
+@dataclass(frozen=True, slots=True)
+class WidgetInteractionDefinition:
+    """One browser action the Runtime may accept for a widget type.
+
+    The action is a capability, not an instruction to mutate state. Runtime
+    will apply the widget's transition policy in SD7; it must never trust an
+    arbitrary state value sent by the browser.
+    """
+
+    action: str
+    description: str
+    state_rule: Mapping[str, Mapping[str, str]] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "action", _text(self.action, "widget interaction action"))
+        object.__setattr__(self, "description", _text(self.description, "widget interaction description"))
+        if not isinstance(self.state_rule, Mapping):
+            raise WidgetPropsError("widget interaction state_rule must be an object.")
+        normalized: dict[str, dict[str, str]] = {}
+        for field_name, rule in self.state_rule.items():
+            name = _text(field_name, "widget interaction state_rule field")
+            if not isinstance(rule, Mapping) or set(rule) != {"op"}:
+                raise WidgetPropsError("each interaction state_rule must contain exactly 'op'.")
+            operation = _text(rule.get("op"), "widget interaction state_rule op")
+            if operation not in {"toggle"}:
+                raise WidgetPropsError(f"unsupported interaction state_rule operation '{operation}'.")
+            normalized[name] = {"op": operation}
+        object.__setattr__(self, "state_rule", normalized)
+
+    def state_changes_for(self, current_state: Mapping[str, Any]) -> dict[str, Any]:
+        """Apply this interaction's declarative, widget-owned state rule.
+
+        The Runtime invokes this generic interpreter after it has resolved a
+        trusted component.  It never branches on a widget ID; a future action
+        may add another declared operation here only when a real widget needs
+        it.
+        """
+
+        if not isinstance(current_state, Mapping):
+            raise WidgetPropsError("widget interaction current_state must be an object.")
+        changes: dict[str, Any] = {}
+        for field_name, rule in self.state_rule.items():
+            value = current_state.get(field_name)
+            if rule["op"] == "toggle":
+                if not isinstance(value, bool):
+                    raise WidgetPropsError(
+                        f"state.{field_name} must be a boolean to use interaction operation 'toggle'."
+                    )
+                changes[field_name] = not value
+        return changes
+
+
+@dataclass(frozen=True, slots=True)
+class WidgetAssetReferenceDefinition:
+    """One asset path a widget renders and Compiler must validate."""
+
+    path: str
+    allowed_kinds: tuple[str, ...] = ("image",)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "path", _text(self.path, "widget asset reference path"))
+        kinds = tuple(_text(kind, "widget asset reference allowed kind") for kind in self.allowed_kinds)
+        if not kinds or len(kinds) != len(set(kinds)):
+            raise WidgetPropsError("widget asset reference allowed_kinds must be non-empty and unique.")
+        object.__setattr__(self, "allowed_kinds", kinds)
+
+
+@dataclass(frozen=True, slots=True)
+class StageMapTextSource:
+    """One text value genuinely rendered by a state-dependent map view."""
+
+    content_label: str | None
+    text_source: str
+    quote_text: bool = False
+
+    def __post_init__(self) -> None:
+        if self.content_label is not None:
+            object.__setattr__(self, "content_label", _text(self.content_label, "stage map text content_label"))
+        object.__setattr__(self, "text_source", _text(self.text_source, "stage map text source"))
+        if not isinstance(self.quote_text, bool):
+            raise WidgetPropsError("stage map text quote_text must be a boolean.")
+
+
+@dataclass(frozen=True, slots=True)
+class StageMapView:
+    """A policy view selected solely from one declared component state value."""
+
+    state_field: str
+    state_value: bool
+    policy: "StageMapPolicy"
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "state_field", _text(self.state_field, "stage map view state_field"))
+        if not isinstance(self.state_value, bool):
+            raise WidgetPropsError("stage map view state_value must be a boolean.")
+        if not isinstance(self.policy, StageMapPolicy):
+            raise WidgetPropsError("stage map view policy must be a StageMapPolicy.")
+
+
+@dataclass(frozen=True, slots=True)
+class StageMapPolicy:
+    """Structured, renderer-facing description of visible widget semantics.
+
+    It deliberately names data sources rather than generating prose. SD6's
+    generic stage-map renderer will resolve these paths and use only fields the
+    corresponding browser widget actually renders.
+    """
+
+    kind: str
+    content_label: str | None = None
+    quote_text: bool = False
+    anchor_key: str | None = None
+    text_source: str | None = None
+    asset_source: str | None = None
+    asset_text_source: str | None = None
+    count_source: str | None = None
+    item_anchor_prefix: str | None = None
+    text_rendered: bool = True
+    children_layout: str | None = None
+    text_sources: tuple[StageMapTextSource, ...] = ()
+    views: tuple[StageMapView, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "kind", _text(self.kind, "stage map kind"))
+        for field_name in (
+            "content_label", "anchor_key", "text_source", "asset_source", "asset_text_source",
+            "count_source", "item_anchor_prefix", "children_layout",
+        ):
+            value = getattr(self, field_name)
+            if value is not None:
+                object.__setattr__(self, field_name, _text(value, f"stage map {field_name}"))
+        if not isinstance(self.text_rendered, bool):
+            raise WidgetPropsError("stage map text_rendered must be a boolean.")
+        if not isinstance(self.quote_text, bool):
+            raise WidgetPropsError("stage map quote_text must be a boolean.")
+        if not isinstance(self.text_sources, tuple) or not all(
+            isinstance(item, StageMapTextSource) for item in self.text_sources
+        ):
+            raise WidgetPropsError("stage map text_sources must contain StageMapTextSource values.")
+        if not isinstance(self.views, tuple) or not all(isinstance(item, StageMapView) for item in self.views):
+            raise WidgetPropsError("stage map views must contain StageMapView values.")
+        view_keys = tuple((item.state_field, item.state_value) for item in self.views)
+        if len(view_keys) != len(set(view_keys)):
+            raise WidgetPropsError("stage map views must be unique per state value.")
+
+    def to_public_contract(self) -> dict[str, Any]:
+        contract: dict[str, Any] = {
+            "kind": self.kind,
+            "text_rendered": self.text_rendered,
+            "quote_text": self.quote_text,
+        }
+        for field_name in (
+            "content_label", "anchor_key", "text_source", "asset_source", "asset_text_source",
+            "count_source", "item_anchor_prefix", "children_layout",
+        ):
+            value = getattr(self, field_name)
+            if value is not None:
+                contract[field_name] = value
+        if self.text_sources:
+            contract["text_sources"] = [
+                {
+                    "content_label": item.content_label,
+                    "text_source": item.text_source,
+                    "quote_text": item.quote_text,
+                }
+                for item in self.text_sources
+            ]
+        if self.views:
+            contract["views"] = [
+                {"state_field": item.state_field, "state_value": item.state_value}
+                for item in self.views
+            ]
+        return contract
+
+    def for_state(self, state: Mapping[str, Any]) -> "StageMapPolicy":
+        for view in self.views:
+            if state.get(view.state_field) == view.state_value:
+                return view.policy
+        return self
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,7 +344,9 @@ class WidgetDefinition:
     props: tuple[WidgetPropDefinition, ...]
     state_fields: tuple[WidgetStateDefinition, ...] = ()
     allowed_child_widget_ids: tuple[str, ...] = ()
-    interaction_event: str | None = None
+    interactions: tuple[WidgetInteractionDefinition, ...] = ()
+    stage_map_policy: StageMapPolicy | None = None
+    asset_references: tuple[WidgetAssetReferenceDefinition, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "widget_id", _text(self.widget_id, "widget_id"))
@@ -168,8 +361,22 @@ class WidgetDefinition:
         if len(children) != len(set(children)):
             raise WidgetPropsError("widget child widget_ids must be unique.")
         object.__setattr__(self, "allowed_child_widget_ids", children)
-        if self.interaction_event is not None:
-            object.__setattr__(self, "interaction_event", _text(self.interaction_event, "widget interaction event"))
+        if not isinstance(self.interactions, tuple) or not all(
+            isinstance(item, WidgetInteractionDefinition) for item in self.interactions
+        ):
+            raise WidgetPropsError("widget interactions must contain WidgetInteractionDefinition values.")
+        actions = tuple(item.action for item in self.interactions)
+        if len(actions) != len(set(actions)):
+            raise WidgetPropsError("widget interaction actions must be unique.")
+        if self.stage_map_policy is not None and not isinstance(self.stage_map_policy, StageMapPolicy):
+            raise WidgetPropsError("widget stage_map_policy must be a StageMapPolicy or None.")
+        if not isinstance(self.asset_references, tuple) or not all(
+            isinstance(item, WidgetAssetReferenceDefinition) for item in self.asset_references
+        ):
+            raise WidgetPropsError("widget asset_references must contain WidgetAssetReferenceDefinition values.")
+        reference_paths = tuple(item.path for item in self.asset_references)
+        if len(reference_paths) != len(set(reference_paths)):
+            raise WidgetPropsError("widget asset reference paths must be unique.")
 
     def validate(self, props: Mapping[str, Any]) -> dict[str, Any]:
         if not isinstance(props, Mapping):
@@ -190,6 +397,7 @@ class WidgetDefinition:
             contract["state_fields"] = {
                 state.name: {
                     "type": state.value_type,
+                    "default": state.default_value,
                     "allowed_values": list(state.allowed_values),
                     "transitions": {
                         source: list(targets) for source, targets in state.transitions.items()
@@ -199,9 +407,90 @@ class WidgetDefinition:
             }
         if self.allowed_child_widget_ids:
             contract["allowed_child_widget_ids"] = list(self.allowed_child_widget_ids)
-        if self.interaction_event is not None:
-            contract["interaction_event"] = self.interaction_event
+        if self.interactions:
+            contract["interactions"] = [
+                {
+                    "action": item.action,
+                    "description": item.description,
+                    **({"state_rule": item.state_rule} if item.state_rule else {}),
+                }
+                for item in self.interactions
+            ]
+        if self.stage_map_policy is not None:
+            contract["stage_map_policy"] = self.stage_map_policy.to_public_contract()
+        if self.asset_references:
+            contract["asset_references"] = [
+                {"path": item.path, "allowed_kinds": list(item.allowed_kinds)}
+                for item in self.asset_references
+            ]
         return contract
+
+    @property
+    def default_state(self) -> dict[str, Any]:
+        """The only state a new component receives before an interaction."""
+
+        return {definition.name: definition.default_value for definition in self.state_fields}
+
+    @property
+    def interaction_event(self) -> str | None:
+        """Compatibility view for pre-SD7 callers that support one action."""
+
+        return self.interactions[0].action if len(self.interactions) == 1 else None
+
+    def allows_interaction(self, action: str) -> bool:
+        return any(item.action == action for item in self.interactions)
+
+    def interaction_state_changes(
+        self, *, action: str, current_state: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        for interaction in self.interactions:
+            if interaction.action == action:
+                changes = interaction.state_changes_for(current_state)
+                if not changes:
+                    return {}
+                self.validate_state_changes(current_state=current_state, changes=changes)
+                return changes
+        raise WidgetPropsError(f"{self.widget_id} does not allow interaction action '{action}'.")
+
+    def materialize_initial_state(self, initial_state: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        """Merge a plan's initial state with registry defaults without transitions."""
+
+        if initial_state is None:
+            initial_state = {}
+        if not isinstance(initial_state, Mapping):
+            raise WidgetPropsError("initial state must be an object.")
+        definitions = {field.name: field for field in self.state_fields}
+        unsupported = set(initial_state) - set(definitions)
+        if unsupported:
+            raise WidgetPropsError(
+                f"{self.widget_id} does not allow initial state fields: {sorted(unsupported)}."
+            )
+        state = self.default_state
+        for field_name, value in initial_state.items():
+            state[field_name] = definitions[field_name].validate_value(value)
+        return state
+
+    def validate_child_widget_ids(self, child_widget_ids: tuple[str, ...]) -> tuple[str, ...]:
+        """Validate a parent widget's declared child widget types.
+
+        Child props are validated by the referenced child WidgetDefinition. The
+        compiler will compose both checks in SD3; keeping this policy here
+        prevents containers from accepting arbitrary nested widget types.
+        """
+
+        if not isinstance(child_widget_ids, tuple) or not all(isinstance(item, str) for item in child_widget_ids):
+            raise WidgetPropsError("child widget ids must be a tuple of strings.")
+        normalized = tuple(_text(item, "child widget_id") for item in child_widget_ids)
+        if not normalized:
+            return ()
+        if not self.allowed_child_widget_ids:
+            raise WidgetPropsError(f"{self.widget_id} does not allow child widgets.")
+        unsupported = set(normalized) - set(self.allowed_child_widget_ids)
+        if unsupported:
+            raise WidgetPropsError(
+                f"{self.widget_id} does not allow child widget ids: {sorted(unsupported)}."
+            )
+        return normalized
 
     def validate_state_changes(
         self,
@@ -253,15 +542,21 @@ class WidgetRegistry:
     def widget_index(
         self,
         allowed_widget_ids: tuple[str, ...] | None = None,
-    ) -> tuple[dict[str, str], ...]:
+    ) -> tuple[dict[str, Any], ...]:
         """Return the short discovery catalog safe for the Plan Agent's first turn."""
 
         allowed = set(allowed_widget_ids) if allowed_widget_ids is not None else None
-        return tuple(
-            {"id": definition.widget_id, "purpose": definition.purpose}
-            for definition in self._definitions.values()
-            if allowed is None or definition.widget_id in allowed
-        )
+        index: list[dict[str, Any]] = []
+        for definition in self._definitions.values():
+            if allowed is not None and definition.widget_id not in allowed:
+                continue
+            item: dict[str, Any] = {"id": definition.widget_id, "purpose": definition.purpose}
+            if definition.allowed_child_widget_ids:
+                item["allows_children"] = True
+            if definition.interactions:
+                item["interaction_actions"] = [item.action for item in definition.interactions]
+            index.append(item)
+        return tuple(index)
 
 def _validate_text(props: Mapping[str, Any]) -> dict[str, Any]:
     unknown = set(props) - {"content", "role"}
@@ -325,6 +620,37 @@ def _validate_choice(props: Mapping[str, Any]) -> dict[str, Any]:
     return {}
 
 
+def _validate_flashcard(props: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate exactly the two faces that the browser flashcard renders."""
+
+    if set(props) != {"front", "back"}:
+        raise WidgetPropsError("flashcard.props must contain exactly front and back.")
+    front = props.get("front")
+    back = props.get("back")
+    if not isinstance(front, Mapping) or set(front) != {"asset_id", "text"}:
+        raise WidgetPropsError("flashcard.front must contain exactly asset_id and text.")
+    if not isinstance(back, Mapping) or set(back) != {"word", "phonetic", "meaning"}:
+        raise WidgetPropsError("flashcard.back must contain exactly word, phonetic and meaning.")
+    normalized_front = {
+        "asset_id": _text(front.get("asset_id"), "flashcard.front.asset_id"),
+        "text": _text(front.get("text"), "flashcard.front.text"),
+    }
+    normalized_back = {
+        "word": _text(back.get("word"), "flashcard.back.word"),
+        "phonetic": _text(back.get("phonetic"), "flashcard.back.phonetic"),
+        "meaning": _text(back.get("meaning"), "flashcard.back.meaning"),
+    }
+    for path, value in (
+        ("flashcard.front.text", normalized_front["text"]),
+        ("flashcard.back.word", normalized_back["word"]),
+        ("flashcard.back.phonetic", normalized_back["phonetic"]),
+        ("flashcard.back.meaning", normalized_back["meaning"]),
+    ):
+        if len(value) > 80:
+            raise WidgetPropsError(f"{path} must not exceed 80 characters.")
+    return {"front": normalized_front, "back": normalized_back}
+
+
 def _no_anchors(_: Mapping[str, Any]) -> tuple[WidgetAnchor, ...]:
     return ()
 
@@ -358,14 +684,29 @@ def _choice_anchors(_: Mapping[str, Any]) -> tuple[WidgetAnchor, ...]:
     return (WidgetAnchor(key="choice", allowed_effect_ids=("highlight", "circle")),)
 
 
+def _flashcard_anchors(_: Mapping[str, Any]) -> tuple[WidgetAnchor, ...]:
+    return (WidgetAnchor(key="card", allowed_effect_ids=("highlight", "circle")),)
+
+
 def build_default_widget_registry() -> WidgetRegistry:
     """Return the initial registry without coupling it to any domain manifest."""
 
     visibility_state = WidgetStateDefinition(
         name="visibility",
         value_type="string",
+        default_value="visible",
         allowed_values=("visible", "hidden"),
         transitions={"visible": ("hidden",), "hidden": ("visible",)},
+    )
+    selected_state = WidgetStateDefinition(
+        name="selected",
+        value_type="boolean",
+        default_value=False,
+    )
+    flipped_state = WidgetStateDefinition(
+        name="flipped",
+        value_type="boolean",
+        default_value=False,
     )
     return WidgetRegistry(
         (
@@ -392,6 +733,13 @@ def build_default_widget_registry() -> WidgetRegistry:
                     ),
                 ),
                 state_fields=(visibility_state,),
+                stage_map_policy=StageMapPolicy(
+                    kind="text",
+                    content_label="CHỮ",
+                    quote_text=True,
+                    text_source="props.content",
+                    anchor_key="text",
+                ),
             ),
             WidgetDefinition(
                 widget_id="image",
@@ -416,6 +764,17 @@ def build_default_widget_registry() -> WidgetRegistry:
                     ),
                 ),
                 state_fields=(visibility_state,),
+                stage_map_policy=StageMapPolicy(
+                    kind="image",
+                    content_label="ẢNH",
+                    asset_source="props.asset_id",
+                    asset_text_source="asset.caption",
+                    anchor_key="image",
+                    text_rendered=False,
+                ),
+                asset_references=(WidgetAssetReferenceDefinition(
+                    path="props.asset_id", allowed_kinds=("image", "icon"),
+                ),),
             ),
             WidgetDefinition(
                 widget_id="object_group",
@@ -448,6 +807,17 @@ def build_default_widget_registry() -> WidgetRegistry:
                     ),
                 ),
                 state_fields=(visibility_state,),
+                stage_map_policy=StageMapPolicy(
+                    kind="object_group",
+                    content_label="NHÓM",
+                    asset_source="props.asset_id",
+                    asset_text_source="asset.caption",
+                    count_source="props.count",
+                    anchor_key="group",
+                    item_anchor_prefix="item_",
+                    text_rendered=False,
+                ),
+                asset_references=(WidgetAssetReferenceDefinition(path="props.asset_id"),),
             ),
             WidgetDefinition(
                 widget_id="answer",
@@ -467,6 +837,12 @@ def build_default_widget_registry() -> WidgetRegistry:
                     ),
                 ),
                 state_fields=(visibility_state,),
+                stage_map_policy=StageMapPolicy(
+                    kind="answer",
+                    content_label="KẾT QUẢ",
+                    text_source="props.value",
+                    anchor_key="answer",
+                ),
             ),
             WidgetDefinition(
                 widget_id="number_display",
@@ -483,6 +859,12 @@ def build_default_widget_registry() -> WidgetRegistry:
                     ),
                 ),
                 state_fields=(visibility_state,),
+                stage_map_policy=StageMapPolicy(
+                    kind="number_display",
+                    content_label="SỐ",
+                    text_source="props.value",
+                    anchor_key="number",
+                ),
             ),
             WidgetDefinition(
                 widget_id="choice",
@@ -490,9 +872,78 @@ def build_default_widget_registry() -> WidgetRegistry:
                 anchor_policy=_choice_anchors,
                 purpose="Tạo một lựa chọn có thể chạm/chọn; hiển thị ảnh hoặc nhóm ở trên và nhãn/chữ ở dưới.",
                 props=(),
-                state_fields=(visibility_state,),
+                state_fields=(visibility_state, selected_state),
                 allowed_child_widget_ids=("image", "text", "number_display", "object_group"),
-                interaction_event="select",
+                interactions=(WidgetInteractionDefinition(
+                    action="select", description="Trẻ chạm hoặc chọn toàn bộ thẻ lựa chọn.",
+                ),),
+                stage_map_policy=StageMapPolicy(
+                    kind="container", anchor_key="choice", children_layout="vertical",
+                ),
+            ),
+            WidgetDefinition(
+                widget_id="flashcard",
+                validate_props=_validate_flashcard,
+                anchor_policy=_flashcard_anchors,
+                purpose="Hiển thị thẻ từ vựng có thể lật giữa mặt ảnh và mặt kiến thức.",
+                props=(
+                    WidgetPropDefinition(
+                        name="front",
+                        value_type="object",
+                        required=True,
+                        template_value_kind="binding",
+                        description="Mặt trước gồm asset_id ảnh và chữ ngắn thật sự hiển thị.",
+                    ),
+                    WidgetPropDefinition(
+                        name="back",
+                        value_type="object",
+                        required=True,
+                        template_value_kind="binding",
+                        description="Mặt sau gồm word, phonetic và meaning đều hiển thị.",
+                    ),
+                ),
+                state_fields=(visibility_state, flipped_state),
+                interactions=(WidgetInteractionDefinition(
+                    action="flip",
+                    description="Chạm hoặc dùng bàn phím để lật giữa hai mặt thẻ.",
+                    state_rule={"flipped": {"op": "toggle"}},
+                ),),
+                stage_map_policy=StageMapPolicy(
+                    kind="flashcard",
+                    anchor_key="card",
+                    views=(
+                        StageMapView(
+                            state_field="flipped",
+                            state_value=False,
+                            policy=StageMapPolicy(
+                                kind="flashcard_front",
+                                content_label="ẢNH",
+                                asset_source="props.front.asset_id",
+                                asset_text_source="asset.caption",
+                                text_rendered=True,
+                                text_sources=(StageMapTextSource(
+                                    content_label="CHỮ",
+                                    text_source="props.front.text",
+                                    quote_text=True,
+                                ),),
+                            ),
+                        ),
+                        StageMapView(
+                            state_field="flipped",
+                            state_value=True,
+                            policy=StageMapPolicy(
+                                kind="flashcard_back",
+                                text_rendered=True,
+                                text_sources=(
+                                    StageMapTextSource("TỪ", "props.back.word", True),
+                                    StageMapTextSource("PHIÊN ÂM", "props.back.phonetic", True),
+                                    StageMapTextSource("NGHĨA", "props.back.meaning", True),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+                asset_references=(WidgetAssetReferenceDefinition(path="props.front.asset_id"),),
             ),
         )
     )

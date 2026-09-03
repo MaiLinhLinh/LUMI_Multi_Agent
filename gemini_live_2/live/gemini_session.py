@@ -645,7 +645,14 @@ class PersistentGeminiLiveConversation:
             pcm = getattr(inline, "data", None) if inline else None
             if not pcm:
                 continue
-            if self.state == LiveSessionState.WAITING_FOR_TOOL:
+            # A typed barge-in deliberately puts the session back into
+            # LISTENING while its response is awaited.  The first PCM packet
+            # is the authoritative signal that Gemini is now speaking for
+            # that new turn, regardless of whether it was triggered by a
+            # tool flow or typed input.  Without this transition the browser
+            # keeps streaming microphone audio unconditionally and can feed
+            # speaker echo back into Gemini.
+            if self.state in {LiveSessionState.LISTENING, LiveSessionState.WAITING_FOR_TOOL}:
                 await self._set_state(LiveSessionState.SPEAKING)
             output_turn_id = self._ensure_output_turn_id()
             rate = _sample_rate(getattr(inline, "mime_type", None))

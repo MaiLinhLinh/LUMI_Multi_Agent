@@ -1,4 +1,4 @@
-export function renderChoiceWidget(block, {
+export function renderChoiceWidget(component, {
   anchorsByKey = {},
   surfaceId = "",
   renderChild = null,
@@ -32,7 +32,7 @@ export function renderChoiceWidget(block, {
 
   const content = document.createElement("div");
   content.className = "lumi-widget-choice-content";
-  const children = Array.isArray(block.children) ? block.children : [];
+  const children = Array.isArray(component.children) ? component.children : [];
   for (const child of children) {
     const node = renderChild?.(child);
     if (!node) continue;

@@ -45,6 +45,8 @@ class DomainManifest:
     tool_capabilities: tuple[str, ...] = ()
     presentation_prompt_path: Path | None = None
     presentation_prompt_constant: str | None = None
+    plan_prompt_path: Path | None = None
+    plan_prompt_constant: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "domain_id", _text(self.domain_id, "manifest.domain_id"))
@@ -73,6 +75,20 @@ class DomainManifest:
                 "presentation_prompt_constant",
                 _text(self.presentation_prompt_constant, "manifest.presentation_prompt_constant"),
             )
+        has_plan_prompt_path = self.plan_prompt_path is not None
+        has_plan_prompt_constant = self.plan_prompt_constant is not None
+        if has_plan_prompt_path != has_plan_prompt_constant:
+            raise ManifestError(
+                "manifest.plan_prompt_path and manifest.plan_prompt_constant must be declared together."
+            )
+        if not has_plan_prompt_path:
+            raise ManifestError("manifest must declare plan_prompt_path and plan_prompt_constant.")
+        if has_plan_prompt_constant:
+            object.__setattr__(
+                self,
+                "plan_prompt_constant",
+                _text(self.plan_prompt_constant, "manifest.plan_prompt_constant"),
+            )
 
     def for_plan_agent(self) -> dict[str, Any]:
         return {
@@ -95,6 +111,7 @@ class DomainResources:
     assets: AssetCatalog
     templates: TemplateCatalog
     presentation_instruction: str
+    plan_instruction: str
 
 
 class DomainRegistry:
@@ -145,13 +162,27 @@ class DomainRegistry:
             )
         except TemplateCatalogError as exc:
             raise ManifestError(str(exc)) from exc
-        presentation_instruction = self._load_presentation_instruction(manifest, domain_root)
+        presentation_instruction = self._load_instruction(
+            prompt_path=manifest.presentation_prompt_path,
+            prompt_constant=manifest.presentation_prompt_constant,
+            domain_root=domain_root,
+            domain_id=manifest.domain_id,
+            label="presentation",
+        )
+        plan_instruction = self._load_instruction(
+            prompt_path=manifest.plan_prompt_path,
+            prompt_constant=manifest.plan_prompt_constant,
+            domain_root=domain_root,
+            domain_id=manifest.domain_id,
+            label="plan",
+        )
         return DomainResources(
             domain_root=domain_root,
             manifest=manifest,
             assets=assets,
             templates=templates,
             presentation_instruction=presentation_instruction,
+            plan_instruction=plan_instruction,
         )
 
     @staticmethod
@@ -170,30 +201,39 @@ class DomainRegistry:
                 data.get("presentation_prompt_path"), "manifest.presentation_prompt_path"
             ),
             presentation_prompt_constant=data.get("presentation_prompt_constant"),
+            plan_prompt_path=_relative_path(data.get("plan_prompt_path"), "manifest.plan_prompt_path"),
+            plan_prompt_constant=data.get("plan_prompt_constant"),
         )
 
     @staticmethod
-    def _load_presentation_instruction(manifest: DomainManifest, domain_root: Path) -> str:
-        """Load a domain-owned prompt constant without a concrete-domain branch."""
+    def _load_instruction(
+        *,
+        prompt_path: Path | None,
+        prompt_constant: str | None,
+        domain_root: Path,
+        domain_id: str,
+        label: str,
+    ) -> str:
+        """Load one domain-owned prompt constant without a concrete-domain branch."""
 
-        assert manifest.presentation_prompt_path is not None
-        prompt_path = (domain_root / manifest.presentation_prompt_path).resolve()
+        assert prompt_path is not None
+        prompt_path = (domain_root / prompt_path).resolve()
         try:
             prompt_path.relative_to(domain_root)
         except ValueError as exc:
-            raise ManifestError("presentation prompt resolves outside its domain.") from exc
+            raise ManifestError(f"{label} prompt resolves outside its domain.") from exc
         if not prompt_path.is_file():
-            raise ManifestError("presentation prompt file does not exist.")
-        module_name = f"gemini_live_2_domain_prompt_{manifest.domain_id}"
+            raise ManifestError(f"{label} prompt file does not exist.")
+        module_name = f"gemini_live_2_domain_{label}_prompt_{domain_id}"
         spec = importlib.util.spec_from_file_location(module_name, prompt_path)
         if spec is None or spec.loader is None:
-            raise ManifestError("cannot load presentation prompt module.")
+            raise ManifestError(f"cannot load {label} prompt module.")
         module = importlib.util.module_from_spec(spec)
         try:
             spec.loader.exec_module(module)
         except Exception as exc:
-            raise ManifestError(f"cannot execute presentation prompt module: {exc}") from exc
-        value = getattr(module, manifest.presentation_prompt_constant or "", None)
+            raise ManifestError(f"cannot execute {label} prompt module: {exc}") from exc
+        value = getattr(module, prompt_constant or "", None)
         if not isinstance(value, str) or not value.strip():
-            raise ManifestError("presentation prompt constant must be a non-empty string.")
+            raise ManifestError(f"{label} prompt constant must be a non-empty string.")
         return value.strip()
