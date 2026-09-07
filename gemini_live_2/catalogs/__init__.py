@@ -5,8 +5,10 @@ from .layout_templates import (
     LayoutTemplate,
     LayoutTemplateError,
     LayoutTemplateMaterializer,
+    TemplateComponentContract,
     TemplateBinding,
     TemplateExtractor,
+    TemplateSpec,
 )
 from .templates import (
     TemplateCatalog,
@@ -27,8 +29,10 @@ __all__ = [
     "LayoutTemplate",
     "LayoutTemplateError",
     "LayoutTemplateMaterializer",
+    "TemplateComponentContract",
     "TemplateBinding",
     "TemplateExtractor",
+    "TemplateSpec",
     "TemplateCatalog",
     "TemplateCatalogEntry",
     "TemplateCatalogError",

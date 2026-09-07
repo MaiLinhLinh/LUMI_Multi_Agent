@@ -1,6 +1,9 @@
 import { widgetRendererFor } from "./widgets/registry.js?v=text-fit-20260903";
 
-export function renderSurfaceDocument(surface, assets = [], { revealedComponentIds = new Set() } = {}) {
+export function renderSurfaceDocument(surface, assets = [], {
+  revealedComponentIds = new Set(),
+  onRuntimeDiagnostic = null,
+} = {}) {
   const grid = document.createElement("main");
   grid.className = "surface-document-grid";
   grid.setAttribute("aria-label", "Nội dung trực quan");
@@ -24,23 +27,84 @@ export function renderSurfaceDocument(surface, assets = [], { revealedComponentI
   for (const component of Array.isArray(surface?.components) ? surface.components : []) {
     const layout = component?.layout;
     const renderer = widgetRendererFor(component?.type);
-    if (!renderer || !validGrid(layout) || typeof component?.id !== "string") continue;
+    const componentId = typeof component?.id === "string" ? component.id : "";
+    const anchor = componentId ? firstAnchor(anchorsByComponent.get(componentId) || {}) : null;
+    const diagnose = (errorType, observed) => {
+      if (!componentId || !anchor?.anchor_id || typeof onRuntimeDiagnostic !== "function") return;
+      onRuntimeDiagnostic({
+        component_id: componentId,
+        anchor_id: anchor.anchor_id,
+        error_type: errorType,
+        observed,
+        repair_scope: "surface_plan",
+      });
+    };
+    if (!componentId || !validGrid(layout)) {
+      diagnose("layout_overflow", { status: "invalid_grid" });
+      continue;
+    }
+    if (!renderer) {
+      diagnose("renderer_missing", { widget_type: String(component?.type || "") });
+      continue;
+    }
+    if (!validComponentState(component?.state)) {
+      diagnose("state_apply_failed", { status: "invalid_state" });
+      continue;
+    }
 
     const materializedComponent = withAssetUrl(component, assetUrls);
-    const node = renderer(materializedComponent, {
-      anchorsByKey: anchorsByComponent.get(component.id) || {},
-      surfaceId: surface?.surface_id || "",
-      renderChild: (child) => renderComponentChild(child, assetUrls),
-    });
+    let node = null;
+    try {
+      node = renderer(materializedComponent, {
+        anchorsByKey: anchorsByComponent.get(component.id) || {},
+        surfaceId: surface?.surface_id || "",
+        renderChild: (child) => renderComponentChild(child, assetUrls),
+      });
+    } catch (error) {
+      diagnose("widget_render_failed", { status: "exception", name: String(error?.name || "Error") });
+      continue;
+    }
     if (!node) continue;
     node.dataset.componentId = component.id;
     node.dataset.visibility = component.state?.visibility === "hidden" ? "hidden" : "visible";
     if (revealedComponentIds.has(component.id)) node.classList.add("lumi-widget-revealed");
     node.style.gridColumn = `${layout.col} / span ${layout.col_span}`;
     node.style.gridRow = `${layout.row} / span ${layout.row_span}`;
+    installImageDiagnostics(node, diagnose);
     grid.append(node);
   }
   return grid;
+}
+
+function firstAnchor(anchorsByKey) {
+  return Object.values(anchorsByKey).find((anchor) => anchor?.anchor_id) || null;
+}
+
+function validComponentState(state) {
+  return state && (state.visibility === "visible" || state.visibility === "hidden");
+}
+
+function installImageDiagnostics(node, diagnose) {
+  for (const image of node.querySelectorAll("img")) {
+    let retryUsed = false;
+    const complete = (status) => image.dispatchEvent(new CustomEvent("lumi:image-final", {
+      bubbles: false,
+      detail: { status },
+    }));
+    image.addEventListener("load", () => complete("loaded"));
+    image.addEventListener("error", () => {
+      if (!retryUsed && image.src) {
+        retryUsed = true;
+        const failedUrl = image.src;
+        image.removeAttribute("src");
+        queueMicrotask(() => { image.src = failedUrl; });
+        return;
+      }
+      diagnose("image_load_failed", { status: "error", retry_attempts: 1 });
+      complete("failed");
+    });
+    if (image.complete) queueMicrotask(() => complete(image.naturalWidth > 0 ? "loaded" : "failed"));
+  }
 }
 
 function withAssetUrl(component, assetUrls) {

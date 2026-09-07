@@ -2,16 +2,20 @@
 
 from .domain_gateway import (
     CapabilityDescriptor,
+    CapabilityExecutionContext,
     DomainCapability,
     DomainGateway,
     GatewayConfigurationError,
+    GatewayExecutionError,
     GatewayPermissionError,
 )
 
 __all__ = [
     "CapabilityDescriptor",
+    "CapabilityExecutionContext",
     "DomainCapability",
     "DomainGateway",
     "GatewayConfigurationError",
+    "GatewayExecutionError",
     "GatewayPermissionError",
 ]

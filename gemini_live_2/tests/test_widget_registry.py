@@ -85,7 +85,7 @@ class WidgetRegistryTests(unittest.TestCase):
             self.registry.widget_index(("text", "image")),
             (
                 {"id": "text", "purpose": "Hiển thị văn bản tự do như tiêu đề, nhãn hoặc nội dung ngắn."},
-                {"id": "image", "purpose": "Hiển thị một ảnh hoặc minh hoạ từ Asset Catalog."},
+                {"id": "image", "purpose": "Hiển thị một ảnh từ Asset Catalog hoặc kết quả search ảnh đã được backend xác minh."},
             ),
         )
 
@@ -110,12 +110,12 @@ class WidgetRegistryTests(unittest.TestCase):
     def test_public_widget_contract_identifies_asset_backed_props(self) -> None:
         image = self.registry.get("image")
         self.assertEqual(image.widget_id, "image")
-        self.assertEqual(image.purpose, "Hiển thị một ảnh hoặc minh hoạ từ Asset Catalog.")
+        self.assertEqual(image.purpose, "Hiển thị một ảnh từ Asset Catalog hoặc kết quả search ảnh đã được backend xác minh.")
         self.assertEqual(
             image.public_props_contract()["asset_id"],
             {
                 "type": "string",
-                "required": True,
+                "required": False,
                 "template_value_kind": "binding",
                 "description": "ID của asset ảnh sẽ hiển thị.",
                 "source": "asset_catalog.id",

@@ -17,8 +17,10 @@ from gemini_live_2.panel import ActiveSurfaceSummary
 from gemini_live_2.catalogs.templates import TemplateCatalogError
 from gemini_live_2.gateway import (
     CapabilityDescriptor,
+    CapabilityExecutionContext,
     DomainGateway,
     GatewayConfigurationError,
+    GatewayExecutionError,
     GatewayPermissionError,
 )
 from gemini_live_2.panel.contracts import (
@@ -37,7 +39,7 @@ from .prompts import SurfacePlanPromptBuilder
 
 
 logger = logging.getLogger("lumi.plan_agent")
-_MAX_TOOL_STEPS = 4
+_MAX_TOOL_STEPS = 10
 _CALL_CAPABILITY_NAME = "call_capability"
 _DESCRIBE_WIDGETS_NAME = "describe_widgets"
 _DESCRIBE_TEMPLATE_NAME = "describe_template"
@@ -60,6 +62,26 @@ def _mapping(value: object, field_name: str) -> Mapping[str, Any]:
     return value
 
 
+def _log_payload(value: object, *, limit: int = 2_000) -> str:
+    """Make planning diagnostics readable without dumping unbounded model data."""
+
+    try:
+        text = json.dumps(value, ensure_ascii=False, default=str, separators=(",", ":"))
+    except (TypeError, ValueError):  # pragma: no cover - defensive logging only.
+        text = repr(value)
+    return text if len(text) <= limit else f"{text[:limit]}…<truncated>"
+
+
+def _bundle_summary(bundle: DataBundle) -> dict[str, Any]:
+    data = dict(bundle.data)
+    search_results = data.get("search_results")
+    return {
+        "data_keys": sorted(data),
+        "alias_ids": [alias.id for alias in bundle.alias_catalog],
+        "search_result_count": len(search_results) if isinstance(search_results, list) else 0,
+    }
+
+
 def _safe_history(value: object) -> tuple[dict[str, str], ...]:
     if not isinstance(value, tuple):
         raise PlanAgentError("recent_history must be a tuple.")
@@ -80,11 +102,20 @@ def _bundle_for_agent(bundle: DataBundle) -> dict[str, Any]:
 
 
 def _merge_bundles(current: DataBundle, update: DataBundle) -> DataBundle:
-    """Keep all verified tool results without silently overwriting values."""
+    """Keep verified data, with an append-only journal for search results."""
 
     if current.domain_id != update.domain_id:
         raise PlanAgentError("domain capability returned data for another domain.")
-    duplicate_keys = set(current.data).intersection(update.data)
+    merged_data = dict(current.data)
+    update_data = dict(update.data)
+    current_search_results = merged_data.pop("search_results", None)
+    update_search_results = update_data.pop("search_results", None)
+    if current_search_results is not None or update_search_results is not None:
+        existing = _search_results(current_search_results, "existing search_results")
+        incoming = _search_results(update_search_results, "capability search_results")
+        merged_data["search_results"] = [*existing, *incoming]
+
+    duplicate_keys = set(merged_data).intersection(update_data)
     if duplicate_keys:
         raise PlanAgentError(
             "capability result conflicts with existing data keys: " + ", ".join(sorted(duplicate_keys)) + "."
@@ -93,7 +124,28 @@ def _merge_bundles(current: DataBundle, update: DataBundle) -> DataBundle:
     alias_ids = [alias.id for alias in aliases]
     if len(alias_ids) != len(set(alias_ids)):
         raise PlanAgentError("capability result conflicts with an existing data alias.")
-    return DataBundle(domain_id=current.domain_id, data={**current.data, **update.data}, aliases=aliases)
+    return DataBundle(domain_id=current.domain_id, data={**merged_data, **update_data}, aliases=aliases)
+
+
+def _search_results(value: object, field_name: str) -> list[dict[str, Any]]:
+    """Validate the agreed append-only search journal shape at the merge boundary."""
+
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise PlanAgentError(f"{field_name} must be an array.")
+    results: list[dict[str, Any]] = []
+    for index, item in enumerate(value, start=1):
+        if not isinstance(item, Mapping):
+            raise PlanAgentError(f"{field_name}[{index}] must be an object.")
+        kind = item.get("kind")
+        result_id = item.get("result_id")
+        if kind not in {"web", "image"} or not isinstance(result_id, str) or not result_id.strip():
+            raise PlanAgentError(
+                f"{field_name}[{index}] requires kind 'web' or 'image' and a non-empty result_id."
+            )
+        results.append(dict(item))
+    return results
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,6 +158,8 @@ class PlanAgentRequest:
     initial_bundle: DataBundle | None = None
     active_surface_summary: ActiveSurfaceSummary | None = None
     validation_feedback: Mapping[str, Any] | None = None
+    runtime_feedback: Mapping[str, Any] | None = None
+    session_id: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "domain_id", _text(self.domain_id, "domain_id"))
@@ -125,6 +179,12 @@ class PlanAgentRequest:
             if not isinstance(self.validation_feedback, Mapping):
                 raise PlanAgentError("validation_feedback must be an object.")
             object.__setattr__(self, "validation_feedback", dict(self.validation_feedback))
+        if self.runtime_feedback is not None:
+            if not isinstance(self.runtime_feedback, Mapping):
+                raise PlanAgentError("runtime_feedback must be an object.")
+            object.__setattr__(self, "runtime_feedback", dict(self.runtime_feedback))
+        if self.session_id is not None:
+            object.__setattr__(self, "session_id", _text(self.session_id, "session_id"))
 
 
 @dataclass(frozen=True, slots=True)
@@ -301,6 +361,19 @@ class PlanAgent:
     async def plan(self, request: PlanAgentRequest) -> PlanAgentResult:
         """Return the final decision plus the trusted bundle for the Compiler."""
 
+        logger.info(
+            "[PLAN_AGENT_START] provider=%s domain=%s intent=%r history=%d active_surface=%s "
+            "compiler_feedback=%s runtime_feedback=%s tool_budget=%d",
+            self._settings.planner_provider,
+            request.domain_id,
+            request.intent,
+            len(request.recent_history),
+            request.active_surface_summary is not None,
+            request.validation_feedback is not None,
+            request.runtime_feedback is not None,
+            self._max_tool_steps,
+        )
+
         if self._settings.planner_provider == "cerebras":
             return await self._plan_with_cerebras(request)
         if self._settings.planner_provider != "gemini":
@@ -315,6 +388,14 @@ class PlanAgent:
             raise PlanAgentError(str(exc)) from exc
 
         bundle = request.initial_bundle or self._domain_gateway.empty_bundle(request.domain_id)
+        logger.info(
+            "[PLAN_AGENT_CONTEXT] provider=gemini assets=%d templates=%d widgets=%d capabilities=%s verified=%s",
+            len(resources.assets.assets),
+            len(resources.templates.for_plan_agent()),
+            len(resources.manifest.allowed_widget_ids),
+            [capability.id for capability in capabilities],
+            _log_payload(_bundle_summary(bundle)),
+        )
         payload = {
             "domain": resources.manifest.for_plan_agent(),
             "intent": request.intent,
@@ -326,6 +407,7 @@ class PlanAgent:
                 resources.manifest.allowed_widget_ids
             ),
             "capabilities": [capability.for_plan_agent() for capability in capabilities],
+            "tool_budget": {"max_native_calls": self._max_tool_steps},
         "verified_data": _bundle_for_agent(bundle),
         "active_surface_summary": (
             request.active_surface_summary.to_dict()
@@ -335,6 +417,8 @@ class PlanAgent:
         }
         if request.validation_feedback is not None:
             payload["compiler_feedback"] = dict(request.validation_feedback)
+        if request.runtime_feedback is not None:
+            payload["runtime_feedback"] = dict(request.runtime_feedback)
         messages: list[types.Content] = [
             types.Content(role="user", parts=[types.Part(text=json.dumps(payload, ensure_ascii=False))])
         ]
@@ -345,12 +429,19 @@ class PlanAgent:
             automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
         )
         tool_call_count = 0
+        tool_limit_feedback_sent = False
         described_widget_ids: set[str] = set()
         described_template_ids: set[str] = set()
 
         while True:
             response = await self._generate_response(client, messages, config)
             calls = _function_calls(response)
+            logger.info(
+                "[PLAN_AGENT_MODEL_STEP] provider=gemini tool_calls_used=%d/%d calls=%s",
+                tool_call_count,
+                self._max_tool_steps,
+                [getattr(call, "name", None) for call in calls],
+            )
             if not calls:
                 return self._final_result(
                     response,
@@ -360,14 +451,41 @@ class PlanAgent:
                     described_widget_ids=described_widget_ids,
                     described_template_ids=described_template_ids,
                 )
-            if tool_call_count + len(calls) > self._max_tool_steps:
-                raise PlanAgentError("Plan Agent exceeded the allowed number of capability calls.")
+            if tool_limit_feedback_sent:
+                raise PlanAgentError("Plan Agent called a tool after receiving tool_limit_reached.")
 
             messages.append(_model_content(response, calls))
             function_responses: list[types.Part] = []
-            for call in calls:
+            remaining_tool_calls = self._max_tool_steps - tool_call_count
+            for call_index, call in enumerate(calls, start=1):
                 name = getattr(call, "name", None)
                 arguments = _mapping(getattr(call, "args", None), f"{name} arguments")
+                logger.info(
+                    "[PLAN_AGENT_TOOL_CALL] provider=gemini step=%d/%d name=%s arguments=%s",
+                    tool_call_count + call_index,
+                    self._max_tool_steps,
+                    name,
+                    _log_payload(arguments),
+                )
+                if call_index > remaining_tool_calls:
+                    response_data = {
+                        "error": {
+                            "code": "tool_limit_reached",
+                            "message": (
+                                "Native tool budget reached. Do not call another tool; use verified_data "
+                                "already received to return the final surface plan."
+                            ),
+                        },
+                    }
+                    tool_limit_feedback_sent = True
+                    function_responses.append(types.Part(
+                        function_response=types.FunctionResponse(
+                            name=name,
+                            id=getattr(call, "id", None),
+                            response=response_data,
+                        )
+                    ))
+                    continue
                 if name == _DESCRIBE_WIDGETS_NAME:
                     response_data = self._describe_widgets(
                         widget_ids=arguments.get("widget_ids"),
@@ -388,16 +506,33 @@ class PlanAgent:
                             domain_id=request.domain_id,
                             capability_id=capability_id,
                             arguments=capability_arguments,
+                            execution_context=(
+                                CapabilityExecutionContext(session_id=request.session_id)
+                                if request.session_id is not None else None
+                            ),
                         )
+                    except GatewayExecutionError as exc:
+                        response_data = {
+                            "capability_id": capability_id,
+                            "error": {"message": str(exc)},
+                        }
                     except (GatewayConfigurationError, GatewayPermissionError) as exc:
                         raise PlanAgentError(str(exc)) from exc
-                    bundle = _merge_bundles(bundle, update)
-                    response_data = {
-                        "capability_id": capability_id,
-                        "verified_data": _bundle_for_agent(update),
-                    }
+                    else:
+                        bundle = _merge_bundles(bundle, update)
+                        response_data = {
+                            "capability_id": capability_id,
+                            "verified_data": _bundle_for_agent(update),
+                        }
                 else:
                     raise PlanAgentError("Plan Agent called an unsupported native function.")
+                logger.info(
+                    "[PLAN_AGENT_TOOL_RESPONSE] provider=gemini step=%d name=%s response=%s bundle=%s",
+                    tool_call_count + call_index,
+                    name,
+                    _log_payload(response_data),
+                    _log_payload(_bundle_summary(bundle)),
+                )
                 function_responses.append(types.Part(
                     function_response=types.FunctionResponse(
                         name=name,
@@ -405,7 +540,7 @@ class PlanAgent:
                         response=response_data,
                     )
                 ))
-            tool_call_count += len(calls)
+            tool_call_count += min(len(calls), max(0, remaining_tool_calls))
             messages.append(types.Content(role="user", parts=function_responses))
 
     async def _plan_with_cerebras(self, request: PlanAgentRequest) -> PlanAgentResult:
@@ -420,6 +555,14 @@ class PlanAgent:
             raise PlanAgentError(str(exc)) from exc
 
         bundle = request.initial_bundle or self._domain_gateway.empty_bundle(request.domain_id)
+        logger.info(
+            "[PLAN_AGENT_CONTEXT] provider=cerebras assets=%d templates=%d widgets=%d capabilities=%s verified=%s",
+            len(resources.assets.assets),
+            len(resources.templates.for_plan_agent()),
+            len(resources.manifest.allowed_widget_ids),
+            [capability.id for capability in capabilities],
+            _log_payload(_bundle_summary(bundle)),
+        )
         payload = {
             "domain": resources.manifest.for_plan_agent(),
             "intent": request.intent,
@@ -429,6 +572,7 @@ class PlanAgent:
             "template_catalog": resources.templates.for_plan_agent(),
             "widget_index": self._widget_registry.widget_index(resources.manifest.allowed_widget_ids),
             "capabilities": [capability.for_plan_agent() for capability in capabilities],
+            "tool_budget": {"max_native_calls": self._max_tool_steps},
             "verified_data": _bundle_for_agent(bundle),
             "active_surface_summary": (
                 request.active_surface_summary.to_dict()
@@ -438,6 +582,8 @@ class PlanAgent:
         }
         if request.validation_feedback is not None:
             payload["compiler_feedback"] = dict(request.validation_feedback)
+        if request.runtime_feedback is not None:
+            payload["runtime_feedback"] = dict(request.runtime_feedback)
         messages: list[dict[str, Any]] = [
             {
                 "role": "system",
@@ -450,6 +596,7 @@ class PlanAgent:
             base_url="https://api.cerebras.ai/v1",
         )
         tool_call_count = 0
+        tool_limit_feedback_sent = False
         described_widget_ids: set[str] = set()
         described_template_ids: set[str] = set()
 
@@ -473,6 +620,12 @@ class PlanAgent:
                 raise PlanAgentError("Cerebras returned no planning choice.")
             message = choices[0].message
             calls = tuple(getattr(message, "tool_calls", None) or ())
+            logger.info(
+                "[PLAN_AGENT_MODEL_STEP] provider=cerebras tool_calls_used=%d/%d calls=%s",
+                tool_call_count,
+                self._max_tool_steps,
+                [getattr(getattr(call, "function", None), "name", None) for call in calls],
+            )
             if not calls:
                 return self._final_result_from_text(
                     getattr(message, "content", None),
@@ -482,11 +635,12 @@ class PlanAgent:
                     described_widget_ids=described_widget_ids,
                     described_template_ids=described_template_ids,
                 )
-            if tool_call_count + len(calls) > self._max_tool_steps:
-                raise PlanAgentError("Plan Agent exceeded the allowed number of capability calls.")
+            if tool_limit_feedback_sent:
+                raise PlanAgentError("Plan Agent called a tool after receiving tool_limit_reached.")
 
             messages.append(message.model_dump(exclude_none=True))
-            for call in calls:
+            remaining_tool_calls = self._max_tool_steps - tool_call_count
+            for call_index, call in enumerate(calls, start=1):
                 function = getattr(call, "function", None)
                 name = getattr(function, "name", None)
                 raw_arguments = getattr(function, "arguments", None)
@@ -494,6 +648,30 @@ class PlanAgent:
                     arguments = _mapping(json.loads(raw_arguments), f"{name} arguments")
                 except (TypeError, json.JSONDecodeError, PlanAgentError) as exc:
                     raise PlanAgentError(f"Cerebras returned invalid arguments for {name}.") from exc
+                logger.info(
+                    "[PLAN_AGENT_TOOL_CALL] provider=cerebras step=%d/%d name=%s arguments=%s",
+                    tool_call_count + call_index,
+                    self._max_tool_steps,
+                    name,
+                    _log_payload(arguments),
+                )
+                if call_index > remaining_tool_calls:
+                    response_data = {
+                        "error": {
+                            "code": "tool_limit_reached",
+                            "message": (
+                                "Native tool budget reached. Do not call another tool; use verified_data "
+                                "already received to return the final surface plan."
+                            ),
+                        },
+                    }
+                    tool_limit_feedback_sent = True
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": getattr(call, "id", None),
+                        "content": json.dumps(response_data, ensure_ascii=False),
+                    })
+                    continue
                 if name == _DESCRIBE_WIDGETS_NAME:
                     response_data = self._describe_widgets(
                         widget_ids=arguments.get("widget_ids"),
@@ -514,22 +692,39 @@ class PlanAgent:
                             domain_id=request.domain_id,
                             capability_id=capability_id,
                             arguments=capability_arguments,
+                            execution_context=(
+                                CapabilityExecutionContext(session_id=request.session_id)
+                                if request.session_id is not None else None
+                            ),
                         )
+                    except GatewayExecutionError as exc:
+                        response_data = {
+                            "capability_id": capability_id,
+                            "error": {"message": str(exc)},
+                        }
                     except (GatewayConfigurationError, GatewayPermissionError) as exc:
                         raise PlanAgentError(str(exc)) from exc
-                    bundle = _merge_bundles(bundle, update)
-                    response_data = {
-                        "capability_id": capability_id,
-                        "verified_data": _bundle_for_agent(update),
-                    }
+                    else:
+                        bundle = _merge_bundles(bundle, update)
+                        response_data = {
+                            "capability_id": capability_id,
+                            "verified_data": _bundle_for_agent(update),
+                        }
                 else:
                     raise PlanAgentError("Plan Agent called an unsupported native function.")
+                logger.info(
+                    "[PLAN_AGENT_TOOL_RESPONSE] provider=cerebras step=%d name=%s response=%s bundle=%s",
+                    tool_call_count + call_index,
+                    name,
+                    _log_payload(response_data),
+                    _log_payload(_bundle_summary(bundle)),
+                )
                 messages.append({
                     "role": "tool",
                     "tool_call_id": getattr(call, "id", None),
                     "content": json.dumps(response_data, ensure_ascii=False),
                 })
-            tool_call_count += len(calls)
+            tool_call_count += min(len(calls), max(0, remaining_tool_calls))
 
     def _describe_widgets(
         self,
@@ -584,6 +779,7 @@ class PlanAgent:
         return {
             "template_id": template.template_id,
             "description": template.description,
+            "semantic_spec": template.semantic_spec.to_dict(),
             "blocks": [block.to_dict() for block in template.blocks],
             "bindings": [binding.to_dict() for binding in template.bindings],
         }
@@ -642,21 +838,16 @@ class PlanAgent:
         except (json.JSONDecodeError, PlanAgentError) as exc:
             logger.warning("[PLAN_AGENT_INVALID_DECISION] error_type=%s detail=%s", type(exc).__name__, str(exc)[:500])
             raise PlanAgentError("Plan Agent returned an invalid final decision.") from exc
-        if isinstance(command, CreateSurfacePlan):
-            used_widget_ids = {
-                widget_id
-                for block in command.blocks
-                for widget_id in (block.widget_id, *(child.widget_id for child in block.children))
-            }
-            missing_widget_ids = sorted(used_widget_ids - described_widget_ids)
-            if missing_widget_ids:
-                raise PlanAgentError(
-                    "Plan Agent must call describe_widgets before using: "
-                    + ", ".join(missing_widget_ids)
-                )
-        elif isinstance(command, UseExistingSurfaceTemplate):
+        if isinstance(command, UseExistingSurfaceTemplate):
             if command.template_id not in described_template_ids:
                 raise PlanAgentError(
                     "Plan Agent must call describe_template before using: " + command.template_id
                 )
+        logger.info(
+            "[PLAN_AGENT_FINAL_DECISION] action=%s verified=%s described_widgets=%s described_templates=%s",
+            command.to_dict()["action"],
+            _log_payload(_bundle_summary(bundle)),
+            sorted(described_widget_ids),
+            sorted(described_template_ids),
+        )
         return PlanAgentResult(command=command, data_bundle=bundle)

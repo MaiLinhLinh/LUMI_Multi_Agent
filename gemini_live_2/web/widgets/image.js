@@ -13,8 +13,9 @@ export function renderImageWidget(component, { anchorsByKey = {} } = {}) {
   }
 
   const image = document.createElement("img");
-  image.src = component.props?.asset_url || "";
-  image.alt = component.props?.label || "";
+  const source = component.props?.source;
+  image.src = source?.url || component.props?.asset_url || "";
+  image.alt = component.props?.label || source?.caption || "";
   image.draggable = false;
   figure.append(image);
   return figure;

@@ -23,10 +23,16 @@ class TemplateCatalogTests(unittest.TestCase):
 
     def test_catalog_exposes_semantic_entries_without_plan_paths(self) -> None:
         entries = self.resources.templates.for_plan_agent()
-        self.assertIn({
-            "id": "two_subject_comparison",
-            "description": "So sánh trực quan hai đối tượng ngang hàng: mỗi bên có ảnh lớn và nhãn ngắn, phù hợp khi trẻ quan sát hai chủ thể.",
-        }, entries)
+        comparison = next(entry for entry in entries if entry["id"] == "two_subject_comparison")
+        self.assertEqual(
+            comparison["description"],
+            "So sánh trực quan hai đối tượng ngang hàng: mỗi bên có ảnh lớn và nhãn ngắn, phù hợp khi trẻ quan sát hai chủ thể.",
+        )
+        self.assertEqual(comparison["semantic_spec"]["mechanics"], [])
+        self.assertEqual(
+            [item["widget_id"] for item in comparison["semantic_spec"]["component_contracts"]],
+            ["text", "image", "image"],
+        )
         self.assertTrue(entries)
         self.assertTrue(all("layout_path" not in entry and "plan_path" not in entry for entry in entries))
 

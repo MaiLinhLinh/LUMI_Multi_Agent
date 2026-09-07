@@ -49,7 +49,7 @@ class LiveToolRegistry:
             số lượng, asset, ngôn ngữ, vị trí hoặc bố cục nào trên panel.
 
             BẮT BUỘC gọi route_request khi người dùng yêu cầu tạo, thêm, bớt, thay, xếp,
-            di chuyển, so sánh, minh hoạ lại hoặc học nội dung khiến panel hiện tại cần đổi.
+            di chuyển, so sánh, minh hoạ lại hoặc nội dung khiến panel hiện tại cần đổi.
             Nếu số lượng, đối tượng, nhãn, ngôn ngữ hoặc bố cục người dùng yêu cầu khác
             VISUAL STAGE MAP hiện tại, đó luôn là panel mới — không được trả lời bằng lời
             hay gọi present_visual thay thế.

@@ -14,6 +14,7 @@ from gemini_live_2.panel import (
     SurfaceDocument,
 )
 from gemini_live_2.widgets import build_default_widget_registry
+from gemini_live_2.search import SearchResultStore
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -84,6 +85,82 @@ class PanelCompilerTests(unittest.TestCase):
             PlanBlock("image", GridRect(1, 1, 4, 4), {"asset_id": "plus", "label": "+"}),
         ))
         self.assertEqual(document.components[0].props["asset_id"], "plus")
+
+    def test_compiler_materializes_only_a_current_session_remote_image_result(self) -> None:
+        store = SearchResultStore()
+        result_id = store.put_image(
+            session_id="session-a",
+            remote_url="https://images.example/pig.png",
+            source_url="https://example/pig",
+            caption="Một chú heo dễ thương",
+        )
+        compiler = PanelCompiler(build_default_widget_registry(), search_result_store=store)
+        document = compiler.compile_surface_document(
+            surface_id="surface-test",
+            data_bundle=self.bundle,
+            domain_resources=self.resources,
+            search_session_id="session-a",
+            plan=PresentationPlan(domain_id="education", blocks=(
+                PlanBlock("image", GridRect(1, 1, 4, 4), {"remote_image_result_id": result_id}),
+            )),
+        )
+        self.assertEqual(document.components[0].props["remote_image_result_id"], result_id)
+        self.assertEqual(document.components[0].props["source"]["url"], "https://images.example/pig.png")
+        with self.assertRaisesRegex(PanelCompilationError, "search again"):
+            compiler.compile_surface_document(
+                data_bundle=self.bundle,
+                domain_resources=self.resources,
+                search_session_id="different-session",
+                plan=PresentationPlan(domain_id="education", blocks=(
+                    PlanBlock("image", GridRect(1, 1, 4, 4), {"remote_image_result_id": result_id}),
+                )),
+            )
+
+    def test_compiler_materializes_remote_image_on_flashcard_front(self) -> None:
+        store = SearchResultStore()
+        result_id = store.put_image(
+            session_id="session-a",
+            remote_url="https://images.example/coffee.png",
+            source_url="https://example/coffee",
+            caption="Một tách cà phê nóng",
+        )
+        compiler = PanelCompiler(build_default_widget_registry(), search_result_store=store)
+        document = compiler.compile_surface_document(
+            surface_id="surface-test",
+            data_bundle=self.bundle,
+            domain_resources=self.resources,
+            search_session_id="session-a",
+            plan=PresentationPlan(domain_id="education", blocks=(
+                PlanBlock("flashcard", GridRect(1, 1, 8, 6), {
+                    "front": {"remote_image_result_id": result_id, "text": "coffee"},
+                    "back": {"word": "coffee", "phonetic": "/ˈkɒf.i/", "meaning": "cà phê"},
+                }),
+            )),
+        )
+        front = document.components[0].props["front"]
+        self.assertEqual(front["remote_image_result_id"], result_id)
+        self.assertEqual(front["source"]["url"], "https://images.example/coffee.png")
+
+    def test_image_rejects_raw_provider_url_or_two_image_sources(self) -> None:
+        with self.assertRaisesRegex(PanelCompilationError, "unsupported fields"):
+            self._compile((PlanBlock("image", GridRect(1, 1, 4, 4), {"url": "https://example/pig.png"}),))
+        with self.assertRaisesRegex(PanelCompilationError, "exactly one"):
+            self._compile((PlanBlock("image", GridRect(1, 1, 4, 4), {
+                "asset_id": "cat", "remote_image_result_id": "img_x",
+            }),))
+
+    def test_rejects_a_plan_declared_interaction_that_the_widget_does_not_own(self) -> None:
+        with self.assertRaises(PanelCompilationError) as raised:
+            self._compile((PlanBlock(
+                "image",
+                GridRect(1, 1, 4, 4),
+                {"asset_id": "cat", "action": "flip"},
+            ),))
+
+        feedback = raised.exception.for_plan_agent()
+        self.assertEqual(feedback["error_code"], "invalid_widget_contract")
+        self.assertEqual(feedback["details"], {"block_index": 1, "widget_id": "image"})
+        self.assertIn("unsupported fields", feedback["message"])
 
     def test_materializes_initial_visibility_into_component_state(self) -> None:
         document = self._compile((

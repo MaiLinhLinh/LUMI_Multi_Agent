@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Mapping
 from uuid import uuid4
 
 from gemini_live_2.widgets import WidgetPropsError, WidgetRegistry
+from gemini_live_2.search.result_store import SearchResultStore, SearchResultStoreError
 
 from .contracts import (
     AnchorBinding,
@@ -66,6 +67,7 @@ class PanelCompiler:
     widget_registry: WidgetRegistry
     canvas_columns: int = CANVAS_COLUMNS
     canvas_rows: int = CANVAS_ROWS
+    search_result_store: SearchResultStore | None = None
 
     def __post_init__(self) -> None:
         for field_name in ("canvas_columns", "canvas_rows"):
@@ -82,6 +84,7 @@ class PanelCompiler:
         surface_id: str | None = None,
         component_ids: tuple[str, ...] | None = None,
         anchor_ids_by_component_key: Mapping[tuple[str, str], str] | None = None,
+        search_session_id: str | None = None,
     ) -> SurfaceDocument:
         """Validate a plan into the SD3 ``SurfaceDocument`` contract.
 
@@ -117,17 +120,28 @@ class PanelCompiler:
                 normalized_props = widget.validate(_resolve_aliases(block.props, aliases))
                 initial_state = self._materialize_initial_state(block=block, widget=widget)
             except WidgetPropsError as error:
-                raise PanelCompilationError(str(error)) from error
+                raise PanelCompilationError(
+                    str(error),
+                    code="invalid_widget_contract",
+                    details={"block_index": index, "widget_id": block.widget_id},
+                ) from error
 
             self._validate_asset_references(
                 widget=widget,
                 props=normalized_props,
                 domain_resources=domain_resources,
             )
+            anchor_props = normalized_props
+            normalized_props = self._materialize_remote_image_reference(
+                widget=widget,
+                props=normalized_props,
+                search_session_id=search_session_id,
+            )
             children = self._materialize_component_children(
                 block=block,
                 aliases=aliases,
                 domain_resources=domain_resources,
+                search_session_id=search_session_id,
             )
             component = ComponentNode(
                 id=component_ids[index - 1] if component_ids is not None else str(index),
@@ -138,7 +152,7 @@ class PanelCompiler:
                 children=children,
             )
             components.append(component)
-            anchor_requests.extend((component, anchor) for anchor in widget.anchors_for(component.props))
+            anchor_requests.extend((component, anchor) for anchor in widget.anchors_for(anchor_props))
 
         resolved_surface_id = surface_id or f"panel-{uuid4().hex}"
         anchors = self._materialize_anchors(
@@ -199,6 +213,7 @@ class PanelCompiler:
         block: PlanBlock,
         aliases: Mapping[str, Any],
         domain_resources: DomainResources,
+        search_session_id: str | None,
     ) -> tuple[ComponentChild, ...]:
         """Validate child widgets for a document component without grid cells.
 
@@ -237,6 +252,11 @@ class PanelCompiler:
                 widget=child_widget,
                 props=child_props,
                 domain_resources=domain_resources,
+            )
+            child_props = self._materialize_remote_image_reference(
+                widget=child_widget,
+                props=child_props,
+                search_session_id=search_session_id,
             )
             materialized.append(ComponentChild(type=child_widget_id, props=child_props))
         return tuple(materialized)
@@ -306,6 +326,8 @@ class PanelCompiler:
 
         for reference in widget.asset_references:
             asset_id = _resolve_props_path(props, reference.path)
+            if asset_id is None and not reference.required:
+                continue
             if not isinstance(asset_id, str) or not asset_id:
                 raise PanelCompilationError(
                     f"asset reference '{reference.path}' for widget '{widget.widget_id}' must resolve to a string."
@@ -319,6 +341,75 @@ class PanelCompiler:
                 raise PanelCompilationError(
                     f"asset_id '{asset_id}' must be an {allowed} asset for widget '{widget.widget_id}'."
                 )
+
+    def _materialize_remote_image_reference(
+        self,
+        *,
+        widget: Any,
+        props: Mapping[str, Any],
+        search_session_id: str | None,
+    ) -> dict[str, Any]:
+        """Materialize every widget-declared remote image result in its props.
+
+        Validation remains widget-owned.  This generic compiler step merely
+        replaces a trusted, session-scoped result ID with renderer-safe source
+        metadata at the same object level, whether the image is a root prop
+        (``image``) or nested (``flashcard.front``).
+        """
+
+        def materialize(value: Any) -> Any:
+            if isinstance(value, Mapping):
+                resolved = {key: materialize(item) for key, item in value.items()}
+                remote_result_id = resolved.get("remote_image_result_id")
+                if remote_result_id is None:
+                    return resolved
+                if not isinstance(remote_result_id, str) or not remote_result_id:
+                    raise PanelCompilationError("remote_image_result_id must be a non-empty string.")
+                result = self._get_remote_image_result(
+                    remote_result_id=remote_result_id,
+                    search_session_id=search_session_id,
+                )
+                resolved["source"] = {
+                    "kind": "remote",
+                    "url": result.remote_url,
+                    "caption": result.caption,
+                    "source_url": result.source_url,
+                }
+                return resolved
+            if isinstance(value, list):
+                return [materialize(item) for item in value]
+            if isinstance(value, tuple):
+                return tuple(materialize(item) for item in value)
+            return value
+
+        return materialize(props)
+
+    def _get_remote_image_result(
+        self,
+        *,
+        remote_result_id: str,
+        search_session_id: str | None,
+    ) -> Any:
+        if self.search_result_store is None or not search_session_id:
+            raise PanelCompilationError(
+                "remote_image_result_id is unavailable; search again.",
+                code="invalid_remote_image_result",
+            )
+        try:
+            result = self.search_result_store.get_image(
+                session_id=search_session_id,
+                result_id=remote_result_id,
+            )
+        except SearchResultStoreError as error:
+            raise PanelCompilationError(
+                "remote_image_result_id is unavailable; search again.",
+                code="invalid_remote_image_result",
+            ) from error
+        return result
+
+    def clear_search_results(self, session_id: str) -> None:
+        if self.search_result_store is not None:
+            self.search_result_store.clear_session(session_id)
 
 
 def _resolve_props_path(props: Mapping[str, Any], path: str) -> Any:

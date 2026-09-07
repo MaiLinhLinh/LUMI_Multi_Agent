@@ -85,6 +85,15 @@ class _CerebrasClient:
 
 
 class PlanAgentTests(unittest.TestCase):
+
+    def test_base_prompt_requires_activity_first_before_final_surface_plan(self) -> None:
+        from gemini_live_2.plan_agent.prompts import CORE_SURFACE_LIFECYCLE_INSTRUCTION
+
+        self.assertIn("QUY TRÌNH SUY NGHĨ NỘI BỘ BẮT BUỘC TRƯỚC KHI TẠO SURFACE", CORE_SURFACE_LIFECYCLE_INSTRUCTION)
+        self.assertIn("Final Surface Plan", CORE_SURFACE_LIFECYCLE_INSTRUCTION)
+        self.assertIn("CONTRACT SURFACE PLAN", CORE_SURFACE_LIFECYCLE_INSTRUCTION)
+        self.assertIn("ROOT_BLOCK", CORE_SURFACE_LIFECYCLE_INSTRUCTION)
+        self.assertIn('"op":"replace_children"', CORE_SURFACE_LIFECYCLE_INSTRUCTION)
     def test_create_plan_requires_describing_its_widgets_first(self) -> None:
         with _domain_root([]) as root:
             client = _Client([
@@ -114,9 +123,36 @@ class PlanAgentTests(unittest.TestCase):
                 payload["widget_index"],
                 [
                     {"id": "text", "purpose": "Hiển thị văn bản tự do như tiêu đề, nhãn hoặc nội dung ngắn."},
-                    {"id": "image", "purpose": "Hiển thị một ảnh hoặc minh hoạ từ Asset Catalog."},
+                    {"id": "image", "purpose": "Hiển thị một ảnh từ Asset Catalog hoặc kết quả search ảnh đã được backend xác minh."},
                 ],
             )
+
+    def test_runtime_feedback_is_sent_as_structured_plan_agent_context(self) -> None:
+        with _domain_root([]) as root:
+            client = _Client([
+                _Response(calls=[types.FunctionCall(
+                    id="native-widget-1", name="describe_widgets", args={"widget_ids": ["image"]},
+                )]),
+                _Response(_create_plan_json()),
+            ])
+            agent = _agent(root, DomainGateway(DomainRegistry(root)), client)
+            feedback = {
+                "kind": "runtime_feedback",
+                "surface_id": "panel-a",
+                "revision": 3,
+                "component_id": "2",
+                "anchor_id": "b",
+                "error_type": "image_load_failed",
+                "observed": {"status": "error", "retry_attempts": 1},
+                "repair_scope": "surface_plan",
+            }
+
+            asyncio.run(agent.plan(PlanAgentRequest(
+                domain_id="education", intent="Sửa ảnh bị lỗi.", runtime_feedback=feedback,
+            )))
+
+            payload = json.loads(client.models.calls[0]["contents"][0].parts[0].text)
+            self.assertEqual(payload["runtime_feedback"], feedback)
 
     def test_native_function_call_returns_function_response_before_final_plan(self) -> None:
         with _domain_root(["lookup_lesson"]) as root:
@@ -177,13 +213,158 @@ class PlanAgentTests(unittest.TestCase):
             self.assertEqual(widget_response.id, "native-widget-1")
             self.assertEqual(widget_response.name, "describe_widgets")
 
-    def test_create_plan_rejects_widget_that_was_not_described(self) -> None:
+    def test_retrieval_results_accumulate_across_multiple_capability_calls(self) -> None:
+        with _domain_root(["search_web", "search_image"]) as root:
+            gateway = DomainGateway(DomainRegistry(root))
+            gateway.register(DomainCapability(
+                domain_id="education",
+                descriptor=CapabilityDescriptor("search_web", "Search web.", {"type": "object"}),
+                handler=lambda _: DataBundle(domain_id="education", data={"search_results": [{
+                    "kind": "web", "result_id": "web_1", "title": "Vòng đời bướm",
+                    "snippet": "Trứng, sâu, nhộng, bướm.", "source_url": "https://example/web",
+                }]}),
+            ))
+            gateway.register(DomainCapability(
+                domain_id="education",
+                descriptor=CapabilityDescriptor("search_image", "Search image.", {"type": "object"}),
+                handler=lambda _: DataBundle(domain_id="education", data={"search_results": [{
+                    "kind": "image", "result_id": "img_1", "caption": "Vòng đời bướm",
+                    "source_url": "https://example/image",
+                }]}),
+            ))
+            client = _Client([
+                _Response(calls=[types.FunctionCall(
+                    id="web-1", name="call_capability",
+                    args={"capability_id": "search_web", "arguments": {"query": "vòng đời bướm"}},
+                )]),
+                _Response(calls=[types.FunctionCall(
+                    id="image-1", name="call_capability",
+                    args={"capability_id": "search_image", "arguments": {"query": "ảnh vòng đời bướm"}},
+                )]),
+                _Response(calls=[types.FunctionCall(
+                    id="widget-1", name="describe_widgets", args={"widget_ids": ["text"]},
+                )]),
+                _Response(json.dumps({
+                    "action": "create_surface_plan",
+                    "template_description": "Một tiêu đề bài học.",
+                    "surface": {"blocks": [{
+                        "widget_id": "text",
+                        "grid": {"col": 1, "row": 1, "col_span": 16, "row_span": 1},
+                        "props": {"content": "Cùng quan sát vòng đời bướm nhé!"},
+                    }]},
+                }, ensure_ascii=False)),
+            ])
+
+            result = asyncio.run(_agent(root, gateway, client).plan(PlanAgentRequest(
+                domain_id="education", intent="Dạy vòng đời bướm.", session_id="session-a",
+            )))
+
+            results = result.data_bundle.data["search_results"]
+            self.assertEqual([item["kind"] for item in results], ["web", "image"])
+            self.assertEqual([item["result_id"] for item in results], ["web_1", "img_1"])
+            self.assertEqual(json.loads(client.models.calls[0]["contents"][0].parts[0].text)["tool_budget"], {
+                "max_native_calls": 10,
+            })
+
+    def test_tool_limit_returns_feedback_once_then_allows_a_final_plan(self) -> None:
+        with _domain_root(["lookup_lesson"]) as root:
+            gateway = DomainGateway(DomainRegistry(root))
+            gateway.register(DomainCapability(
+                domain_id="education",
+                descriptor=CapabilityDescriptor("lookup_lesson", "Lookup.", {"type": "object"}),
+                handler=lambda _: DataBundle(domain_id="education", data={"lesson": {"title": "Bướm"}}),
+            ))
+            client = _Client([
+                _Response(calls=[types.FunctionCall(
+                    id="widget-1", name="describe_widgets", args={"widget_ids": ["text"]},
+                )]),
+                _Response(calls=[types.FunctionCall(
+                    id="capability-1", name="call_capability",
+                    args={"capability_id": "lookup_lesson", "arguments": {}},
+                )]),
+                _Response(json.dumps({
+                    "action": "create_surface_plan",
+                    "template_description": "Một tiêu đề.",
+                    "surface": {"blocks": [{
+                        "widget_id": "text",
+                        "grid": {"col": 1, "row": 1, "col_span": 16, "row_span": 1},
+                        "props": {"content": "Bài học về bướm"},
+                    }]},
+                }, ensure_ascii=False)),
+            ])
+
+            result = asyncio.run(_agent(root, gateway, client, max_tool_steps=1).plan(
+                PlanAgentRequest(domain_id="education", intent="Tạo bài học.")
+            ))
+
+            self.assertIsInstance(result.command, CreateSurfacePlan)
+            limit_responses = [
+                part.function_response.response
+                for content in client.models.calls[-1]["contents"]
+                for part in content.parts
+                if getattr(part, "function_response", None) is not None
+            ]
+            self.assertEqual(limit_responses[-1]["error"]["code"], "tool_limit_reached")
+
+    def test_tool_call_after_limit_feedback_is_rejected(self) -> None:
+        with _domain_root([]) as root:
+            client = _Client([
+                _Response(calls=[types.FunctionCall(
+                    id="widget-1", name="describe_widgets", args={"widget_ids": ["text"]},
+                )]),
+                _Response(calls=[types.FunctionCall(
+                    id="widget-2", name="describe_widgets", args={"widget_ids": ["image"]},
+                )]),
+                _Response(calls=[types.FunctionCall(
+                    id="widget-3", name="describe_widgets", args={"widget_ids": ["text"]},
+                )]),
+            ])
+            with self.assertRaisesRegex(PlanAgentError, "after receiving tool_limit_reached"):
+                asyncio.run(_agent(
+                    root, DomainGateway(DomainRegistry(root)), client, max_tool_steps=1,
+                ).plan(PlanAgentRequest(domain_id="education", intent="Tạo bài học.")))
+
+    def test_tool_limit_is_enforced_inside_one_multi_call_response(self) -> None:
+        with _domain_root([]) as root:
+            client = _Client([
+                _Response(calls=[
+                    types.FunctionCall(id="widget-1", name="describe_widgets", args={"widget_ids": ["text"]}),
+                    types.FunctionCall(id="widget-2", name="describe_widgets", args={"widget_ids": ["image"]}),
+                ]),
+                _Response(json.dumps({
+                    "action": "create_surface_plan",
+                    "template_description": "Một tiêu đề.",
+                    "surface": {"blocks": [{
+                        "widget_id": "text",
+                        "grid": {"col": 1, "row": 1, "col_span": 16, "row_span": 1},
+                        "props": {"content": "Bài học về bướm"},
+                    }]},
+                }, ensure_ascii=False)),
+            ])
+            result = asyncio.run(_agent(
+                root, DomainGateway(DomainRegistry(root)), client, max_tool_steps=1,
+            ).plan(PlanAgentRequest(domain_id="education", intent="Tạo bài học.")))
+
+            self.assertIsInstance(result.command, CreateSurfacePlan)
+            function_responses = [
+                part.function_response.response
+                for content in client.models.calls[-1]["contents"]
+                for part in content.parts
+                if getattr(part, "function_response", None) is not None
+            ]
+            self.assertEqual(function_responses[-1]["error"]["code"], "tool_limit_reached")
+
+    def test_create_plan_allows_widget_without_describing_it_first(self) -> None:
         with _domain_root([]) as root:
             client = _Client([_Response(_create_plan_json())])
             agent = _agent(root, DomainGateway(DomainRegistry(root)), client)
 
-            with self.assertRaisesRegex(PlanAgentError, "must call describe_widgets before using: image"):
-                asyncio.run(agent.plan(PlanAgentRequest(domain_id="education", intent="Hiển thị chú chó.")))
+            result = asyncio.run(agent.plan(PlanAgentRequest(
+                domain_id="education", intent="Hiển thị chú chó."
+            )))
+
+            self.assertIsInstance(result.command, CreateSurfacePlan)
+            self.assertEqual(result.command.blocks[0].widget_id, "image")
 
     def test_create_plan_rejects_model_generated_domain_id(self) -> None:
         with _domain_root([]) as root:
@@ -347,7 +528,7 @@ class PlanAgentTests(unittest.TestCase):
             self.assertEqual(choice.props, {})
             self.assertEqual([child.widget_id for child in choice.children], ["image", "text"])
 
-    def test_create_plan_rejects_choice_child_that_was_not_described(self) -> None:
+    def test_create_plan_allows_choice_child_without_describing_it_first(self) -> None:
         with _domain_root([], allowed_widget_ids=["choice", "image", "text"]) as root:
             client = _Client([
                 _Response(calls=[types.FunctionCall(
@@ -368,10 +549,12 @@ class PlanAgentTests(unittest.TestCase):
             ])
             agent = _agent(root, DomainGateway(DomainRegistry(root)), client)
 
-            with self.assertRaisesRegex(PlanAgentError, "must call describe_widgets before using: image"):
-                asyncio.run(agent.plan(PlanAgentRequest(
-                    domain_id="education", intent="Chọn đúng con chó."
-                )))
+            result = asyncio.run(agent.plan(PlanAgentRequest(
+                domain_id="education", intent="Chọn đúng con chó."
+            )))
+
+            self.assertIsInstance(result.command, CreateSurfacePlan)
+            self.assertEqual(result.command.blocks[0].children[0].widget_id, "image")
 
     def test_describe_widgets_rejects_widget_outside_domain_scope(self) -> None:
         with _domain_root([]) as root:
@@ -461,6 +644,7 @@ class PlanAgentTemplateToolTests(unittest.TestCase):
             self.assertEqual(response.id, "native-template-1")
             self.assertEqual(response.response["bindings"][0]["key"], "$block_1_content")
             self.assertEqual(response.response["blocks"][0]["widget_id"], "text")
+            self.assertEqual(response.response["semantic_spec"]["component_contracts"][0]["widget_id"], "text")
 
 
 class _CerebrasProviderTests(unittest.TestCase):
@@ -521,11 +705,18 @@ def _create_plan_json() -> str:
     }, ensure_ascii=False)
 
 
-def _agent(root: Path, gateway: DomainGateway, client: _Client) -> PlanAgent:
+def _agent(
+    root: Path,
+    gateway: DomainGateway,
+    client: _Client,
+    *,
+    max_tool_steps: int = 10,
+) -> PlanAgent:
     return PlanAgent(
         _settings(), domain_registry=DomainRegistry(root), domain_gateway=gateway,
         widget_registry=build_default_widget_registry(),
         client_factory=lambda **_kwargs: client,
+        max_tool_steps=max_tool_steps,
     )
 
 

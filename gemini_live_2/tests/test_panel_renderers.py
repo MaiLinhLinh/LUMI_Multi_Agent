@@ -56,6 +56,30 @@ class PanelRendererTests(unittest.TestCase):
         self.assertNotIn("[ảnh dog]", stage_map.lower())
         self.assertNotIn('ảnh "Dog"', stage_map)
 
+    def test_stage_map_uses_the_materialized_remote_image_provider_caption(self) -> None:
+        remote_component = replace(
+            self.document.components[1],
+            props={
+                "remote_image_result_id": "img_pig",
+                "source": {
+                    "kind": "remote_image",
+                    "url": "https://images.example/pig.png",
+                    "caption": "Một chú heo dễ thương",
+                    "source_url": "https://example/pig",
+                },
+            },
+        )
+        remote_document = replace(
+            self.document,
+            components=(self.document.components[0], remote_component, self.document.components[2]),
+        )
+
+        stage_map = self._stage_map(remote_document)
+
+        self.assertIn("ẢNH: Một chú heo dễ thương", stage_map)
+        self.assertNotIn("img_pig", stage_map)
+        self.assertNotIn("https://images.example", stage_map)
+
     def test_client_payload_has_only_used_browser_asset_urls(self) -> None:
         payload = surface_document_client_payload(
             self.document,
@@ -223,6 +247,46 @@ class PanelRendererTests(unittest.TestCase):
         self.assertIn("NGHĨA: “con mèo”", flipped_map)
         self.assertNotIn("Minh họa một chú mèo", flipped_map)
         self.assertIn("[anchor: a]", flipped_map)
+
+    def test_flashcard_stage_map_uses_materialized_remote_front_caption(self) -> None:
+        document = PanelCompiler(self.registry).compile_surface_document(
+            domain_resources=self.resources,
+            data_bundle=DataBundle(domain_id="education", data={}),
+            plan=PresentationPlan(
+                domain_id="education",
+                blocks=(
+                    PlanBlock(
+                        "flashcard", GridRect(3, 2, 8, 6),
+                        {
+                            "front": {"asset_id": "cat", "text": "coffee"},
+                            "back": {"word": "coffee", "phonetic": "/ˈkɒf.i/", "meaning": "cà phê"},
+                        },
+                    ),
+                ),
+            ),
+        )
+        remote_document = replace(
+            document,
+            components=(replace(
+                document.components[0],
+                props={
+                    "front": {
+                        "remote_image_result_id": "img_coffee",
+                        "text": "coffee",
+                        "source": {
+                            "kind": "remote",
+                            "url": "https://images.example/coffee.png",
+                            "caption": "Một tách cà phê nóng",
+                            "source_url": "https://example/coffee",
+                        },
+                    },
+                    "back": {"word": "coffee", "phonetic": "/ˈkɒf.i/", "meaning": "cà phê"},
+                },
+            ),),
+        )
+        stage_map = self._stage_map(remote_document)
+        self.assertIn("ẢNH: Một tách cà phê nóng", stage_map)
+        self.assertIn("CHỮ: “coffee”", stage_map)
 
     def _stage_map(self, document):
         return render_visual_stage_map(

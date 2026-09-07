@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
-from gemini_live_2.catalogs.layout_templates import LayoutTemplate, LayoutTemplateError
+from gemini_live_2.catalogs.layout_templates import LayoutTemplate, LayoutTemplateError, TemplateSpec
 
 
 class TemplateCatalogError(ValueError):
@@ -60,8 +60,12 @@ class TemplateCatalogEntry:
         if not isinstance(self.layout_path, Path):
             raise TemplateCatalogError("template.layout_path must be a Path.")
 
-    def for_plan_agent(self) -> dict[str, str]:
-        return {"id": self.id, "description": self.description}
+    def for_plan_agent(self, *, semantic_spec: TemplateSpec) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "description": self.description,
+            "semantic_spec": semantic_spec.to_dict(),
+        }
 
     def to_catalog_record(self) -> dict[str, str]:
         return {
@@ -92,8 +96,13 @@ class TemplateCatalog:
         if self.catalog_path is not None and not isinstance(self.catalog_path, Path):
             raise TemplateCatalogError("template_catalog.catalog_path must be a Path.")
 
-    def for_plan_agent(self) -> list[dict[str, str]]:
-        return [entry.for_plan_agent() for entry in self.entries]
+    def for_plan_agent(self) -> list[dict[str, Any]]:
+        """Advertise semantic shape, never merely a visually similar title."""
+
+        return [
+            entry.for_plan_agent(semantic_spec=self.load_layout_template(entry.id).semantic_spec)
+            for entry in self.entries
+        ]
 
     def contains(self, template_id: str) -> bool:
         return any(entry.id == template_id for entry in self.entries)

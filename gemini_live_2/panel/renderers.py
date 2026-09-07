@@ -278,12 +278,42 @@ def _stage_map_policy(widget_registry: WidgetRegistry, component_type: str) -> S
 def _asset_caption(
     policy: StageMapPolicy, props: Mapping[str, Any], asset_catalog: AssetCatalog
 ) -> str | None:
+    # A remote image is materialized by Compiler as a trusted ``source`` object.
+    # Its provider caption is the only description Stage Map may use; the
+    # original search query and Agent-provided labels are deliberately ignored.
+    source = _source_for_asset_path(props, policy.asset_source)
+    if isinstance(source, Mapping):
+        caption = source.get("caption")
+        if isinstance(caption, str) and caption.strip():
+            return caption.strip()
     asset_id = _resolve_path(props, policy.asset_source)
     if not isinstance(asset_id, str):
         return None
     asset = asset_catalog.get(asset_id)
     value = _resolve_path(asset, policy.asset_text_source)
     return str(value) if value is not None else None
+
+
+def _source_for_asset_path(
+    props: Mapping[str, Any], asset_path: str | None
+) -> Mapping[str, Any] | None:
+    """Find the materialized source adjacent to an asset path.
+
+    A root image has ``props.source``; a flashcard front has
+    ``props.front.source``.  The Stage Map policy already names the asset
+    path, so deriving its containing object keeps this renderer generic.
+    """
+
+    if asset_path is None:
+        return None
+    parts = asset_path.split(".")
+    if parts and parts[0] == "props":
+        parts = parts[1:]
+    parent = _resolve_path(props, ".".join(parts[:-1])) if parts[:-1] else props
+    if not isinstance(parent, Mapping):
+        return None
+    source = parent.get("source")
+    return source if isinstance(source, Mapping) else None
 
 
 def _resolve_path(root: object, path: str | None) -> object | None:

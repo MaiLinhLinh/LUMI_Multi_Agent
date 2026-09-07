@@ -8,7 +8,7 @@
     },
     {
       "id": "tm1",
-      "description": "Bố cục đơn giản gồm tiêu đề ở trên, hình ảnh trung tâm, và đoạn văn kể chuyện ở dưới, phù hợp cho câu chuyện về động vật cho trẻ em.",
+      "description": "Khung bài học phép cộng: hàng trên là tiêu đề và câu hỏi; khu giữa là phương trình hình ảnh gồm hai nhóm đối tượng cách nhau bởi hai biểu tượng phép tính, kế bên là ô đáp án dạng ẩn/hiện; hàng dưới là ba thẻ lựa chọn đặt ngang, mỗi thẻ gồm tượng số phía trên và nhãn chữ phía dưới.",
       "layout_path": "layouts/tm1.layout.json"
     }
   ]

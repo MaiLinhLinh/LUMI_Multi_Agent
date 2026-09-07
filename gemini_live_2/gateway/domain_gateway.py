@@ -24,6 +24,10 @@ class GatewayPermissionError(ValueError):
     """Raised when a caller requests a capability outside its routed domain."""
 
 
+class GatewayExecutionError(RuntimeError):
+    """A granted capability ran but could not produce verified data this turn."""
+
+
 def _text(value: object, field: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise GatewayConfigurationError(f"{field} must be a non-empty string.")
@@ -37,6 +41,17 @@ def _arguments(value: object) -> dict[str, Any]:
 
 
 CapabilityHandler = Callable[[Mapping[str, Any]], DataBundle]
+ContextualCapabilityHandler = Callable[[Mapping[str, Any], "CapabilityExecutionContext"], DataBundle]
+
+
+@dataclass(frozen=True, slots=True)
+class CapabilityExecutionContext:
+    """Trusted runtime context never supplied by the planning model."""
+
+    session_id: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "session_id", _text(self.session_id, "capability execution session_id"))
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,7 +83,8 @@ class DomainCapability:
 
     domain_id: str
     descriptor: CapabilityDescriptor
-    handler: CapabilityHandler
+    handler: CapabilityHandler | ContextualCapabilityHandler
+    requires_execution_context: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "domain_id", _text(self.domain_id, "capability.domain_id"))
@@ -76,6 +92,8 @@ class DomainCapability:
             raise GatewayConfigurationError("capability.descriptor must be a CapabilityDescriptor.")
         if not callable(self.handler):
             raise GatewayConfigurationError("capability.handler must be callable.")
+        if not isinstance(self.requires_execution_context, bool):
+            raise GatewayConfigurationError("capability.requires_execution_context must be a boolean.")
 
 
 class DomainGateway:
@@ -125,6 +143,7 @@ class DomainGateway:
         domain_id: str,
         capability_id: str,
         arguments: Mapping[str, Any],
+        execution_context: CapabilityExecutionContext | None = None,
     ) -> DataBundle:
         """Run one manifest-granted handler and enforce its domain on the result."""
 
@@ -140,7 +159,13 @@ class DomainGateway:
                 f"manifest grants '{safe_capability_id}' for '{resources.manifest.domain_id}', "
                 "but no handler is registered."
             )
-        bundle = capability.handler(_arguments(arguments))
+        safe_arguments = _arguments(arguments)
+        if capability.requires_execution_context:
+            if execution_context is None:
+                raise GatewayPermissionError("capability requires trusted execution context.")
+            bundle = capability.handler(safe_arguments, execution_context)  # type: ignore[call-arg]
+        else:
+            bundle = capability.handler(safe_arguments)  # type: ignore[call-arg]
         if not isinstance(bundle, DataBundle):
             raise GatewayConfigurationError("capability handler must return a DataBundle.")
         if bundle.domain_id != resources.manifest.domain_id:

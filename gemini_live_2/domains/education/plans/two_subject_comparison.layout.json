@@ -62,5 +62,20 @@
       "required": false,
       "description": "Nhãn ngắn cho ảnh."
     }
-  ]
+  ],
+  "semantic_spec": {
+    "mechanics": [],
+    "slots": [
+      "$block_1_content",
+      "$block_2_asset_id",
+      "$block_2_label",
+      "$block_3_asset_id",
+      "$block_3_label"
+    ],
+    "component_contracts": [
+      {"widget_id": "text", "initial_state": {"visibility": "visible"}},
+      {"widget_id": "image", "initial_state": {"visibility": "visible"}},
+      {"widget_id": "image", "initial_state": {"visibility": "visible"}}
+    ]
+  }
 }

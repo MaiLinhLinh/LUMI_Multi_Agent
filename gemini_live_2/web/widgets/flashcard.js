@@ -43,8 +43,8 @@ function renderFront(front) {
   const face = document.createElement("section");
   face.className = "lumi-widget-flashcard-face lumi-widget-flashcard-front";
   const image = document.createElement("img");
-  image.src = typeof front.asset_url === "string" ? front.asset_url : "";
-  image.alt = "";
+  image.src = front.source?.url || (typeof front.asset_url === "string" ? front.asset_url : "");
+  image.alt = front.source?.caption || "";
   image.draggable = false;
   const text = document.createElement("p");
   text.textContent = typeof front.text === "string" ? front.text : "";

@@ -146,6 +146,28 @@ class LayoutTemplateTests(unittest.TestCase):
         self.assertEqual(restored.blocks[0].children[0].props["asset_id"], "dog")
         self.assertEqual(restored.blocks[0].children[1].props["content"], "Chó")
         self.assertNotIn("label", restored.blocks[0].children[0].props)
+        self.assertEqual(template.semantic_spec.mechanics, ("select",))
+        self.assertEqual(template.semantic_spec.component_contracts[0].child_widget_ids, ("image", "text"))
+
+    def test_remote_image_result_is_replaced_with_a_slot_not_saved_as_temporary_data(self) -> None:
+        template = self.extractor.extract(
+            plan=PresentationPlan(
+                domain_id="education",
+                blocks=(PlanBlock(
+                    "image", GridRect(1, 1, 12, 10),
+                    {"remote_image_result_id": "img_session_ephemeral"},
+                ),),
+            ),
+            template_id="remote_image_frame",
+            description="Một ảnh lớn ở giữa.",
+        )
+
+        saved = template.to_dict()
+        self.assertNotIn("img_session_ephemeral", str(saved))
+        self.assertEqual(
+            saved["blocks"][0]["props"]["remote_image_result_id"],
+            "$block_1_remote_image_result_id",
+        )
 
 
 if __name__ == "__main__":

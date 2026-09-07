@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import shutil
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from gemini_live_2.catalogs.domains import DomainRegistry
 from gemini_live_2.gateway import DomainGateway
@@ -73,6 +75,21 @@ class _PlanAgentStub:
         )
 
 
+class _SequentialPlanAgentStub(_PlanAgentStub):
+    """Returns a rejected plan then the Agent's supported alternative."""
+
+    def __init__(self, commands) -> None:
+        super().__init__()
+        self._commands = list(commands)
+
+    async def plan(self, request):
+        self.requests.append(request)
+        return PlanAgentResult(
+            command=self._commands.pop(0),
+            data_bundle=DataBundle(domain_id=request.domain_id, data={}),
+        )
+
+
 class _RepairingCompiler:
     """Reject once, then delegate to the real compiler."""
 
@@ -126,6 +143,49 @@ class LiveRoutingTests(unittest.TestCase):
         self.assertIn("cô giáo thân thiện", result.response["presentation_instruction"])
         self.assertEqual(self.orchestrator.active_panel("s1").revision, 1)
         self.assertEqual(self.agent.requests[0].recent_history[0]["text"], "Cho bé xem hai con vật")
+
+    def test_new_template_is_curated_only_after_the_exact_browser_render_confirmation(self) -> None:
+        with TemporaryDirectory() as directory:
+            domains_root = Path(directory) / "domains"
+            shutil.copytree(PROJECT_ROOT / "domains", domains_root)
+            registry = DomainRegistry(domains_root)
+            agent = _PlanAgentStub()
+            agent.command = CreateSurfacePlan(
+                blocks=(_plan_block("image", 3, 2, 10, 7, {"asset_id": "dog"}),),
+                template_description="Một ảnh lớn ở giữa.",
+            )
+            orchestrator = LiveSessionOrchestrator(
+                domain_registry=registry,
+                plan_agent=agent,  # type: ignore[arg-type]
+                panel_compiler=PanelCompiler(build_default_widget_registry()),
+            )
+
+            result = asyncio.run(orchestrator.execute_tool_call_result(
+                session_id="template-confirm",
+                tool_name="route_request",
+                arguments={"domain_id": "education", "intent": "Hiển thị một chú chó."},
+            ))
+            surface = result.presentation.panel["surface"]  # type: ignore[union-attr]
+            resources = registry.load("education")
+            self.assertFalse(resources.templates.contains("tm2"))
+
+            ignored = orchestrator.confirm_template_candidate_rendered(
+                session_id="template-confirm",
+                surface_id=surface["surface_id"],
+                revision=surface["revision"] + 1,
+            )
+            self.assertEqual(ignored["status"], "ignored")
+            self.assertFalse(resources.templates.contains("tm2"))
+
+            confirmed = orchestrator.confirm_template_candidate_rendered(
+                session_id="template-confirm",
+                surface_id=surface["surface_id"],
+                revision=surface["revision"],
+            )
+            self.assertEqual(confirmed, {"status": "completed", "template_id": "tm2"})
+            saved = registry.load("education").templates.load_layout_template("tm2")
+            self.assertEqual(saved.semantic_spec.mechanics, ())
+            self.assertEqual(saved.semantic_spec.component_contracts[0].widget_id, "image")
 
     def test_route_materializes_an_existing_template_from_bindings(self) -> None:
         self.agent.command = UseExistingSurfaceTemplate(
@@ -691,6 +751,112 @@ class LiveRoutingTests(unittest.TestCase):
         assert feedback is not None
         self.assertEqual(feedback["error_code"], "grid_overlap")
         self.assertEqual(feedback["details"]["overlap_cells"], [{"col": 7, "row": 6}])
+
+    def test_unsupported_interaction_receives_feedback_then_uses_a_real_widget(self) -> None:
+        invalid_fake_flip = CreateSurfacePlan(blocks=(
+            _plan_block("image", 1, 2, 6, 5, {"asset_id": "cat", "action": "flip"}),
+        ))
+        supported_flashcard = CreateSurfacePlan(blocks=(
+            _plan_block("flashcard", 4, 2, 9, 7, {
+                "front": {"asset_id": "cat", "text": "Con mèo"},
+                "back": {"word": "CAT", "phonetic": "/kæt/", "meaning": "con mèo"},
+            }),
+        ))
+        agent = _SequentialPlanAgentStub([invalid_fake_flip, supported_flashcard])
+        orchestrator = LiveSessionOrchestrator(
+            domain_registry=self.registry,
+            plan_agent=agent,  # type: ignore[arg-type]
+            panel_compiler=PanelCompiler(build_default_widget_registry()),
+        )
+
+        result = asyncio.run(orchestrator.execute_tool_call_result(
+            session_id="s-supported-mechanic",
+            tool_name="route_request",
+            arguments={"domain_id": "education", "intent": "Tạo thẻ lật cho từ CAT."},
+        ))
+
+        self.assertEqual(result.response["status"], "completed")
+        self.assertEqual(len(agent.requests), 2)
+        feedback = agent.requests[1].validation_feedback
+        self.assertIsNotNone(feedback)
+        assert feedback is not None
+        self.assertEqual(feedback["error_code"], "invalid_widget_contract")
+        self.assertEqual(feedback["details"], {"block_index": 1, "widget_id": "image"})
+        active = orchestrator.active_panel("s-supported-mechanic")
+        assert active is not None
+        self.assertEqual(active.document.components[0].type, "flashcard")
+
+    def test_runtime_diagnostic_repairs_only_the_active_component_revision(self) -> None:
+        initial = asyncio.run(self.orchestrator.execute_tool_call_result(
+            session_id="s-runtime-repair",
+            tool_name="route_request",
+            arguments={"domain_id": "education", "intent": "Hiển thị chó và mèo."},
+        ))
+        self.assertEqual(initial.response["status"], "completed")
+        before = self.orchestrator.active_panel("s-runtime-repair")
+        assert before is not None
+        self.agent.command = PatchSurfacePlan(
+            surface_id=before.document.surface_id,
+            base_revision=before.revision,
+            operations=(UpdatePropsOperation(anchor_id="b", changes={"asset_id": "cat"}),),
+        )
+
+        result = asyncio.run(self.orchestrator.repair_runtime_diagnostic(
+            session_id="s-runtime-repair",
+            diagnostic={
+                "surface_id": before.document.surface_id,
+                "revision": before.revision,
+                "component_id": before.document.anchor_map["b"].component_id,
+                "anchor_id": "b",
+                "error_type": "image_load_failed",
+                "observed": {"status": "error", "retry_attempts": 1},
+                "repair_scope": "surface_plan",
+            },
+        ))
+
+        self.assertEqual(result.response["status"], "completed")
+        self.assertEqual(result.response["kind"], "runtime_repair")
+        self.assertIsNotNone(result.presentation)
+        request = self.agent.requests[-1]
+        self.assertEqual(request.runtime_feedback, {
+            "kind": "runtime_feedback",
+            "surface_id": before.document.surface_id,
+            "revision": before.revision,
+            "component_id": before.document.anchor_map["b"].component_id,
+            "anchor_id": "b",
+            "error_type": "image_load_failed",
+            "observed": {"status": "error", "retry_attempts": 1},
+            "repair_scope": "surface_plan",
+        })
+        after = self.orchestrator.active_panel("s-runtime-repair")
+        assert after is not None
+        self.assertEqual(after.revision, before.revision + 1)
+        self.assertEqual(after.document.component_map[after.document.anchor_map["b"].component_id].props["asset_id"], "cat")
+
+    def test_runtime_diagnostic_for_a_stale_revision_is_ignored(self) -> None:
+        asyncio.run(self.orchestrator.execute_tool_call_result(
+            session_id="s-stale-runtime-diagnostic",
+            tool_name="route_request",
+            arguments={"domain_id": "education", "intent": "Hiển thị chó và mèo."},
+        ))
+        active = self.orchestrator.active_panel("s-stale-runtime-diagnostic")
+        assert active is not None
+
+        result = asyncio.run(self.orchestrator.repair_runtime_diagnostic(
+            session_id="s-stale-runtime-diagnostic",
+            diagnostic={
+                "surface_id": active.document.surface_id,
+                "revision": active.revision - 1,
+                "component_id": active.document.anchor_map["b"].component_id,
+                "anchor_id": "b",
+                "error_type": "image_load_failed",
+                "observed": {"status": "error", "retry_attempts": 1},
+                "repair_scope": "surface_plan",
+            },
+        ))
+
+        self.assertEqual(result.response["status"], "ignored")
+        self.assertEqual(len(self.agent.requests), 1)
 
     def test_unknown_domain_is_returned_as_a_safe_error(self) -> None:
         result = asyncio.run(self.orchestrator.execute_tool_call_result(

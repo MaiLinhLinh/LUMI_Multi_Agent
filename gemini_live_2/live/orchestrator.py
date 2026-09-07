@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import Any, Mapping
 
 from gemini_live_2.catalogs.domains import DomainRegistry, ManifestError
 from gemini_live_2.catalogs.layout_templates import (
@@ -72,10 +72,26 @@ class SurfaceDeleteResult:
     response: dict[str, Any]
 
 
+@dataclass(frozen=True, slots=True)
+class PendingTemplateCandidate:
+    """A compiled create plan awaiting browser confirmation before curation."""
+
+    surface_id: str
+    revision: int
+    domain_id: str
+    command: CreateSurfacePlan
+
+
 class LiveSessionOrchestrator:
     """Create a new SurfaceDocument only when Gemini Live explicitly routes a request."""
 
     _MAX_PLAN_REPAIR_ATTEMPTS = 2
+    _RUNTIME_REPAIR_ERROR_TYPES = frozenset({
+        "image_load_failed",
+        "renderer_missing",
+        "widget_render_failed",
+        "state_apply_failed",
+    })
 
     def __init__(
         self,
@@ -91,6 +107,7 @@ class LiveSessionOrchestrator:
         self._panel_compiler = panel_compiler
         self._technical_states: dict[str, LiveSessionState] = {}
         self._active_panels: dict[str, ActivePanelState] = {}
+        self._pending_template_candidates: dict[str, PendingTemplateCandidate] = {}
 
     def session_memory(self, session_id: str):
         return self._memory_store.get(session_id)
@@ -107,6 +124,11 @@ class LiveSessionOrchestrator:
 
     def reset_session_state(self, session_id: str) -> None:
         self._technical_states[session_id] = LiveSessionState.IDLE
+        if self._panel_compiler is not None:
+            clear_search_results = getattr(self._panel_compiler, "clear_search_results", None)
+            if callable(clear_search_results):
+                clear_search_results(session_id)
+        self._pending_template_candidates.pop(session_id, None)
 
     def active_panel(self, session_id: str) -> ActivePanelState | None:
         return self._active_panels.get(session_id)
@@ -135,6 +157,21 @@ class LiveSessionOrchestrator:
             ),
             "visual_effects": _visual_effects(state.document),
         }
+
+    def runtime_repair_presentation_context(
+        self, *, session_id: str, surface_id: str, revision: object
+    ) -> dict[str, Any]:
+        """Return a map only after the browser confirms the active repair revision."""
+
+        state = self._active_panels.get(session_id)
+        if state is None:
+            raise ValueError("no active surface")
+        if surface_id != state.document.surface_id or revision != state.revision:
+            raise ValueError("surface_id or revision is not active")
+        context = self.active_panel_presentation_context(session_id)
+        if context is None:  # pragma: no cover - guarded by the active state above.
+            raise ValueError("active surface context is unavailable")
+        return context
 
     async def execute_tool_call_result(
         self,
@@ -165,6 +202,7 @@ class LiveSessionOrchestrator:
                     recent_history=history,
                     active_surface_summary=active_surface_summary,
                     validation_feedback=validation_feedback,
+                    session_id=session_id,
                 ))
                 try:
                     state = self._apply_surface_command(
@@ -198,11 +236,7 @@ class LiveSessionOrchestrator:
             return OrchestratedToolResult({"status": "error", "detail": str(exc)})
 
         self._active_panels[session_id] = state
-        if isinstance(planned.command, CreateSurfacePlan) and planned.command.template_description:
-            self._persist_reusable_template(
-                command=planned.command,
-                domain_resources=resources,
-            )
+        self._track_template_candidate(session_id=session_id, command=planned.command, state=state)
         payload = surface_document_client_payload(
             state.document,
             asset_urls={
@@ -224,6 +258,148 @@ class LiveSessionOrchestrator:
             "visual_effects": _visual_effects(state.document),
         }
         return OrchestratedToolResult(response=response, presentation=RenderedPresentation(panel=payload))
+
+    async def repair_runtime_diagnostic(
+        self,
+        *,
+        session_id: str,
+        diagnostic: Mapping[str, Any],
+    ) -> OrchestratedToolResult:
+        """Repair an active surface only after a browser-observed fatal error.
+
+        This is deliberately separate from Gemini Live routing: a browser cannot
+        supply a plan, content, or replacement asset.  It can only identify the
+        current compiler-owned component and the bounded observed failure.
+        """
+
+        try:
+            active, runtime_feedback = self._validate_runtime_diagnostic(
+                session_id=session_id,
+                diagnostic=diagnostic,
+            )
+        except ValueError as exc:
+            trace("RUNTIME_DIAGNOSTIC_IGNORED reason=%s", exc)
+            return OrchestratedToolResult({"status": "ignored", "detail": str(exc)})
+        if self._domain_registry is None or self._plan_agent is None or self._panel_compiler is None:
+            return OrchestratedToolResult({"status": "error", "detail": "Panel routing is not configured."})
+
+        try:
+            route = RouteRequest.from_dict({
+                "domain_id": active.document.domain_id,
+                "intent": active.purpose,
+            })
+            resources = self._domain_registry.load(route.domain_id)
+            history = tuple(
+                {"role": item["role"], "text": item["content"]}
+                for item in self.session_memory(session_id).history
+                if item.get("role") in {"user", "assistant"} and item.get("content")
+            )
+            validation_feedback: dict[str, Any] | None = None
+            active_surface_summary = self.active_surface_summary(session_id)
+            for repair_attempt in range(self._MAX_PLAN_REPAIR_ATTEMPTS + 1):
+                planned = await self._plan_agent.plan(PlanAgentRequest(
+                    domain_id=route.domain_id,
+                    intent=route.intent,
+                    recent_history=history,
+                    active_surface_summary=active_surface_summary,
+                    validation_feedback=validation_feedback,
+                    runtime_feedback=runtime_feedback,
+                    session_id=session_id,
+                ))
+                try:
+                    state = self._apply_surface_command(
+                        session_id=session_id,
+                        route=route,
+                        command=planned.command,
+                        data_bundle=planned.data_bundle,
+                        domain_resources=resources,
+                    )
+                    break
+                except PanelCompilationError as exc:
+                    if repair_attempt >= self._MAX_PLAN_REPAIR_ATTEMPTS:
+                        raise
+                    validation_feedback = exc.for_plan_agent()
+            else:  # pragma: no cover - loop always breaks or raises.
+                raise PlanAgentError("Plan Agent did not produce a compilable runtime repair.")
+        except (ManifestError, PanelCompilationError, PlanAgentError, ValueError) as exc:
+            return OrchestratedToolResult({"status": "error", "detail": str(exc)})
+
+        self._active_panels[session_id] = state
+        self._track_template_candidate(session_id=session_id, command=planned.command, state=state)
+        payload = surface_document_client_payload(
+            state.document,
+            asset_urls={
+                asset.id: f"/assets/domains/{state.document.domain_id}/{asset.id}"
+                for asset in resources.assets.assets
+            },
+        )
+        response = {
+            "status": "completed",
+            "kind": "runtime_repair",
+            "domain_id": state.document.domain_id,
+            "panel_id": state.document.surface_id,
+            "revision": state.revision,
+            "visual_stage_map": render_visual_stage_map(
+                state.document,
+                widget_registry=self._panel_compiler.widget_registry,
+                asset_catalog=resources.assets,
+            ),
+            "visual_effects": _visual_effects(state.document),
+        }
+        return OrchestratedToolResult(response=response, presentation=RenderedPresentation(panel=payload))
+
+    def _validate_runtime_diagnostic(
+        self,
+        *,
+        session_id: str,
+        diagnostic: Mapping[str, Any],
+    ) -> tuple[ActivePanelState, dict[str, Any]]:
+        if not isinstance(diagnostic, Mapping):
+            raise ValueError("runtime diagnostic must be an object")
+        active = self._active_panels.get(session_id)
+        if active is None:
+            raise ValueError("no active surface")
+        document = active.document
+        surface_id = diagnostic.get("surface_id")
+        revision = diagnostic.get("revision")
+        component_id = diagnostic.get("component_id")
+        anchor_id = diagnostic.get("anchor_id")
+        error_type = diagnostic.get("error_type")
+        repair_scope = diagnostic.get("repair_scope")
+        observed = diagnostic.get("observed")
+        if surface_id != document.surface_id or revision != document.revision:
+            raise ValueError("surface_id or revision is not active")
+        if not isinstance(component_id, str) or component_id not in document.component_map:
+            raise ValueError("component_id is not in the active surface")
+        anchor = document.anchor_map.get(anchor_id) if isinstance(anchor_id, str) else None
+        if anchor is None or anchor.component_id != component_id:
+            raise ValueError("anchor_id does not belong to the active component")
+        if error_type not in self._RUNTIME_REPAIR_ERROR_TYPES:
+            raise ValueError("runtime diagnostic error_type is not repairable")
+        if repair_scope != "surface_plan":
+            raise ValueError("runtime diagnostic repair_scope is not supported")
+        if not isinstance(observed, Mapping) or len(observed) > 12:
+            raise ValueError("runtime diagnostic observed must be a small object")
+        normalized_observed: dict[str, str | int | float | bool | None] = {}
+        for key, value in observed.items():
+            if not isinstance(key, str) or not key or len(key) > 80:
+                raise ValueError("runtime diagnostic observed contains an invalid key")
+            if isinstance(value, str):
+                if len(value) > 240:
+                    raise ValueError("runtime diagnostic observed string is too long")
+            elif not isinstance(value, (int, float, bool, type(None))):
+                raise ValueError("runtime diagnostic observed values must be scalar")
+            normalized_observed[key] = value
+        return active, {
+            "kind": "runtime_feedback",
+            "surface_id": document.surface_id,
+            "revision": document.revision,
+            "component_id": component_id,
+            "anchor_id": anchor_id,
+            "error_type": error_type,
+            "observed": normalized_observed,
+            "repair_scope": repair_scope,
+        }
 
     def _apply_surface_command(
         self,
@@ -248,6 +424,7 @@ class LiveSessionOrchestrator:
                 plan=PresentationPlan(domain_id=route.domain_id, blocks=command.blocks),
                 data_bundle=data_bundle,
                 domain_resources=domain_resources,
+                search_session_id=session_id,
             )
             previous = self._active_panels.get(session_id)
             if previous is not None:
@@ -266,6 +443,7 @@ class LiveSessionOrchestrator:
                 plan=plan,
                 data_bundle=data_bundle,
                 domain_resources=domain_resources,
+                search_session_id=session_id,
             )
             previous = self._active_panels.get(session_id)
             if previous is not None:
@@ -282,8 +460,63 @@ class LiveSessionOrchestrator:
             domain_resources=domain_resources,
         )
 
-    def _persist_reusable_template(self, *, command: CreateSurfacePlan, domain_resources: Any) -> None:
-        """Store only a fully compiled new layout; persistence never replaces UI success."""
+    def confirm_template_candidate_rendered(
+        self, *, session_id: str, surface_id: str, revision: object
+    ) -> dict[str, Any]:
+        """Persist a new reusable template only after its exact browser render succeeds."""
+
+        candidate = self._pending_template_candidates.get(session_id)
+        active = self._active_panels.get(session_id)
+        if candidate is None:
+            return {"status": "ignored", "detail": "no pending template candidate"}
+        if (
+            not isinstance(revision, int)
+            or surface_id != candidate.surface_id
+            or revision != candidate.revision
+            or active is None
+            or active.document.surface_id != candidate.surface_id
+            or active.revision != candidate.revision
+        ):
+            return {"status": "ignored", "detail": "template candidate revision is not active"}
+
+        self._pending_template_candidates.pop(session_id, None)
+        if self._domain_registry is None:
+            return {"status": "error", "detail": "domain registry is not configured"}
+        try:
+            resources = self._domain_registry.load(candidate.domain_id)
+            template_id = self._persist_reusable_template(
+                command=candidate.command,
+                domain_resources=resources,
+            )
+        except (ManifestError, ValueError) as exc:
+            trace("TEMPLATE_SAVE_SKIPPED reason=%s", str(exc)[:300])
+            return {"status": "error", "detail": str(exc)}
+        if template_id is None:
+            return {"status": "ignored", "detail": "template could not be curated"}
+        return {"status": "completed", "template_id": template_id}
+
+    def _track_template_candidate(
+        self,
+        *,
+        session_id: str,
+        command: CreateSurfacePlan | PatchSurfacePlan | UseExistingSurfaceTemplate,
+        state: ActivePanelState,
+    ) -> None:
+        """Only newly created, explicitly reusable surfaces can become templates."""
+
+        self._pending_template_candidates.pop(session_id, None)
+        if not isinstance(command, CreateSurfacePlan) or not command.template_description:
+            return
+        self._pending_template_candidates[session_id] = PendingTemplateCandidate(
+            surface_id=state.document.surface_id,
+            revision=state.revision,
+            domain_id=state.document.domain_id,
+            command=command,
+        )
+        trace("TEMPLATE_CANDIDATE_PENDING surface=%s revision=%s", state.document.surface_id, state.revision)
+
+    def _persist_reusable_template(self, *, command: CreateSurfacePlan, domain_resources: Any) -> str | None:
+        """Curate a browser-confirmed plan into a data-free reusable TemplateSpec."""
 
         assert self._panel_compiler is not None
         try:
@@ -298,8 +531,10 @@ class LiveSessionOrchestrator:
             )
             catalog.save_layout_template(template)
             trace("TEMPLATE_SAVED id=%s", template.template_id)
+            return template.template_id
         except (LayoutTemplateError, TemplateCatalogError, OSError, ValueError) as exc:
             trace("TEMPLATE_SAVE_SKIPPED reason=%s", str(exc)[:300])
+            return None
 
     def _apply_patch_surface_plan(
         self,
@@ -328,11 +563,11 @@ class LiveSessionOrchestrator:
                 PlanBlock(
                     widget_id=component.type,
                     grid=component.layout,
-                    props=component.props,
+                    props=_plan_props_from_component(component.props),
                     initial_visibility=str(component.state["visibility"]),
                     initial_state=component.state,
                     children=tuple(
-                        ChoiceChild(widget_id=child.type, props=child.props)
+                        ChoiceChild(widget_id=child.type, props=_plan_props_from_component(child.props))
                         for child in component.children
                     ),
                 ),
@@ -425,6 +660,7 @@ class LiveSessionOrchestrator:
             surface_id=active.document.surface_id,
             component_ids=tuple(component_id for component_id, _ in planned_blocks),
             anchor_ids_by_component_key=anchor_ids_by_component_key,
+            search_session_id=session_id,
         )
         return ActivePanelState(
             document=replace(document, revision=active.revision + 1),
@@ -703,3 +939,16 @@ def _next_runtime_component_id(component_ids: Any) -> int:
 
     numeric_ids = [int(item) for item in component_ids if isinstance(item, str) and item.isdigit()]
     return max(numeric_ids, default=0) + 1
+
+
+def _plan_props_from_component(props: Any) -> dict[str, Any]:
+    """Remove compiler-owned remote source metadata before a structural patch.
+
+    The stored ``remote_image_result_id`` remains in plan props.  A fresh
+    Compiler pass resolves it again for the current session, while raw provider
+    URLs never become legal Plan-Agent input.
+    """
+
+    if not isinstance(props, dict):
+        return dict(props)
+    return {key: value for key, value in props.items() if key != "source"}

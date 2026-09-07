@@ -21,7 +21,7 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from gemini_live_2.live.gemini_session import GeminiLiveSession
+from gemini_live_2.live.gemini_session import GeminiLiveSession, GeminiLiveSessionError
 from gemini_live_2.live.orchestrator import LiveSessionOrchestrator
 from gemini_live_2.live.persistent_transport import PersistentLiveTransportStore
 from gemini_live_2.live.registry import LiveToolRegistry
@@ -29,6 +29,8 @@ from gemini_live_2.catalogs.domains import DomainRegistry, ManifestError
 from gemini_live_2.gateway import DomainGateway
 from gemini_live_2.panel import PanelCompiler
 from gemini_live_2.plan_agent import PlanAgent
+from gemini_live_2.search import BraveSearchClient, BraveSearchQuota, SearchResultStore
+from gemini_live_2.search.capabilities import build_search_capabilities
 from gemini_live_2.settings import load_settings
 from gemini_live_2.trace import TRACE_LEVEL, trace
 from gemini_live_2.widgets import build_default_widget_registry
@@ -46,7 +48,7 @@ def _trace_timestamp() -> str:
 
 
 def configure_logging() -> None:
-    for name in ("lumi.trace", "lumi.gemini_live", "lumi.gemini_live.web", "lumi.plan_agent"):
+    for name in ("lumi.trace", "lumi.gemini_live", "lumi.gemini_live.web", "lumi.plan_agent", "lumi.search.brave"):
         current = logging.getLogger(name)
         current.setLevel(TRACE_LEVEL if name == "lumi.trace" else logging.INFO)
         current.propagate = False
@@ -63,7 +65,27 @@ settings = load_settings()
 domain_registry = DomainRegistry(ROOT / "domains")
 domain_gateway = DomainGateway(domain_registry)
 widget_registry = build_default_widget_registry()
-panel_compiler = PanelCompiler(widget_registry)
+search_result_store = SearchResultStore(ttl_seconds=30 * 60)
+search_quota = BraveSearchQuota(max_requests_per_session=settings.brave_search_max_requests_per_session)
+
+
+def _brave_search_client() -> BraveSearchClient:
+    """Construct only on a capability call, so absent config becomes tool feedback."""
+
+    return BraveSearchClient(
+        api_key=settings.brave_search_api_key,
+        timeout_seconds=settings.brave_search_timeout_seconds,
+    )
+
+
+for capability in build_search_capabilities(
+    domain_id="education",
+    client_factory=_brave_search_client,
+    quota=search_quota,
+    result_store=search_result_store,
+):
+    domain_gateway.register(capability)
+panel_compiler = PanelCompiler(widget_registry, search_result_store=search_result_store)
 plan_agent = PlanAgent(
     settings,
     domain_registry=domain_registry,
@@ -244,6 +266,46 @@ async def live_socket(websocket: WebSocket) -> None:
                         await event({"type": "live:error", "message": "Lumi đang xử lý lượt trước."})
                     else:
                         text_task = asyncio.create_task(conversation.submit_text(query))
+                elif kind == "runtime:diagnostic":
+                    diagnostic_result = await orchestrator.repair_runtime_diagnostic(
+                        session_id=session_id,
+                        diagnostic=command,
+                    )
+                    if diagnostic_result.presentation is not None:
+                        await event({
+                            "type": "panel_update",
+                            "panel": diagnostic_result.presentation.panel,
+                            "runtime_repair": True,
+                        })
+                    await event({
+                        "type": "runtime:diagnostic_result",
+                        "status": diagnostic_result.response.get("status", "error"),
+                        "detail": diagnostic_result.response.get("detail"),
+                    })
+                elif kind == "runtime:repair_rendered":
+                    try:
+                        panel_context = orchestrator.runtime_repair_presentation_context(
+                            session_id=session_id,
+                            surface_id=str(command.get("surface_id") or ""),
+                            revision=command.get("revision"),
+                        )
+                        await conversation.sync_surface_context(panel_context)
+                    except (ValueError, GeminiLiveSessionError) as exc:
+                        trace("RUNTIME_REPAIR_CONTEXT_SYNC_IGNORED reason=%s", exc)
+                        await event({"type": "runtime:diagnostic_result", "status": "ignored", "detail": str(exc)})
+                    else:
+                        await event({"type": "runtime:diagnostic_result", "status": "context_synced"})
+                elif kind == "surface:rendered":
+                    template_result = orchestrator.confirm_template_candidate_rendered(
+                        session_id=session_id,
+                        surface_id=str(command.get("surface_id") or ""),
+                        revision=command.get("revision"),
+                    )
+                    trace(
+                        "TEMPLATE_RENDER_CONFIRMATION status=%s detail=%s",
+                        template_result.get("status"),
+                        template_result.get("detail") or template_result.get("template_id"),
+                    )
                 elif kind == "panel:interaction":
                     try:
                         interaction_result = orchestrator.apply_panel_interaction(

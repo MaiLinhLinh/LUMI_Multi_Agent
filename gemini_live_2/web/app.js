@@ -37,9 +37,14 @@ let panelInteractionRoot = null;
 let audioContext = null, sampleRate = null, nextAudioAt = 0, pendingAudioMarker = null;
 let pendingAudioChunkTurnId = null, activeAudioTurnId = null;
 let activePanelRevision = null;
+let activePanelSurfaceId = null;
 let sources = new Set(), inputTranscriptBubble = null, traceBubble = null;
 let microphoneStream = null, microphoneContext = null, microphoneSource = null, microphoneProcessor = null, muteGain = null;
 let recording = false, openingMicrophone = false;
+// Gemini Live streams PCM in short buffers.  A tiny overlap prevents clicks or
+// chirps at buffer boundaries when adjacent samples do not meet at the same
+// amplitude.
+const PCM_CROSSFADE_SECONDS = 0.0015;
 // Gemini remains the only turn detector.  This gate runs only while Gemini is
 // busy, so it avoids streaming endless silence yet immediately passes a real
 // barge-in back to Gemini for normal VAD handling.
@@ -55,6 +60,33 @@ function reportVisualDiagnostic(phase, details = {}) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ phase: `visual_${phase}`, message }),
   }).catch(() => {});
+}
+
+function reportRuntimeDiagnostic(diagnostic) {
+  if (!diagnostic || socket?.readyState !== WebSocket.OPEN || !activePanelSurfaceId || !Number.isInteger(activePanelRevision)) {
+    reportVisualDiagnostic("runtime_diagnostic_ignored", { reason: "missing_active_surface", diagnostic });
+    return;
+  }
+  const payload = {
+    type: "runtime:diagnostic",
+    surface_id: activePanelSurfaceId,
+    revision: activePanelRevision,
+    component_id: String(diagnostic.component_id || ""),
+    anchor_id: String(diagnostic.anchor_id || ""),
+    error_type: String(diagnostic.error_type || ""),
+    observed: diagnostic.observed && typeof diagnostic.observed === "object" ? diagnostic.observed : {},
+    repair_scope: String(diagnostic.repair_scope || "surface_plan"),
+  };
+  if (!payload.component_id || !payload.anchor_id || !payload.error_type) {
+    reportVisualDiagnostic("runtime_diagnostic_ignored", { reason: "invalid_diagnostic", diagnostic: payload });
+    return;
+  }
+  socket.send(JSON.stringify(payload));
+  reportVisualDiagnostic("runtime_diagnostic_sent", {
+    component_id: payload.component_id,
+    anchor_id: payload.anchor_id,
+    error_type: payload.error_type,
+  });
 }
 
 function addMessage(role, text) {
@@ -106,10 +138,20 @@ function playPcm(bytes) {
   const output = buffer.getChannelData(0);
   for (let i = 0; i < input.length; i += 1) output[i] = input[i] / 32768;
   const source = audioContext.createBufferSource();
-  source.buffer = buffer; source.connect(audioContext.destination);
+  const gain = audioContext.createGain();
+  source.buffer = buffer; source.connect(gain); gain.connect(audioContext.destination);
   source.lumiTurnId = pcmTurnId;
-  const start = Math.max(audioContext.currentTime + 0.040, nextAudioAt);
-  source.start(start); nextAudioAt = start + buffer.duration;
+  const fade = Math.min(PCM_CROSSFADE_SECONDS, buffer.duration / 4);
+  const start = Math.max(audioContext.currentTime + 0.020, nextAudioAt);
+  const end = start + buffer.duration;
+  // Do not abruptly join independently scheduled AudioBufferSourceNodes. The
+  // next buffer starts slightly before this one ends, producing one continuous
+  // PCM stream to the listener.
+  gain.gain.setValueAtTime(0, start);
+  gain.gain.linearRampToValueAtTime(1, start + fade);
+  gain.gain.setValueAtTime(1, Math.max(start + fade, end - fade));
+  gain.gain.linearRampToValueAtTime(0, end);
+  source.start(start); nextAudioAt = end - fade;
   if (pendingAudioMarker) {
     const markerMatchesPanel = Number.isInteger(pendingAudioMarker.panel_revision)
       && pendingAudioMarker.panel_revision === activePanelRevision;
@@ -190,6 +232,7 @@ function renderPanel(panel, { isUpdate = false } = {}) {
   const revealedComponentIds = isUpdate ? hiddenComponentIdsInCurrentSurface() : new Set();
   const revision = Number(panel.surface?.revision);
   activePanelRevision = Number.isInteger(revision) && revision > 0 ? revision : null;
+  activePanelSurfaceId = typeof panel.surface?.surface_id === "string" ? panel.surface.surface_id : null;
   contentPanel.hidden = false; weatherView.hidden = false; welcome.hidden = true;
   workspace.classList.remove("no-dashboard"); workspace.classList.add("has-dashboard");
   contentTitle.textContent = panel.ui_type === "weather" ? "Thông tin thời tiết" : "Nội dung trực quan";
@@ -210,20 +253,88 @@ function renderPanel(panel, { isUpdate = false } = {}) {
   content.append(renderSurfaceDocument(
     panel.surface,
     Array.isArray(panel.assets) ? panel.assets : [],
-    { revealedComponentIds },
+    { revealedComponentIds, onRuntimeDiagnostic: reportRuntimeDiagnostic },
   ));
   root.append(widgetStyles, style, content);
   // The first layout pass can happen before the shadow stylesheet arrives.
   // Refit once it has supplied the real grid and widget dimensions.
-  widgetStyles.addEventListener("load", () => fitPresentationToHost(content), { once: true });
+  widgetStyles.addEventListener("load", () => {
+    fitPresentationToHost(content);
+    checkRenderedLayout(content);
+  }, { once: true });
   fitPresentationToHost(content);
+  void confirmSurfaceRendered({
+    surfaceId: activePanelSurfaceId,
+    revision: activePanelRevision,
+    content,
+    widgetStyles,
+  });
   animationController.clear();
+}
+
+function waitForWidgetStyles(widgetStyles) {
+  if (widgetStyles.sheet) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    widgetStyles.addEventListener("load", () => resolve(true), { once: true });
+    widgetStyles.addEventListener("error", () => resolve(false), { once: true });
+  });
+}
+
+function waitForSurfaceImages(content) {
+  const images = [...content.querySelectorAll("img")];
+  if (!images.length) return Promise.resolve(true);
+  return Promise.all(images.map((image) => new Promise((resolve) => {
+    if (image.complete) {
+      resolve(image.naturalWidth > 0);
+      return;
+    }
+    image.addEventListener("lumi:image-final", (event) => {
+      resolve(event.detail?.status === "loaded");
+    }, { once: true });
+  }))).then((results) => results.every(Boolean));
+}
+
+async function confirmSurfaceRendered({ surfaceId, revision, content, widgetStyles }) {
+  if (!surfaceId || !Number.isInteger(revision)) return;
+  const stylesLoaded = await waitForWidgetStyles(widgetStyles);
+  if (!stylesLoaded || activePanelSurfaceId !== surfaceId || activePanelRevision !== revision) return;
+  fitPresentationToHost(content);
+  await new Promise((resolve) => requestAnimationFrame(resolve));
+  const imagesLoaded = await waitForSurfaceImages(content);
+  if (!imagesLoaded || activePanelSurfaceId !== surfaceId || activePanelRevision !== revision) return;
+  if (!checkRenderedLayout(content) || socket?.readyState !== WebSocket.OPEN) return;
+  socket.send(JSON.stringify({ type: "surface:rendered", surface_id: surfaceId, revision }));
+  reportVisualDiagnostic("surface_rendered_confirmed", { surface_id: surfaceId, revision });
+}
+
+function checkRenderedLayout(content) {
+  const root = content.querySelector(".surface-document-grid");
+  if (!root) return false;
+  for (const node of root.querySelectorAll("[data-component-id]")) {
+    if (node.scrollWidth <= node.clientWidth + 1 && node.scrollHeight <= node.clientHeight + 1) continue;
+    // Text and child content overflow is a presentation concern. Widgets first
+    // wrap and fit their own content; this observation must never create a new
+    // surface or invoke the Plan Agent.
+    reportVisualDiagnostic("layout_overflow", {
+      component_id: node.dataset.componentId,
+      anchor_id: node.dataset.anchorId,
+      observed: {
+        scroll_width: node.scrollWidth,
+        client_width: node.clientWidth,
+        scroll_height: node.scrollHeight,
+        client_height: node.clientHeight,
+      },
+    });
+  }
+  // An overflow diagnostic does not invalidate an otherwise rendered surface.
+  return true;
 }
 function clearPanel({ surface_id: surfaceId, revision } = {}) {
   const nextRevision = Number(revision);
   if (!Number.isInteger(nextRevision) || nextRevision <= 0) return;
   templateHost.shadowRoot?.replaceChildren();
   activePanelRevision = null;
+  activePanelSurfaceId = null;
   contentPanel.hidden = true;
   weatherView.hidden = true;
   welcome.hidden = false;
@@ -338,7 +449,20 @@ function handleMessage(event) {
     } else {
       renderPanel(payload.panel, { isUpdate: true });
       reportVisualDiagnostic("panel_update_rendered", { revision });
+      if (payload.runtime_repair && socket?.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({
+          type: "runtime:repair_rendered",
+          surface_id: payload.panel.surface.surface_id,
+          revision,
+        }));
+      }
     }
+  }
+  if (payload.type === "runtime:diagnostic_result") {
+    reportVisualDiagnostic("runtime_diagnostic_result", {
+      status: payload.status,
+      detail: payload.detail || null,
+    });
   }
   if (payload.type === "panel_clear") clearPanel(payload);
   if (payload.type === "scene") animationController.queue({

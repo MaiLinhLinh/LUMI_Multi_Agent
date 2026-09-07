@@ -29,6 +29,9 @@ class Settings:
     planner_provider: str = "gemini"
     cerebras_api_key: str = ""
     cerebras_planner_model: str = "gpt-oss-120b"
+    brave_search_api_key: str = ""
+    brave_search_timeout_seconds: float = 8.0
+    brave_search_max_requests_per_session: int = 20
 
 
 def load_settings() -> Settings:
@@ -39,6 +42,13 @@ def load_settings() -> Settings:
             return int(os.getenv(name, str(default)))
         except ValueError:
             return default
+
+    def positive_float(name: str, default: float) -> float:
+        try:
+            value = float(os.getenv(name, str(default)))
+        except ValueError:
+            return default
+        return value if value > 0 else default
 
     return Settings(
         gemini_live_api_key=os.getenv("GEMINI_LIVE_API_KEY", "").strip(),
@@ -53,4 +63,7 @@ def load_settings() -> Settings:
         planner_provider=os.getenv("PLANNER_PROVIDER", "gemini").strip().lower() or "gemini",
         cerebras_api_key=os.getenv("CEREBRAS_API_KEY", "").strip(),
         cerebras_planner_model=(os.getenv("CEREBRAS_PLANNER_MODEL", "gpt-oss-120b").strip() or "gpt-oss-120b"),
+        brave_search_api_key=os.getenv("BRAVE_SEARCH_API_KEY", "").strip(),
+        brave_search_timeout_seconds=positive_float("BRAVE_SEARCH_TIMEOUT_SECONDS", 8.0),
+        brave_search_max_requests_per_session=max(1, integer("BRAVE_SEARCH_MAX_REQUESTS_PER_SESSION", 20)),
     )

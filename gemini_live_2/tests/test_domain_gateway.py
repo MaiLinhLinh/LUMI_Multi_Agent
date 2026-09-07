@@ -20,10 +20,25 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 class DomainGatewayTests(unittest.TestCase):
-    def test_education_asset_only_flow_exposes_no_capabilities(self) -> None:
+    def test_education_search_capabilities_require_registered_backend_handlers(self) -> None:
         gateway = DomainGateway(DomainRegistry(PROJECT_ROOT / "domains"))
 
-        self.assertEqual(gateway.capability_catalog("education"), ())
+        with self.assertRaises(GatewayConfigurationError):
+            gateway.capability_catalog("education")
+        for capability_id in ("search_web", "search_image"):
+            gateway.register(DomainCapability(
+                domain_id="education",
+                descriptor=CapabilityDescriptor(
+                    id=capability_id,
+                    description=f"Test {capability_id}.",
+                    input_schema={"type": "object"},
+                ),
+                handler=lambda _: DataBundle(domain_id="education", data={}),
+            ))
+        self.assertEqual(
+            [item.id for item in gateway.capability_catalog("education")],
+            ["search_web", "search_image"],
+        )
         self.assertEqual(gateway.empty_bundle("education"), DataBundle(domain_id="education", data={}))
 
     def test_only_manifest_granted_capability_can_execute(self) -> None:

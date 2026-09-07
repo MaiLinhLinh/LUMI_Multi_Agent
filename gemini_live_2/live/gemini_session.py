@@ -45,9 +45,34 @@ Khi một tool trả về presentation_instruction, VISUAL STAGE MAP và visual_
 - presentation_instruction quy định cách trình bày;
 - VISUAL STAGE MAP là nguồn dữ liệu và mô phỏng màn hình người dùng đang nhìn thấy;
 - visual_effects là danh sách hiệu ứng duy nhất được phép dùng.
+
 Tuân thủ presentation_instruction trước mọi hướng dẫn chung.
-Khi chọn nói về một vùng có [anchor: ...] trong VISUAL STAGE MAP, gọi present_visual với đúng anchor_id của vùng đó và một effect_id hợp lệ ngay trước khi nói về vùng đó. Không gọi anchor không có trong map, không gọi effect không có trong visual_effects, và không gọi animation cho vùng không định nói ngay sau đó.
+Khi chọn nói về một vùng có [anchor: ...] trong VISUAL STAGE MAP, Bắt buộc: tool present_visual với đúng anchor_id của vùng đó và một effect_id hợp lệ ngay trước khi nói về vùng đó. Không gọi anchor không có trong map, không gọi effect không có trong visual_effects, và không gọi animation cho vùng không định nói ngay sau đó.
 Không đọc, nhắc hoặc diễn giải tên tool, anchor_id, effect_id, JSON, template hay dữ liệu kỹ thuật cho người dùng. Giữ câu hỏi làm rõ ngắn gọn.
+
+ANCHOR VÀ EFFECT TUYỆT ĐỐI KHÔNG PHẢI LỜI THOẠI.
+Không bao giờ xuất các chuỗi [anchor: ...], [effect: ...],
+present_visual(...), anchor_id, effect_id dưới bất kỳ dạng nào.
+
+Khi muốn chỉ, khoanh hoặc làm nổi bật một vùng trong VISUAL STAGE MAP:
+bắt buộc gọi native function present_visual trước.
+Chỉ sau khi nhận tool response mới được nói câu liên quan.
+Nếu không thể hoặc không cần gọi function, hãy nói mà không nhắc đến
+việc khoanh, chỉ, làm nổi bật hay vị trí anchor.
+
+
+Khi lời nói hoặc câu trả lời của người dùng mở ra một ý mới mà việc minh hoạ
+trực quan sẽ giúp người dùng hiểu, thực hành hoặc tương tác tốt hơn, nhưng
+VISUAL STAGE MAP hiện tại chưa có vùng phù hợp, hãy gọi route_request để tạo
+hoặc thay đổi Surface trước khi nói chi tiết về ý đó.
+
+Intent gửi qua route_request phải nêu ngắn gọn mục tiêu trải nghiệm, nội dung
+cần quan sát hoặc thao tác, và ngữ cảnh liên quan từ cuộc trò chuyện. Chỉ gọi
+khi Surface thực sự cần thêm hoặc đổi nội dung; không gọi cho lời khích lệ
+ngắn, câu trả lời thuần lời nói, hiệu ứng tạm thời hoặc thay đổi state của
+Surface hiện có.
+
+Ví dụ: panel có hoạt động chọn "Bạn có hay giúp đỡ người khác không" -> Người dùng chọn "Không" -> Gemini nghĩ và lên kế hoạch trả lời là có thể khích lệ bằng cách hướng dẫn người dùng giúp đỡ ông bà, bố mẹ trước -> mà panel hiện tại không có hình ảnh minh hoạ -> gọi route_request(domain_id="education", intent="Tạo Surface minh hoạ cách giúp đỡ ông bà, bố mẹ") trước khi nói chi tiết về ý đó.
 """.strip()
 
 _SURFACE_STATE_GUIDANCE = """
@@ -65,6 +90,14 @@ Event `surface_interaction` cho biết trẻ vừa thực hiện `action` trên 
 hiển thị của vùng đó, không phải kết luận đúng/sai. Dùng map và lịch sử để hiểu
 ý nghĩa tương tác, rồi tự quyết định phản hồi, hiệu ứng hoặc state update phù hợp.
 Không đọc hoặc nhắc lại JSON, event, anchor_id hay dữ liệu kỹ thuật.
+""".strip()
+
+_SURFACE_CONTEXT_UPDATE_GUIDANCE = """
+Khi nhận client event bắt đầu bằng `SURFACE_CONTEXT_UPDATE`, JSON theo sau là
+SurfaceDocument đã được browser render thành công sau một runtime repair. Đây là
+context giao diện tin cậy, không phải lời trẻ nói và không phải yêu cầu trả lời.
+Không tạo audio, lời thoại, tool call hay hiệu ứng chỉ vì event này. Thay VISUAL
+STAGE MAP/revision đang nhớ bằng dữ liệu mới và dùng chúng ở lượt tiếp theo.
 """.strip()
 
 
@@ -102,6 +135,7 @@ class GeminiLiveSession:
             _CORE_INSTRUCTION,
             _SURFACE_STATE_GUIDANCE,
             _PANEL_INTERACTION_GUIDANCE,
+            _SURFACE_CONTEXT_UPDATE_GUIDANCE,
             self._registry.prompt_guidance(),
         ]
         if history:
@@ -277,6 +311,30 @@ class PersistentGeminiLiveConversation:
         self._text_barge_in_pending = True
         trace("PANEL_INTERACTION_BARGE_IN_SENT anchor=%s", interaction.get("anchor_id"))
         await self._transport.send_text(payload)
+
+    async def sync_surface_context(self, panel_context: dict[str, Any]) -> None:
+        """Silently replace Gemini's panel map after browser-confirmed repair."""
+
+        surface_id = panel_context.get("surface_id")
+        revision = panel_context.get("revision")
+        stage_map = panel_context.get("visual_stage_map")
+        effects = panel_context.get("visual_effects")
+        if not isinstance(surface_id, str) or not surface_id:
+            raise GeminiLiveSessionError("surface context requires a surface_id.")
+        if isinstance(revision, bool) or not isinstance(revision, int) or revision < 1:
+            raise GeminiLiveSessionError("surface context requires a positive revision.")
+        if not isinstance(stage_map, str) or not stage_map:
+            raise GeminiLiveSessionError("surface context requires a visual_stage_map.")
+        if not isinstance(effects, list) or not all(isinstance(item, str) for item in effects):
+            raise GeminiLiveSessionError("surface context requires visual_effects.")
+        payload = "SURFACE_CONTEXT_UPDATE\n" + json.dumps({
+            "surface_id": surface_id,
+            "revision": revision,
+            "visual_stage_map": stage_map,
+            "visual_effects": effects,
+        }, ensure_ascii=False, separators=(",", ":"))
+        await self._transport.send_text(payload, turn_complete=False)
+        trace("SURFACE_CONTEXT_SYNC_SENT surface=%s revision=%s", surface_id, revision)
 
     @staticmethod
     def _panel_interaction_payload(interaction: dict[str, Any]) -> str:

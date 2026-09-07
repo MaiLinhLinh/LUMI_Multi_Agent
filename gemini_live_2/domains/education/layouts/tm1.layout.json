@@ -1,7 +1,7 @@
 {
   "template_id": "tm1",
   "domain_id": "education",
-  "description": "Bố cục đơn giản gồm tiêu đề ở trên, hình ảnh trung tâm, và đoạn văn kể chuyện ở dưới, phù hợp cho câu chuyện về động vật cho trẻ em.",
+  "description": "Khung bài học phép cộng: hàng trên là tiêu đề và câu hỏi; khu giữa là phương trình hình ảnh gồm hai nhóm đối tượng cách nhau bởi hai biểu tượng phép tính, kế bên là ô đáp án dạng ẩn/hiện; hàng dưới là ba thẻ lựa chọn đặt ngang, mỗi thẻ gồm tượng số phía trên và nhãn chữ phía dưới.",
   "blocks": [
     {
       "widget_id": "text",
@@ -15,35 +15,201 @@
         "content": "$block_1_content",
         "role": "title"
       },
-      "initial_visibility": "visible"
-    },
-    {
-      "widget_id": "image",
-      "grid": {
-        "col": 4,
-        "row": 2,
-        "col_span": 8,
-        "row_span": 4
-      },
-      "props": {
-        "asset_id": "$block_2_asset_id",
-        "label": "$block_2_label"
-      },
-      "initial_visibility": "visible"
+      "initial_visibility": "visible",
+      "initial_state": {
+        "visibility": "visible"
+      }
     },
     {
       "widget_id": "text",
       "grid": {
+        "col": 1,
+        "row": 2,
+        "col_span": 16,
+        "row_span": 2
+      },
+      "props": {
+        "content": "$block_2_content",
+        "role": "body"
+      },
+      "initial_visibility": "visible",
+      "initial_state": {
+        "visibility": "visible"
+      }
+    },
+    {
+      "widget_id": "object_group",
+      "grid": {
         "col": 2,
-        "row": 6,
-        "col_span": 12,
+        "row": 4,
+        "col_span": 3,
         "row_span": 4
       },
       "props": {
-        "content": "$block_3_content",
-        "role": "body"
+        "asset_id": "$block_3_asset_id",
+        "count": "$block_3_count",
+        "label": "$block_3_label"
       },
-      "initial_visibility": "visible"
+      "initial_visibility": "visible",
+      "initial_state": {
+        "visibility": "visible"
+      }
+    },
+    {
+      "widget_id": "image",
+      "grid": {
+        "col": 5,
+        "row": 5,
+        "col_span": 1,
+        "row_span": 2
+      },
+      "props": {
+        "asset_id": "$block_4_asset_id"
+      },
+      "initial_visibility": "visible",
+      "initial_state": {
+        "visibility": "visible"
+      }
+    },
+    {
+      "widget_id": "object_group",
+      "grid": {
+        "col": 6,
+        "row": 4,
+        "col_span": 4,
+        "row_span": 4
+      },
+      "props": {
+        "asset_id": "$block_5_asset_id",
+        "count": "$block_5_count",
+        "label": "$block_5_label"
+      },
+      "initial_visibility": "visible",
+      "initial_state": {
+        "visibility": "visible"
+      }
+    },
+    {
+      "widget_id": "image",
+      "grid": {
+        "col": 10,
+        "row": 5,
+        "col_span": 1,
+        "row_span": 2
+      },
+      "props": {
+        "asset_id": "$block_6_asset_id"
+      },
+      "initial_visibility": "visible",
+      "initial_state": {
+        "visibility": "visible"
+      }
+    },
+    {
+      "widget_id": "answer",
+      "grid": {
+        "col": 11,
+        "row": 4,
+        "col_span": 3,
+        "row_span": 4
+      },
+      "props": {
+        "value": "$block_7_value"
+      },
+      "initial_visibility": "hidden",
+      "initial_state": {
+        "visibility": "hidden"
+      }
+    },
+    {
+      "widget_id": "choice",
+      "grid": {
+        "col": 2,
+        "row": 8,
+        "col_span": 4,
+        "row_span": 3
+      },
+      "props": {},
+      "initial_visibility": "visible",
+      "initial_state": {
+        "visibility": "visible",
+        "selected": false
+      },
+      "children": [
+        {
+          "widget_id": "image",
+          "props": {
+            "asset_id": "$block_8_child_1_asset_id"
+          }
+        },
+        {
+          "widget_id": "text",
+          "props": {
+            "content": "$block_8_child_2_content",
+            "role": "label"
+          }
+        }
+      ]
+    },
+    {
+      "widget_id": "choice",
+      "grid": {
+        "col": 7,
+        "row": 8,
+        "col_span": 4,
+        "row_span": 3
+      },
+      "props": {},
+      "initial_visibility": "visible",
+      "initial_state": {
+        "visibility": "visible",
+        "selected": false
+      },
+      "children": [
+        {
+          "widget_id": "image",
+          "props": {
+            "asset_id": "$block_9_child_1_asset_id"
+          }
+        },
+        {
+          "widget_id": "text",
+          "props": {
+            "content": "$block_9_child_2_content",
+            "role": "label"
+          }
+        }
+      ]
+    },
+    {
+      "widget_id": "choice",
+      "grid": {
+        "col": 12,
+        "row": 8,
+        "col_span": 4,
+        "row_span": 3
+      },
+      "props": {},
+      "initial_visibility": "visible",
+      "initial_state": {
+        "visibility": "visible",
+        "selected": false
+      },
+      "children": [
+        {
+          "widget_id": "image",
+          "props": {
+            "asset_id": "$block_10_child_1_asset_id"
+          }
+        },
+        {
+          "widget_id": "text",
+          "props": {
+            "content": "$block_10_child_2_content",
+            "role": "label"
+          }
+        }
+      ]
     }
   ],
   "bindings": [
@@ -56,8 +222,41 @@
       "description": "Nội dung văn bản cần hiển thị."
     },
     {
-      "key": "$block_2_asset_id",
+      "key": "$block_2_content",
       "block_index": 2,
+      "prop_name": "content",
+      "type": "string",
+      "required": true,
+      "description": "Nội dung văn bản cần hiển thị."
+    },
+    {
+      "key": "$block_3_asset_id",
+      "block_index": 3,
+      "prop_name": "asset_id",
+      "type": "string",
+      "required": true,
+      "description": "ID của asset được lặp trong nhóm.",
+      "source": "asset_catalog.id"
+    },
+    {
+      "key": "$block_3_count",
+      "block_index": 3,
+      "prop_name": "count",
+      "type": "integer",
+      "required": true,
+      "description": "Số lượng bản sao của asset trong nhóm."
+    },
+    {
+      "key": "$block_3_label",
+      "block_index": 3,
+      "prop_name": "label",
+      "type": "string",
+      "required": false,
+      "description": "Nhãn ngắn cho cả nhóm."
+    },
+    {
+      "key": "$block_4_asset_id",
+      "block_index": 4,
       "prop_name": "asset_id",
       "type": "string",
       "required": true,
@@ -65,20 +264,213 @@
       "source": "asset_catalog.id"
     },
     {
-      "key": "$block_2_label",
-      "block_index": 2,
+      "key": "$block_5_asset_id",
+      "block_index": 5,
+      "prop_name": "asset_id",
+      "type": "string",
+      "required": true,
+      "description": "ID của asset được lặp trong nhóm.",
+      "source": "asset_catalog.id"
+    },
+    {
+      "key": "$block_5_count",
+      "block_index": 5,
+      "prop_name": "count",
+      "type": "integer",
+      "required": true,
+      "description": "Số lượng bản sao của asset trong nhóm."
+    },
+    {
+      "key": "$block_5_label",
+      "block_index": 5,
       "prop_name": "label",
       "type": "string",
       "required": false,
-      "description": "Nhãn ngắn cho ảnh."
+      "description": "Nhãn ngắn cho cả nhóm."
     },
     {
-      "key": "$block_3_content",
-      "block_index": 3,
+      "key": "$block_6_asset_id",
+      "block_index": 6,
+      "prop_name": "asset_id",
+      "type": "string",
+      "required": true,
+      "description": "ID của asset ảnh sẽ hiển thị.",
+      "source": "asset_catalog.id"
+    },
+    {
+      "key": "$block_7_value",
+      "block_index": 7,
+      "prop_name": "value",
+      "type": "string",
+      "required": true,
+      "description": "Đáp án hoặc từ ngắn cần hiển thị."
+    },
+    {
+      "key": "$block_8_child_1_asset_id",
+      "block_index": 8,
+      "prop_name": "asset_id",
+      "type": "string",
+      "required": true,
+      "description": "ID của asset ảnh sẽ hiển thị.",
+      "source": "asset_catalog.id",
+      "child_index": 1
+    },
+    {
+      "key": "$block_8_child_2_content",
+      "block_index": 8,
       "prop_name": "content",
       "type": "string",
       "required": true,
-      "description": "Nội dung văn bản cần hiển thị."
+      "description": "Nội dung văn bản cần hiển thị.",
+      "child_index": 2
+    },
+    {
+      "key": "$block_9_child_1_asset_id",
+      "block_index": 9,
+      "prop_name": "asset_id",
+      "type": "string",
+      "required": true,
+      "description": "ID của asset ảnh sẽ hiển thị.",
+      "source": "asset_catalog.id",
+      "child_index": 1
+    },
+    {
+      "key": "$block_9_child_2_content",
+      "block_index": 9,
+      "prop_name": "content",
+      "type": "string",
+      "required": true,
+      "description": "Nội dung văn bản cần hiển thị.",
+      "child_index": 2
+    },
+    {
+      "key": "$block_10_child_1_asset_id",
+      "block_index": 10,
+      "prop_name": "asset_id",
+      "type": "string",
+      "required": true,
+      "description": "ID của asset ảnh sẽ hiển thị.",
+      "source": "asset_catalog.id",
+      "child_index": 1
+    },
+    {
+      "key": "$block_10_child_2_content",
+      "block_index": 10,
+      "prop_name": "content",
+      "type": "string",
+      "required": true,
+      "description": "Nội dung văn bản cần hiển thị.",
+      "child_index": 2
     }
-  ]
+  ],
+  "semantic_spec": {
+    "mechanics": [
+      "select"
+    ],
+    "slots": [
+      "$block_1_content",
+      "$block_2_content",
+      "$block_3_asset_id",
+      "$block_3_count",
+      "$block_3_label",
+      "$block_4_asset_id",
+      "$block_5_asset_id",
+      "$block_5_count",
+      "$block_5_label",
+      "$block_6_asset_id",
+      "$block_7_value",
+      "$block_8_child_1_asset_id",
+      "$block_8_child_2_content",
+      "$block_9_child_1_asset_id",
+      "$block_9_child_2_content",
+      "$block_10_child_1_asset_id",
+      "$block_10_child_2_content"
+    ],
+    "component_contracts": [
+      {
+        "widget_id": "text",
+        "initial_state": {
+          "visibility": "visible"
+        }
+      },
+      {
+        "widget_id": "text",
+        "initial_state": {
+          "visibility": "visible"
+        }
+      },
+      {
+        "widget_id": "object_group",
+        "initial_state": {
+          "visibility": "visible"
+        }
+      },
+      {
+        "widget_id": "image",
+        "initial_state": {
+          "visibility": "visible"
+        }
+      },
+      {
+        "widget_id": "object_group",
+        "initial_state": {
+          "visibility": "visible"
+        }
+      },
+      {
+        "widget_id": "image",
+        "initial_state": {
+          "visibility": "visible"
+        }
+      },
+      {
+        "widget_id": "answer",
+        "initial_state": {
+          "visibility": "hidden"
+        }
+      },
+      {
+        "widget_id": "choice",
+        "child_widget_ids": [
+          "image",
+          "text"
+        ],
+        "initial_state": {
+          "visibility": "visible",
+          "selected": false
+        },
+        "interactions": [
+          "select"
+        ]
+      },
+      {
+        "widget_id": "choice",
+        "child_widget_ids": [
+          "image",
+          "text"
+        ],
+        "initial_state": {
+          "visibility": "visible",
+          "selected": false
+        },
+        "interactions": [
+          "select"
+        ]
+      },
+      {
+        "widget_id": "choice",
+        "child_widget_ids": [
+          "image",
+          "text"
+        ],
+        "initial_state": {
+          "visibility": "visible",
+          "selected": false
+        },
+        "interactions": [
+          "select"
+        ]
+      }
+    ]
+  }
 }

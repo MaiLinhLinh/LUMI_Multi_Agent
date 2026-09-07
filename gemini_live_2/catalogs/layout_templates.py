@@ -31,6 +31,113 @@ def _text(value: object, field_name: str) -> str:
 
 
 @dataclass(frozen=True, slots=True)
+class TemplateComponentContract:
+    """One structural widget slot retained by a reusable template.
+
+    This is deliberately a *shape* contract, not a copy of the data used by
+    one surface.  It lets the Plan Agent distinguish, for example, an image
+    comparison from a selectable choice card even if their grids look alike.
+    """
+
+    widget_id: str
+    child_widget_ids: tuple[str, ...] = ()
+    initial_state: Mapping[str, Any] | None = None
+    interactions: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "widget_id", _text(self.widget_id, "template component.widget_id"))
+        children = tuple(_text(item, "template component child.widget_id") for item in self.child_widget_ids)
+        object.__setattr__(self, "child_widget_ids", children)
+        interactions = tuple(_text(item, "template component interaction") for item in self.interactions)
+        if len(interactions) != len(set(interactions)):
+            raise LayoutTemplateError("template component interactions must be unique.")
+        object.__setattr__(self, "interactions", interactions)
+        if self.initial_state is not None:
+            if not isinstance(self.initial_state, Mapping):
+                raise LayoutTemplateError("template component.initial_state must be an object.")
+            object.__setattr__(self, "initial_state", dict(self.initial_state))
+
+    def to_dict(self) -> dict[str, Any]:
+        data: dict[str, Any] = {"widget_id": self.widget_id}
+        if self.child_widget_ids:
+            data["child_widget_ids"] = list(self.child_widget_ids)
+        if self.initial_state:
+            data["initial_state"] = dict(self.initial_state)
+        if self.interactions:
+            data["interactions"] = list(self.interactions)
+        return data
+
+    @classmethod
+    def from_dict(cls, value: object) -> "TemplateComponentContract":
+        if not isinstance(value, Mapping):
+            raise LayoutTemplateError("template component contract must be an object.")
+        children = value.get("child_widget_ids", [])
+        interactions = value.get("interactions", [])
+        if not isinstance(children, list) or not all(isinstance(item, str) for item in children):
+            raise LayoutTemplateError("template component child_widget_ids must be an array of strings.")
+        if not isinstance(interactions, list) or not all(isinstance(item, str) for item in interactions):
+            raise LayoutTemplateError("template component interactions must be an array of strings.")
+        initial_state = value.get("initial_state")
+        if initial_state is not None and not isinstance(initial_state, Mapping):
+            raise LayoutTemplateError("template component.initial_state must be an object.")
+        return cls(
+            widget_id=value.get("widget_id"),
+            child_widget_ids=tuple(children),
+            initial_state=initial_state,
+            interactions=tuple(interactions),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class TemplateSpec:
+    """Semantic index for matching a template by mechanics, slots and contract."""
+
+    mechanics: tuple[str, ...]
+    slots: tuple[str, ...]
+    component_contracts: tuple[TemplateComponentContract, ...]
+
+    def __post_init__(self) -> None:
+        mechanics = tuple(_text(item, "template spec mechanic") for item in self.mechanics)
+        if len(mechanics) != len(set(mechanics)):
+            raise LayoutTemplateError("template spec mechanics must be unique.")
+        slots = tuple(_text(item, "template spec slot") for item in self.slots)
+        if len(slots) != len(set(slots)):
+            raise LayoutTemplateError("template spec slots must be unique.")
+        if not isinstance(self.component_contracts, tuple) or not all(
+            isinstance(item, TemplateComponentContract) for item in self.component_contracts
+        ):
+            raise LayoutTemplateError("template spec component_contracts must contain TemplateComponentContract values.")
+        object.__setattr__(self, "mechanics", mechanics)
+        object.__setattr__(self, "slots", slots)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "mechanics": list(self.mechanics),
+            "slots": list(self.slots),
+            "component_contracts": [item.to_dict() for item in self.component_contracts],
+        }
+
+    @classmethod
+    def from_dict(cls, value: object) -> "TemplateSpec":
+        if not isinstance(value, Mapping):
+            raise LayoutTemplateError("template spec must be an object.")
+        mechanics = value.get("mechanics", [])
+        slots = value.get("slots", [])
+        contracts = value.get("component_contracts", [])
+        if not isinstance(mechanics, list) or not all(isinstance(item, str) for item in mechanics):
+            raise LayoutTemplateError("template spec mechanics must be an array of strings.")
+        if not isinstance(slots, list) or not all(isinstance(item, str) for item in slots):
+            raise LayoutTemplateError("template spec slots must be an array of strings.")
+        if not isinstance(contracts, list):
+            raise LayoutTemplateError("template spec component_contracts must be an array.")
+        return cls(
+            mechanics=tuple(mechanics),
+            slots=tuple(slots),
+            component_contracts=tuple(TemplateComponentContract.from_dict(item) for item in contracts),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class TemplateBinding:
     """One deterministic content placeholder in a reusable layout template."""
 
@@ -101,6 +208,7 @@ class LayoutTemplate:
     description: str
     blocks: tuple[PlanBlock, ...]
     bindings: tuple[TemplateBinding, ...]
+    semantic_spec: TemplateSpec | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "template_id", _text(self.template_id, "layout_template.id"))
@@ -122,6 +230,34 @@ class LayoutTemplate:
         }
         if placeholder_keys != set(keys):
             raise LayoutTemplateError("layout_template bindings must exactly match block placeholders.")
+        if self.semantic_spec is None:
+            object.__setattr__(self, "semantic_spec", TemplateSpec(
+                mechanics=(),
+                slots=tuple(binding.key for binding in self.bindings),
+                component_contracts=tuple(
+                    TemplateComponentContract(
+                        widget_id=block.widget_id,
+                        child_widget_ids=tuple(child.widget_id for child in block.children),
+                        initial_state=block.initial_state or {"visibility": block.initial_visibility},
+                    )
+                    for block in self.blocks
+                ),
+            ))
+        elif not isinstance(self.semantic_spec, TemplateSpec):
+            raise LayoutTemplateError("layout_template.semantic_spec must be a TemplateSpec.")
+        if self.semantic_spec.slots != tuple(keys):
+            raise LayoutTemplateError("template spec slots must exactly match template bindings.")
+        expected_contracts = tuple(
+            (block.widget_id, tuple(child.widget_id for child in block.children),
+             dict(block.initial_state or {"visibility": block.initial_visibility}))
+            for block in self.blocks
+        )
+        actual_contracts = tuple(
+            (contract.widget_id, contract.child_widget_ids, dict(contract.initial_state or {}))
+            for contract in self.semantic_spec.component_contracts
+        )
+        if actual_contracts != expected_contracts:
+            raise LayoutTemplateError("template spec component_contracts must exactly match template block structure.")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -130,6 +266,7 @@ class LayoutTemplate:
             "description": self.description,
             "blocks": [block.to_dict() for block in self.blocks],
             "bindings": [binding.to_dict() for binding in self.bindings],
+            "semantic_spec": self.semantic_spec.to_dict(),
         }
 
     @classmethod
@@ -152,6 +289,10 @@ class LayoutTemplate:
             description=value.get("description"),
             blocks=blocks,
             bindings=tuple(TemplateBinding.from_dict(item) for item in raw_bindings),
+            semantic_spec=(
+                TemplateSpec.from_dict(value["semantic_spec"])
+                if "semantic_spec" in value else None
+            ),
         )
 
 
@@ -212,6 +353,7 @@ class LayoutTemplateMaterializer:
                 grid=block.grid,
                 props=props,
                 initial_visibility=block.initial_visibility,
+                initial_state=block.initial_state,
                 children=tuple(children),
             ))
 
@@ -237,6 +379,8 @@ class TemplateExtractor:
     ) -> LayoutTemplate:
         blocks: list[PlanBlock] = []
         bindings: list[TemplateBinding] = []
+        component_contracts: list[TemplateComponentContract] = []
+        mechanics: set[str] = set()
 
         for block_index, block in enumerate(plan.blocks, start=1):
             try:
@@ -246,6 +390,7 @@ class TemplateExtractor:
                 raise LayoutTemplateError(str(exc)) from exc
 
             prop_definitions = {prop.name: prop for prop in widget.props}
+            mechanics.update(interaction.action for interaction in widget.interactions)
             template_props: dict[str, Any] = {}
             for prop_name, prop_value in normalized_props.items():
                 prop = prop_definitions[prop_name]
@@ -260,7 +405,14 @@ class TemplateExtractor:
                     block_index=block_index,
                     prop_name=prop_name,
                     value_type=prop.value_type,
-                    required=prop.required,
+                    # Image sources are XOR-optional in the public widget
+                    # contract, but a saved image template needs the source it
+                    # captured. Other optional props (for example label) stay
+                    # optional when materializing a template.
+                    required=(prop.required or (
+                        widget.widget_id == "image"
+                        and prop.name in {"asset_id", "remote_image_result_id"}
+                    )),
                     description=prop.description,
                     source=prop.source,
                 ))
@@ -272,6 +424,7 @@ class TemplateExtractor:
                 except WidgetPropsError as exc:
                     raise LayoutTemplateError(str(exc)) from exc
                 child_definitions = {prop.name: prop for prop in child_widget.props}
+                mechanics.update(interaction.action for interaction in child_widget.interactions)
                 child_template_props: dict[str, Any] = {}
                 for prop_name, prop_value in normalized_child_props.items():
                     prop = child_definitions[prop_name]
@@ -286,7 +439,10 @@ class TemplateExtractor:
                         child_index=child_index,
                         prop_name=prop_name,
                         value_type=prop.value_type,
-                        required=prop.required,
+                        required=(prop.required or (
+                            child_widget.widget_id == "image"
+                            and prop.name in {"asset_id", "remote_image_result_id"}
+                        )),
                         description=prop.description,
                         source=prop.source,
                     ))
@@ -296,7 +452,14 @@ class TemplateExtractor:
                 grid=block.grid,
                 props=template_props,
                 initial_visibility=block.initial_visibility,
+                initial_state=block.initial_state,
                 children=tuple(template_children),
+            ))
+            component_contracts.append(TemplateComponentContract(
+                widget_id=widget.widget_id,
+                child_widget_ids=tuple(child.widget_id for child in block.children),
+                initial_state=block.initial_state or {"visibility": block.initial_visibility},
+                interactions=tuple(interaction.action for interaction in widget.interactions),
             ))
 
         return LayoutTemplate(
@@ -305,4 +468,9 @@ class TemplateExtractor:
             description=description,
             blocks=tuple(blocks),
             bindings=tuple(bindings),
+            semantic_spec=TemplateSpec(
+                mechanics=tuple(sorted(mechanics)),
+                slots=tuple(binding.key for binding in bindings),
+                component_contracts=tuple(component_contracts),
+            ),
         )
