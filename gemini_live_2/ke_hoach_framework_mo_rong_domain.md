@@ -269,8 +269,8 @@ Protocol native function calling của Plan Agent:
 ```text
 Plan Agent
   → native function_call: describe_widgets(widget_ids)
-  → Widget Registry lọc theo allowed_widget_ids của Domain Manifest
-  → backend trả FunctionResponse chứa contract chi tiết của widget được phép
+  → Widget Registry tra widget extension đã nạp toàn cục
+  → backend trả FunctionResponse chứa contract chi tiết của widget được yêu cầu
   → Plan Agent tiếp tục suy nghĩ
   → native function_call: call_capability(capability_id, arguments)
   → Domain Gateway kiểm tra capability có trong manifest rồi thực thi handler

@@ -11,12 +11,12 @@ from gemini_live_2.catalogs import (
     TemplateExtractor,
 )
 from gemini_live_2.panel import ChoiceChild, GridRect, PlanBlock, PresentationPlan
-from gemini_live_2.widgets import build_default_widget_registry
+from gemini_live_2.tests.runtime_registry import runtime_widget_registry
 
 
 class LayoutTemplateTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.extractor = TemplateExtractor(build_default_widget_registry())
+        self.extractor = TemplateExtractor(runtime_widget_registry())
         self.materializer = LayoutTemplateMaterializer()
 
     def test_extractor_replaces_only_variable_props_with_stable_binding_keys(self) -> None:

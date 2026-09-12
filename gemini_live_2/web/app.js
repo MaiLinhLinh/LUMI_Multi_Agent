@@ -1,5 +1,11 @@
-import { AnimationController } from "/assets/presentation/animation_controller.js?v=circle-effect-20260822";
-import { renderSurfaceDocument } from "/assets/panel_renderer.js?v=surface-document-sd8";
+import { AnimationController } from "/assets/presentation/animation_controller.js?v=extension-registry-ef9a";
+import { renderSurfaceDocument } from "/assets/panel_renderer.js?v=extension-registry-ef9a";
+import {
+  appendEffectExtensionStyles,
+  appendWidgetExtensionStyles,
+  receiveExtensionCatalog,
+  whenExtensionCatalogReady,
+} from "/assets/framework/extension_catalog.js";
 
 const form = document.querySelector("#chatForm");
 const queryInput = document.querySelector("#queryInput");
@@ -225,7 +231,25 @@ function sendPanelInteraction(event) {
   });
 }
 
-function renderPanel(panel, { isUpdate = false } = {}) {
+function appendSurfaceDocumentCoreStyles(root) {
+  const href = "/assets/surface_document.css";
+  const existing = root.querySelector(`link[data-lumi-surface-core-style="${CSS.escape(href)}"]`);
+  if (existing) return existing;
+  const style = document.createElement("link");
+  style.rel = "stylesheet";
+  style.href = href;
+  style.dataset.lumiSurfaceCoreStyle = href;
+  root.append(style);
+  return style;
+}
+
+async function renderPanel(panel, { isUpdate = false } = {}) {
+  try {
+    await whenExtensionCatalogReady();
+  } catch (error) {
+    reportVisualDiagnostic("extension_catalog_unavailable", { name: String(error?.name || "Error") });
+    return;
+  }
   const isSurfaceDocument = panel?.ui_type === "surface_document" && panel?.surface
     && Array.isArray(panel.surface.components);
   if (!isSurfaceDocument) return;
@@ -243,11 +267,11 @@ function renderPanel(panel, { isUpdate = false } = {}) {
     panelInteractionRoot = root;
   }
   root.replaceChildren();
-  const widgetStyles = document.createElement("link");
-  widgetStyles.rel = "stylesheet";
-  widgetStyles.href = "/assets/widgets/styles.css?v=text-fit-20260903";
+  const coreStyle = appendSurfaceDocumentCoreStyles(root);
+  const widgetStyles = appendWidgetExtensionStyles(root);
+  appendEffectExtensionStyles(root);
   const style = document.createElement("style");
-  style.textContent = `[data-anchor-id]{transition:outline .18s,box-shadow .18s,transform .18s}.lumi-highlight{outline:3px solid #0ea5e9!important;outline-offset:4px;box-shadow:0 0 0 8px #0ea5e922!important}.lumi-pulse{animation:lumi-pulse 720ms cubic-bezier(.2,.8,.3,1) 2}@keyframes lumi-pulse{0%,100%{transform:scale(1);filter:none}50%{transform:scale(1.035);filter:drop-shadow(0 0 8px rgba(14,165,233,.7))}}`;
+  style.textContent = `[data-anchor-id]{transition:outline .18s,box-shadow .18s,transform .18s}`;
   const content = document.createElement("div");
   content.style.cssText = "width:100%; height:100%;";
   content.append(renderSurfaceDocument(
@@ -255,19 +279,20 @@ function renderPanel(panel, { isUpdate = false } = {}) {
     Array.isArray(panel.assets) ? panel.assets : [],
     { revealedComponentIds, onRuntimeDiagnostic: reportRuntimeDiagnostic },
   ));
-  root.append(widgetStyles, style, content);
+  root.append(style, content);
   // The first layout pass can happen before the shadow stylesheet arrives.
   // Refit once it has supplied the real grid and widget dimensions.
-  widgetStyles.addEventListener("load", () => {
+  const panelStyles = [coreStyle, ...widgetStyles];
+  Promise.all(panelStyles.map((sheet) => waitForWidgetStyles(sheet))).then(() => {
     fitPresentationToHost(content);
     checkRenderedLayout(content);
-  }, { once: true });
+  });
   fitPresentationToHost(content);
   void confirmSurfaceRendered({
     surfaceId: activePanelSurfaceId,
     revision: activePanelRevision,
     content,
-    widgetStyles,
+    widgetStyles: panelStyles,
   });
   animationController.clear();
 }
@@ -296,7 +321,8 @@ function waitForSurfaceImages(content) {
 
 async function confirmSurfaceRendered({ surfaceId, revision, content, widgetStyles }) {
   if (!surfaceId || !Number.isInteger(revision)) return;
-  const stylesLoaded = await waitForWidgetStyles(widgetStyles);
+  const stylesLoaded = (await Promise.all(widgetStyles.map((sheet) => waitForWidgetStyles(sheet))))
+    .every(Boolean);
   if (!stylesLoaded || activePanelSurfaceId !== surfaceId || activePanelRevision !== revision) return;
   fitPresentationToHost(content);
   await new Promise((resolve) => requestAnimationFrame(resolve));
@@ -435,7 +461,13 @@ function handleMessage(event) {
   if (payload.type === "input_transcript" && payload.text) {
     showInputTranscript(payload.text, Boolean(payload.final));
   }
-  if (payload.type === "panel") renderPanel(payload.panel);
+  if (payload.type === "extensions:catalog") {
+    receiveExtensionCatalog(payload.catalog).catch((error) => {
+      reportVisualDiagnostic("extension_catalog_load_failed", { name: String(error?.name || "Error") });
+    });
+    appendEffectExtensionStyles();
+  }
+  if (payload.type === "panel") void renderPanel(payload.panel);
   if (payload.type === "panel_update") {
     const revision = Number(payload.panel?.surface?.revision);
     if (!Number.isInteger(revision) || revision <= 0 || (
@@ -447,7 +479,7 @@ function handleMessage(event) {
         active_revision: activePanelRevision,
       });
     } else {
-      renderPanel(payload.panel, { isUpdate: true });
+      void renderPanel(payload.panel, { isUpdate: true });
       reportVisualDiagnostic("panel_update_rendered", { revision });
       if (payload.runtime_repair && socket?.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify({

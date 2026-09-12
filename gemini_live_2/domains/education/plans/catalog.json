@@ -8,8 +8,18 @@
     },
     {
       "id": "tm1",
-      "description": "Khung bài học phép cộng: hàng trên là tiêu đề và câu hỏi; khu giữa là phương trình hình ảnh gồm hai nhóm đối tượng cách nhau bởi hai biểu tượng phép tính, kế bên là ô đáp án dạng ẩn/hiện; hàng dưới là ba thẻ lựa chọn đặt ngang, mỗi thẻ gồm tượng số phía trên và nhãn chữ phía dưới.",
+      "description": "Tiêu đề ở trên, ảnh minh họa lớn ở giữa, câu hỏi phía dưới ảnh, ba thẻ lựa chọn ngang hàng và vùng đáp án ẩn ở dưới cùng.",
       "layout_path": "layouts/tm1.layout.json"
+    },
+    {
+      "id": "tm2",
+      "description": "Tiêu đề trên cùng, ảnh minh họa lớn giữa trang, câu hỏi phía dưới ảnh, ba thẻ lựa chọn ngang hàng, và vùng đáp án ẩn ở cuối.",
+      "layout_path": "layouts/tm2.layout.json"
+    },
+    {
+      "id": "tm3",
+      "description": "Tiêu đề trên cùng, ảnh minh họa lớn ở giữa, câu hỏi phía dưới ảnh, ba thẻ lựa chọn ngang hàng và vùng phản hồi ẩn ở dưới cùng.",
+      "layout_path": "layouts/tm3.layout.json"
     }
   ]
 }

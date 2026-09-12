@@ -19,7 +19,7 @@ from gemini_live_2.panel.contracts import (
     SurfaceDocument,
     surface_plan_command_from_dict,
 )
-from gemini_live_2.widgets import build_default_widget_registry
+from gemini_live_2.tests.runtime_registry import runtime_widget_registry
 
 
 def sample_plan_block() -> PlanBlock:
@@ -192,7 +192,7 @@ class PanelContractsTests(unittest.TestCase):
             GridRect(col=0, row=1, col_span=1, row_span=1)
 
     def test_widget_registry_allows_only_registered_visibility_transitions(self) -> None:
-        image = build_default_widget_registry().get("image")
+        image = runtime_widget_registry().get("image")
         self.assertEqual(
             image.validate_state_changes(
                 current_state={"visibility": "hidden"},

@@ -260,12 +260,8 @@ button { -webkit-tap-highlight-color: transparent; }
 .weather-template-host { width: 100%; height: 100%; min-height: 0; display: block; }
 .presentation-overlay { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; z-index: 2; }
 .presentation-overlay .lumi-overlay-shape { fill: none; stroke: #0ea5e9; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; filter: drop-shadow(0 2px 3px rgba(14, 165, 233, 0.3)); }
-.presentation-overlay .lumi-overlay-arrow-head { fill: #0ea5e9; stroke: none; }
-.presentation-overlay .lumi-overlay-draw-circle { stroke-dasharray: 100; stroke-dashoffset: 100; animation: lumi-overlay-draw-stroke 840ms cubic-bezier(.22, .8, .3, 1) forwards; }
-.presentation-overlay .lumi-overlay-draw-arrow { stroke-dasharray: 100; stroke-dashoffset: 100; animation: lumi-overlay-draw-stroke 760ms cubic-bezier(.22, .8, .3, 1) forwards; }
 .presentation-overlay .lumi-overlay-group-bracket { stroke: #f59e0b; stroke-width: 3.5; stroke-dasharray: 100; stroke-dashoffset: 100; fill: rgba(245, 158, 11, .08); animation: lumi-overlay-draw-stroke 900ms cubic-bezier(.22, .8, .3, 1) forwards; }
 .presentation-overlay .lumi-overlay-temperature-range { fill: rgba(255, 189, 25, .13); stroke: #ffb900; stroke-width: 2.5; stroke-dasharray: 100; stroke-dashoffset: 100; animation: lumi-overlay-draw-stroke 1050ms cubic-bezier(.22, .8, .3, 1) forwards; }
-.presentation-overlay .lumi-overlay-arrow-head { opacity: 0; animation: lumi-overlay-show-arrow-head 140ms ease-out 650ms forwards; }
 .presentation-overlay .lumi-overlay-pointer path:first-child { fill: #f8fafc; stroke: #0369a1; stroke-width: 2; stroke-linejoin: round; filter: drop-shadow(0 2px 2px rgba(14, 165, 233, .3)); }
 .presentation-overlay .lumi-overlay-pointer path:last-child { fill: #0ea5e9; }
 
@@ -568,8 +564,6 @@ button { -webkit-tap-highlight-color: transparent; }
 @keyframes avatar-explain { to { transform: rotate(-22deg); } }
 @keyframes avatar-point-left { 55%, 100% { transform: rotate(-52deg); } }
 @keyframes avatar-point-right { 55%, 100% { transform: rotate(52deg); } }
-@keyframes lumi-overlay-draw-stroke { to { stroke-dashoffset: 0; } }
-@keyframes lumi-overlay-show-arrow-head { to { opacity: 1; } }
 
 @media (min-width: 981px) {
   html, body {
@@ -651,4 +645,3 @@ button { -webkit-tap-highlight-color: transparent; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
-

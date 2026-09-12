@@ -18,6 +18,12 @@ from gemini_live_2.settings import Settings
 from gemini_live_2.trace import begin_turn, trace, warning
 
 from .orchestrator import LiveSessionOrchestrator
+from .guide_prompt import (
+    panel_interaction_message,
+    presentation_context_message,
+    presentation_context_response,
+    surface_context_update_message,
+)
 from .delete_surface import DELETE_SURFACE_TOOL
 from .update_surface_state import UPDATE_SURFACE_STATE_TOOL
 from .persistent_transport import PersistentLiveTransport
@@ -38,67 +44,31 @@ def _ui_trace_timestamp() -> str:
 
     return datetime.now().strftime("%H:%M:%S.%f")[:-3]
 
-_CORE_INSTRUCTION = """
-Bạn là Lumi, trợ lý giọng nói tiếng Việt.
-Chỉ dùng dữ liệu thật do các tool đã đăng ký trả về. Không tự tạo hoặc thay đổi số liệu, kết quả, trạng thái, vùng giao diện, anchor hay hiệu ứng.
-Khi một tool trả về presentation_instruction, VISUAL STAGE MAP và visual_effects, đây là hợp đồng trình bày của lượt hiện tại:
-- presentation_instruction quy định cách trình bày;
-- VISUAL STAGE MAP là nguồn dữ liệu và mô phỏng màn hình người dùng đang nhìn thấy;
-- visual_effects là danh sách hiệu ứng duy nhất được phép dùng.
 
-Tuân thủ presentation_instruction trước mọi hướng dẫn chung.
-Khi chọn nói về một vùng có [anchor: ...] trong VISUAL STAGE MAP, Bắt buộc: tool present_visual với đúng anchor_id của vùng đó và một effect_id hợp lệ ngay trước khi nói về vùng đó. Không gọi anchor không có trong map, không gọi effect không có trong visual_effects, và không gọi animation cho vùng không định nói ngay sau đó.
-Không đọc, nhắc hoặc diễn giải tên tool, anchor_id, effect_id, JSON, template hay dữ liệu kỹ thuật cho người dùng. Giữ câu hỏi làm rõ ngắn gọn.
+def _usage_counter(usage: object, *names: str) -> int | None:
+    """Read provider-reported usage only; never derive token counts locally."""
 
-ANCHOR VÀ EFFECT TUYỆT ĐỐI KHÔNG PHẢI LỜI THOẠI.
-Không bao giờ xuất các chuỗi [anchor: ...], [effect: ...],
-present_visual(...), anchor_id, effect_id dưới bất kỳ dạng nào.
-
-Khi muốn chỉ, khoanh hoặc làm nổi bật một vùng trong VISUAL STAGE MAP:
-bắt buộc gọi native function present_visual trước.
-Chỉ sau khi nhận tool response mới được nói câu liên quan.
-Nếu không thể hoặc không cần gọi function, hãy nói mà không nhắc đến
-việc khoanh, chỉ, làm nổi bật hay vị trí anchor.
+    for name in names:
+        value = usage.get(name) if isinstance(usage, dict) else getattr(usage, name, None)
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            return value
+    return None
 
 
-Khi lời nói hoặc câu trả lời của người dùng mở ra một ý mới mà việc minh hoạ
-trực quan sẽ giúp người dùng hiểu, thực hành hoặc tương tác tốt hơn, nhưng
-VISUAL STAGE MAP hiện tại chưa có vùng phù hợp, hãy gọi route_request để tạo
-hoặc thay đổi Surface trước khi nói chi tiết về ý đó.
+def _live_usage_for_ui(usage: object) -> dict[str, int] | None:
+    if usage is None:
+        return None
+    values = {
+        "prompt_tokens": _usage_counter(usage, "prompt_token_count", "prompt_tokens"),
+        "output_tokens": _usage_counter(
+            usage, "response_token_count", "candidates_token_count", "completion_tokens"
+        ),
+        "reasoning_tokens": _usage_counter(usage, "thoughts_token_count"),
+        "tool_input_tokens": _usage_counter(usage, "tool_use_prompt_token_count"),
+        "total_tokens": _usage_counter(usage, "total_token_count", "total_tokens"),
+    }
+    return {key: value for key, value in values.items() if value is not None} or None
 
-Intent gửi qua route_request phải nêu ngắn gọn mục tiêu trải nghiệm, nội dung
-cần quan sát hoặc thao tác, và ngữ cảnh liên quan từ cuộc trò chuyện. Chỉ gọi
-khi Surface thực sự cần thêm hoặc đổi nội dung; không gọi cho lời khích lệ
-ngắn, câu trả lời thuần lời nói, hiệu ứng tạm thời hoặc thay đổi state của
-Surface hiện có.
-
-Ví dụ: panel có hoạt động chọn "Bạn có hay giúp đỡ người khác không" -> Người dùng chọn "Không" -> Gemini nghĩ và lên kế hoạch trả lời là có thể khích lệ bằng cách hướng dẫn người dùng giúp đỡ ông bà, bố mẹ trước -> mà panel hiện tại không có hình ảnh minh hoạ -> gọi route_request(domain_id="education", intent="Tạo Surface minh hoạ cách giúp đỡ ông bà, bố mẹ") trước khi nói chi tiết về ý đó.
-""".strip()
-
-_SURFACE_STATE_GUIDANCE = """
-Khi VISUAL STAGE MAP ghi một vùng đang ẩn và bạn muốn công bố vùng đó, gọi
-update_surface_state với surface_id, base_revision hiện tại và updates. Mỗi update
-gồm anchor_id của vùng cần đổi cùng changes={"visibility":"visible"}. Sau tool
-response, chỉ dùng VISUAL STAGE MAP mới trả về. Không cập nhật lại vùng đã hiện.
-""".strip()
-
-_PANEL_INTERACTION_GUIDANCE = """
-Khi nhận một client event bắt đầu bằng `PANEL_INTERACTION_EVENT`, phần JSON theo
-sau là dữ kiện tương tác giao diện đáng tin cậy, không phải lời người dùng nói.
-Event `surface_interaction` cho biết trẻ vừa thực hiện `action` trên vùng có
-`anchor_id` tương ứng trong VISUAL STAGE MAP. `content` chỉ mô tả các thành phần
-hiển thị của vùng đó, không phải kết luận đúng/sai. Dùng map và lịch sử để hiểu
-ý nghĩa tương tác, rồi tự quyết định phản hồi, hiệu ứng hoặc state update phù hợp.
-Không đọc hoặc nhắc lại JSON, event, anchor_id hay dữ liệu kỹ thuật.
-""".strip()
-
-_SURFACE_CONTEXT_UPDATE_GUIDANCE = """
-Khi nhận client event bắt đầu bằng `SURFACE_CONTEXT_UPDATE`, JSON theo sau là
-SurfaceDocument đã được browser render thành công sau một runtime repair. Đây là
-context giao diện tin cậy, không phải lời trẻ nói và không phải yêu cầu trả lời.
-Không tạo audio, lời thoại, tool call hay hiệu ứng chỉ vì event này. Thay VISUAL
-STAGE MAP/revision đang nhớ bằng dữ liệu mới và dùng chúng ở lượt tiếp theo.
-""".strip()
 
 
 class GeminiLiveSessionError(RuntimeError):
@@ -131,26 +101,12 @@ class GeminiLiveSession:
             for item in memory.history[-6:]
             if item.get("role") in {"user", "assistant"} and item.get("content")
         ]
-        sections = [
-            _CORE_INSTRUCTION,
-            _SURFACE_STATE_GUIDANCE,
-            _PANEL_INTERACTION_GUIDANCE,
-            _SURFACE_CONTEXT_UPDATE_GUIDANCE,
-            self._registry.prompt_guidance(),
-        ]
+        sections = [self._registry.prompt_guidance()]
         if history:
             sections.append("Recent conversation (context only):\n" + "\n".join(history))
         panel_context = self._orchestrator.active_panel_presentation_context(session_id)
         if panel_context is not None:
-            effects = json.dumps(panel_context["visual_effects"], ensure_ascii=False)
-            sections.append(
-                "PANEL HIỆN TẠI — tiếp tục dùng panel này nếu yêu cầu là câu hỏi tiếp nối:\n"
-                f"surface_id: {panel_context['surface_id']}\n"
-                f"base_revision: {panel_context['revision']}\n\n"
-                f"presentation_instruction:\n{panel_context['presentation_instruction']}\n\n"
-                f"VISUAL STAGE MAP:\n{panel_context['visual_stage_map']}\n\n"
-                f"visual_effects:\n{effects}"
-            )
+            sections.append(presentation_context_message(panel_context))
         return "\n\n".join(section for section in sections if section)
 
     def _connection_config(self, session_id: str) -> types.LiveConnectConfig:
@@ -247,6 +203,7 @@ class PersistentGeminiLiveConversation:
         self._animation_calls = 0
         self._audio_chunks = 0
         self._audio_bytes = 0
+        self._usage_metadata: dict[str, int] | None = None
         self._sample_rate: int | None = None
         self._audio_started = False
         self._ui_pending_text_trace: list[str] = []
@@ -325,20 +282,22 @@ class PersistentGeminiLiveConversation:
             raise GeminiLiveSessionError("surface context requires a positive revision.")
         if not isinstance(stage_map, str) or not stage_map:
             raise GeminiLiveSessionError("surface context requires a visual_stage_map.")
-        if not isinstance(effects, list) or not all(isinstance(item, str) for item in effects):
-            raise GeminiLiveSessionError("surface context requires visual_effects.")
-        payload = "SURFACE_CONTEXT_UPDATE\n" + json.dumps({
-            "surface_id": surface_id,
-            "revision": revision,
-            "visual_stage_map": stage_map,
-            "visual_effects": effects,
-        }, ensure_ascii=False, separators=(",", ":"))
+        if not isinstance(effects, list) or not all(
+            isinstance(item, dict)
+            and isinstance(item.get("id"), str)
+            and isinstance(item.get("description"), str)
+            for item in effects
+        ):
+            raise GeminiLiveSessionError(
+                "surface context requires visual_effects with id and description."
+            )
+        payload = surface_context_update_message(panel_context)
         await self._transport.send_text(payload, turn_complete=False)
         trace("SURFACE_CONTEXT_SYNC_SENT surface=%s revision=%s", surface_id, revision)
 
     @staticmethod
     def _panel_interaction_payload(interaction: dict[str, Any]) -> str:
-        return "PANEL_INTERACTION_EVENT\n" + json.dumps(interaction, ensure_ascii=False, separators=(",", ":"))
+        return panel_interaction_message(interaction)
 
     async def begin_audio(self) -> None:
         """Enter listening when the persistent browser microphone begins."""
@@ -369,6 +328,7 @@ class PersistentGeminiLiveConversation:
 
         async for message in self._transport.receive():
             server = getattr(message, "server_content", None)
+            self._capture_usage_metadata(message)
             await self._handle_input_transcript(server)
             if await self._handle_interruption(server):
                 continue
@@ -405,6 +365,7 @@ class PersistentGeminiLiveConversation:
         self._active_query = user_text
         self._transcript = []
         self._tool_calls = self._animation_calls = self._audio_chunks = self._audio_bytes = 0
+        self._usage_metadata = None
         self._sample_rate = None
         self._audio_started = False
         self._ui_pending_text_trace = []
@@ -425,6 +386,7 @@ class PersistentGeminiLiveConversation:
         self._active_query = "<voice>"
         self._transcript = []
         self._tool_calls = self._animation_calls = self._audio_chunks = self._audio_bytes = 0
+        self._usage_metadata = None
         self._sample_rate = None
         self._audio_started = False
         self._ui_pending_text_trace = []
@@ -477,6 +439,61 @@ class PersistentGeminiLiveConversation:
         if has_tool_call or has_model_turn:
             self._interrupted_turn_pending = False
 
+    def _capture_usage_metadata(self, message: Any) -> None:
+        """Keep the latest usage record emitted by Gemini for this Live turn."""
+
+        usage = _live_usage_for_ui(getattr(message, "usage_metadata", None))
+        if usage is not None:
+            self._usage_metadata = usage
+
+    @staticmethod
+    def _format_usage(usage: dict[str, int] | None) -> str:
+        if usage is None:
+            return "usage metadata: provider không trả về"
+        labels = (
+            ("prompt_tokens", "input"),
+            ("tool_input_tokens", "tool input"),
+            ("output_tokens", "output"),
+            ("reasoning_tokens", "reasoning (đã nằm trong output)"),
+            ("total_tokens", "total"),
+        )
+        return " · ".join(
+            f"{label} {usage[name]} tokens" for name, label in labels if name in usage
+        )
+
+    async def _emit_plan_telemetry(self, payload: dict[str, Any]) -> None:
+        """Show a Plan Agent model output in the same browser trace as Live calls."""
+
+        tool_names = [
+            str(name) for name in payload.get("tool_names", [])
+            if isinstance(name, str) and name
+        ]
+        output_kind = "tool call: " + ", ".join(tool_names) if tool_names else "final JSON"
+        await self._on_event({
+            "type": "live:debug_trace",
+            "timestamp": _ui_trace_timestamp(),
+            "event": "tokens",
+            "turn_id": self._ensure_output_turn_id(),
+            "content": (
+                f"Plan Agent/{payload.get('provider', 'unknown')} · bước {payload.get('step', '?')} "
+                f"· {output_kind} · {self._format_usage(payload.get('usage'))}"
+            ),
+        })
+
+    async def _emit_live_usage(self) -> None:
+        """Show Gemini Live's provider-reported usage once its turn is complete."""
+
+        await self._on_event({
+            "type": "live:debug_trace",
+            "timestamp": _ui_trace_timestamp(),
+            "event": "tokens",
+            "turn_id": self._ensure_output_turn_id(),
+            "content": (
+                "Gemini Live · output của lượt hoàn tất · "
+                + self._format_usage(self._usage_metadata)
+            ),
+        })
+
     async def _set_state(self, target: LiveSessionState) -> None:
         current = self.state
         if current != target:
@@ -488,6 +505,7 @@ class PersistentGeminiLiveConversation:
 
         async for message in self._transport.receive():
             server = getattr(message, "server_content", None)
+            self._capture_usage_metadata(message)
             await self._handle_input_transcript(server)
             if await self._handle_interruption(server):
                 continue
@@ -566,8 +584,11 @@ class PersistentGeminiLiveConversation:
                 query=self._active_query or "Yêu cầu hiện tại.",
                 tool_name=name,
                 arguments=args,
+                telemetry_callback=self._emit_plan_telemetry,
             )
             response = result.response
+            if isinstance(response, dict) and "presentation_instruction" in response:
+                response = presentation_context_response(response)
             if isinstance(response, dict):
                 effect_count = len(response.get("visual_effects", []))
                 presentation_context = {
@@ -769,6 +790,7 @@ class PersistentGeminiLiveConversation:
 
     async def _handle_turn_complete(self) -> bool:
         await self._flush_ui_text_trace()
+        await self._emit_live_usage()
         if self._pending_visual_marker is not None:
             warning(
                 "VISUAL_MARKER_UNATTACHED anchor=%s",

@@ -11,9 +11,9 @@ from .registry import (
     WidgetRegistry,
     WidgetStateDefinition,
     StageMapPolicy,
+    StageMapCollectionTextSource,
     StageMapTextSource,
     StageMapView,
-    build_default_widget_registry,
 )
 
 __all__ = [
@@ -27,7 +27,7 @@ __all__ = [
     "WidgetRegistry",
     "WidgetStateDefinition",
     "StageMapPolicy",
+    "StageMapCollectionTextSource",
     "StageMapTextSource",
     "StageMapView",
-    "build_default_widget_registry",
 ]

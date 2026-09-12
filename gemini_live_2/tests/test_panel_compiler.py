@@ -13,7 +13,7 @@ from gemini_live_2.panel import (
     PresentationPlan,
     SurfaceDocument,
 )
-from gemini_live_2.widgets import build_default_widget_registry
+from gemini_live_2.tests.runtime_registry import runtime_widget_registry
 from gemini_live_2.search import SearchResultStore
 
 
@@ -22,7 +22,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 class PanelCompilerTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.compiler = PanelCompiler(build_default_widget_registry())
+        self.compiler = PanelCompiler(runtime_widget_registry())
         self.resources = DomainRegistry(PROJECT_ROOT / "domains").load("education")
         self.bundle = DataBundle(
             domain_id="education",
@@ -75,7 +75,7 @@ class PanelCompilerTests(unittest.TestCase):
         self.assertEqual(feedback["details"]["overlap_cells"], [{"col": 3, "row": 2}, {"col": 4, "row": 2}])
 
     def test_rejects_unsupported_widget_and_unknown_alias(self) -> None:
-        with self.assertRaisesRegex(PanelCompilationError, "not allowed"):
+        with self.assertRaisesRegex(PanelCompilationError, "unknown widget_id"):
             self._compile((PlanBlock("chart", GridRect(1, 1, 4, 4), {}),))
         with self.assertRaisesRegex(PanelCompilationError, "unknown data alias"):
             self._compile((PlanBlock("text", GridRect(1, 1, 4, 1), {"content": "$missing"}),))
@@ -94,7 +94,7 @@ class PanelCompilerTests(unittest.TestCase):
             source_url="https://example/pig",
             caption="Một chú heo dễ thương",
         )
-        compiler = PanelCompiler(build_default_widget_registry(), search_result_store=store)
+        compiler = PanelCompiler(runtime_widget_registry(), search_result_store=store)
         document = compiler.compile_surface_document(
             surface_id="surface-test",
             data_bundle=self.bundle,
@@ -124,7 +124,7 @@ class PanelCompilerTests(unittest.TestCase):
             source_url="https://example/coffee",
             caption="Một tách cà phê nóng",
         )
-        compiler = PanelCompiler(build_default_widget_registry(), search_result_store=store)
+        compiler = PanelCompiler(runtime_widget_registry(), search_result_store=store)
         document = compiler.compile_surface_document(
             surface_id="surface-test",
             data_bundle=self.bundle,

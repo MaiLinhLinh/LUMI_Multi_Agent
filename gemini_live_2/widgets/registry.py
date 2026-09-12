@@ -8,7 +8,7 @@ creates DOM targets or anchor identifiers directly.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Mapping
 
 
@@ -272,6 +272,22 @@ class StageMapTextSource:
 
 
 @dataclass(frozen=True, slots=True)
+class StageMapCollectionTextSource:
+    """One visible text field relative to each object in a collection prop."""
+
+    content_label: str | None
+    text_source: str
+    quote_text: bool = False
+
+    def __post_init__(self) -> None:
+        if self.content_label is not None:
+            object.__setattr__(self, "content_label", _text(self.content_label, "stage map collection content_label"))
+        object.__setattr__(self, "text_source", _text(self.text_source, "stage map collection text_source"))
+        if not isinstance(self.quote_text, bool):
+            raise WidgetPropsError("stage map collection quote_text must be a boolean.")
+
+
+@dataclass(frozen=True, slots=True)
 class StageMapView:
     """A policy view selected solely from one declared component state value."""
 
@@ -305,16 +321,20 @@ class StageMapPolicy:
     asset_text_source: str | None = None
     count_source: str | None = None
     item_anchor_prefix: str | None = None
+    collection_source: str | None = None
+    collection_anchor_prefix: str | None = None
     text_rendered: bool = True
     children_layout: str | None = None
     text_sources: tuple[StageMapTextSource, ...] = ()
+    collection_text_sources: tuple[StageMapCollectionTextSource, ...] = ()
     views: tuple[StageMapView, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "kind", _text(self.kind, "stage map kind"))
         for field_name in (
             "content_label", "anchor_key", "text_source", "asset_source", "asset_text_source",
-            "count_source", "item_anchor_prefix", "children_layout",
+            "count_source", "item_anchor_prefix", "collection_source", "collection_anchor_prefix",
+            "children_layout",
         ):
             value = getattr(self, field_name)
             if value is not None:
@@ -327,6 +347,14 @@ class StageMapPolicy:
             isinstance(item, StageMapTextSource) for item in self.text_sources
         ):
             raise WidgetPropsError("stage map text_sources must contain StageMapTextSource values.")
+        if not isinstance(self.collection_text_sources, tuple) or not all(
+            isinstance(item, StageMapCollectionTextSource) for item in self.collection_text_sources
+        ):
+            raise WidgetPropsError("stage map collection_text_sources must contain StageMapCollectionTextSource values.")
+        if self.collection_source is None and self.collection_text_sources:
+            raise WidgetPropsError("stage map collection_text_sources requires collection_source.")
+        if self.collection_source is not None and self.collection_anchor_prefix is None:
+            raise WidgetPropsError("stage map collection_source requires collection_anchor_prefix.")
         if not isinstance(self.views, tuple) or not all(isinstance(item, StageMapView) for item in self.views):
             raise WidgetPropsError("stage map views must contain StageMapView values.")
         view_keys = tuple((item.state_field, item.state_value) for item in self.views)
@@ -341,7 +369,8 @@ class StageMapPolicy:
         }
         for field_name in (
             "content_label", "anchor_key", "text_source", "asset_source", "asset_text_source",
-            "count_source", "item_anchor_prefix", "children_layout",
+            "count_source", "item_anchor_prefix", "collection_source", "collection_anchor_prefix",
+            "children_layout",
         ):
             value = getattr(self, field_name)
             if value is not None:
@@ -354,6 +383,15 @@ class StageMapPolicy:
                     "quote_text": item.quote_text,
                 }
                 for item in self.text_sources
+            ]
+        if self.collection_text_sources:
+            contract["collection_text_sources"] = [
+                {
+                    "content_label": item.content_label,
+                    "text_source": item.text_source,
+                    "quote_text": item.quote_text,
+                }
+                for item in self.collection_text_sources
             ]
         if self.views:
             contract["views"] = [
@@ -373,19 +411,25 @@ class StageMapPolicy:
 class WidgetDefinition:
     """Registered widget behaviour shared by every domain that enables it."""
 
-    widget_id: str
     validate_props: PropsValidator
     anchor_policy: AnchorPolicy
     purpose: str
     props: tuple[WidgetPropDefinition, ...]
+    # An extension author writes an unbound definition. ExtensionLoader binds
+    # the sole ID from manifest.json before the definition enters a registry.
+    widget_id: str | None = None
     state_fields: tuple[WidgetStateDefinition, ...] = ()
     allowed_child_widget_ids: tuple[str, ...] = ()
     interactions: tuple[WidgetInteractionDefinition, ...] = ()
     stage_map_policy: StageMapPolicy | None = None
     asset_references: tuple[WidgetAssetReferenceDefinition, ...] = ()
+    # Startup-only dependency declaration. AnchorPolicy remains the source of
+    # truth for permission on one concrete component/anchor at runtime.
+    declared_effect_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "widget_id", _text(self.widget_id, "widget_id"))
+        if self.widget_id is not None:
+            object.__setattr__(self, "widget_id", _text(self.widget_id, "widget_id"))
         object.__setattr__(self, "purpose", _text(self.purpose, "widget purpose"))
         names = tuple(prop.name for prop in self.props)
         if len(names) != len(set(names)):
@@ -413,6 +457,26 @@ class WidgetDefinition:
         reference_paths = tuple(item.path for item in self.asset_references)
         if len(reference_paths) != len(set(reference_paths)):
             raise WidgetPropsError("widget asset reference paths must be unique.")
+        effects = tuple(_text(value, "widget declared effect") for value in self.declared_effect_ids)
+        if len(effects) != len(set(effects)):
+            raise WidgetPropsError("widget declared effects must be unique.")
+        object.__setattr__(self, "declared_effect_ids", effects)
+
+    def bind_id(self, widget_id: str) -> "WidgetDefinition":
+        """Return the registered form of an extension-owned definition.
+
+        The ID belongs to manifest.json. A definition can be bound once by
+        ExtensionLoader, but cannot be rebound to a different ID.
+        """
+
+        normalized = _text(widget_id, "widget_id")
+        if self.widget_id is not None:
+            if self.widget_id != normalized:
+                raise WidgetPropsError(
+                    f"widget definition is already bound to '{self.widget_id}'."
+                )
+            return self
+        return replace(self, widget_id=normalized)
 
     def validate(self, props: Mapping[str, Any]) -> dict[str, Any]:
         if not isinstance(props, Mapping):
@@ -562,6 +626,8 @@ class WidgetRegistry:
     def register(self, definition: WidgetDefinition) -> None:
         if not isinstance(definition, WidgetDefinition):
             raise TypeError("widget registry accepts WidgetDefinition values only.")
+        if definition.widget_id is None:
+            raise ValueError("widget registry accepts only definitions bound to a manifest id.")
         if definition.widget_id in self._definitions:
             raise ValueError(f"widget '{definition.widget_id}' is already registered.")
         self._definitions[definition.widget_id] = definition
@@ -575,17 +641,16 @@ class WidgetRegistry:
     def widget_ids(self) -> tuple[str, ...]:
         return tuple(self._definitions)
 
-    def widget_index(
-        self,
-        allowed_widget_ids: tuple[str, ...] | None = None,
-    ) -> tuple[dict[str, Any], ...]:
+    def definitions(self) -> tuple[WidgetDefinition, ...]:
+        """Expose registered contracts for startup-time registry composition only."""
+
+        return tuple(self._definitions.values())
+
+    def widget_index(self) -> tuple[dict[str, Any], ...]:
         """Return the short discovery catalog safe for the Plan Agent's first turn."""
 
-        allowed = set(allowed_widget_ids) if allowed_widget_ids is not None else None
         index: list[dict[str, Any]] = []
         for definition in self._definitions.values():
-            if allowed is not None and definition.widget_id not in allowed:
-                continue
             item: dict[str, Any] = {"id": definition.widget_id, "purpose": definition.purpose}
             if definition.allowed_child_widget_ids:
                 item["allows_children"] = True
@@ -593,45 +658,3 @@ class WidgetRegistry:
                 item["interaction_actions"] = [item.action for item in definition.interactions]
             index.append(item)
         return tuple(index)
-
-def build_default_widget_registry() -> WidgetRegistry:
-    """Build the default registry by registering each widget-owned contract."""
-
-    visibility_state = WidgetStateDefinition(
-        name="visibility",
-        value_type="string",
-        default_value="visible",
-        allowed_values=("visible", "hidden"),
-        transitions={"visible": ("hidden",), "hidden": ("visible",)},
-    )
-    selected_state = WidgetStateDefinition(
-        name="selected",
-        value_type="boolean",
-        default_value=False,
-    )
-    flipped_state = WidgetStateDefinition(
-        name="flipped",
-        value_type="boolean",
-        default_value=False,
-    )
-    # Lazy imports avoid a module cycle: widget modules use the shared types
-    # above, and this file owns only their registration.
-    from . import answer, choice, flashcard, image, number_display, object_group, text
-
-    return WidgetRegistry(
-        (
-            text.definition(visibility_state=visibility_state),
-            image.definition(visibility_state=visibility_state),
-            object_group.definition(visibility_state=visibility_state),
-            answer.definition(visibility_state=visibility_state),
-            number_display.definition(visibility_state=visibility_state),
-            choice.definition(
-                visibility_state=visibility_state,
-                selected_state=selected_state,
-            ),
-            flashcard.definition(
-                visibility_state=visibility_state,
-                flipped_state=flipped_state,
-            ),
-        )
-    )

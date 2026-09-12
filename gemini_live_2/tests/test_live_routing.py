@@ -35,7 +35,7 @@ from gemini_live_2.panel import (
 )
 from gemini_live_2.plan_agent import PlanAgentResult
 from gemini_live_2.settings import Settings
-from gemini_live_2.widgets import build_default_widget_registry
+from gemini_live_2.tests.runtime_registry import runtime_widget_registry
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -94,7 +94,7 @@ class _RepairingCompiler:
     """Reject once, then delegate to the real compiler."""
 
     def __init__(self) -> None:
-        self.widget_registry = build_default_widget_registry()
+        self.widget_registry = runtime_widget_registry()
         self._compiler = PanelCompiler(self.widget_registry)
         self.calls = 0
 
@@ -120,7 +120,7 @@ class LiveRoutingTests(unittest.TestCase):
         self.orchestrator = LiveSessionOrchestrator(
             domain_registry=self.registry,
             plan_agent=self.agent,  # type: ignore[arg-type]
-            panel_compiler=PanelCompiler(build_default_widget_registry()),
+            panel_compiler=PanelCompiler(runtime_widget_registry()),
         )
 
     def test_registry_exposes_only_route_request_with_registered_domain_enum(self) -> None:
@@ -157,7 +157,7 @@ class LiveRoutingTests(unittest.TestCase):
             orchestrator = LiveSessionOrchestrator(
                 domain_registry=registry,
                 plan_agent=agent,  # type: ignore[arg-type]
-                panel_compiler=PanelCompiler(build_default_widget_registry()),
+                panel_compiler=PanelCompiler(runtime_widget_registry()),
             )
 
             result = asyncio.run(orchestrator.execute_tool_call_result(
@@ -766,7 +766,7 @@ class LiveRoutingTests(unittest.TestCase):
         orchestrator = LiveSessionOrchestrator(
             domain_registry=self.registry,
             plan_agent=agent,  # type: ignore[arg-type]
-            panel_compiler=PanelCompiler(build_default_widget_registry()),
+            panel_compiler=PanelCompiler(runtime_widget_registry()),
         )
 
         result = asyncio.run(orchestrator.execute_tool_call_result(

@@ -265,6 +265,9 @@ def _policy_lines(
         if source.quote_text:
             rendered_value = f"“{rendered_value}”"
         lines.extend(_prefixed_lines(source.content_label, rendered_value, width))
+    collection = _resolve_path(props, policy.collection_source)
+    if isinstance(collection, list):
+        lines.extend(_collection_policy_lines(policy, collection, anchors_by_key, width))
     return lines
 
 
@@ -365,6 +368,36 @@ def _object_group_policy_lines(
         lines.append("".join(
             anchor_texts[start + index].center(cell_width) for index in range(visible_items)
         ).rstrip())
+    return lines
+
+
+def _collection_policy_lines(
+    policy: StageMapPolicy,
+    collection: list[object],
+    anchors_by_key: Mapping[str, str],
+    width: int,
+) -> list[str]:
+    """Render visible fields and a separate compiler-owned anchor for each collection item."""
+
+    lines: list[str] = []
+    anchor_prefix = policy.collection_anchor_prefix or ""
+    for index, item in enumerate(collection, start=1):
+        if not isinstance(item, Mapping):
+            continue
+        fragments: list[str] = []
+        for source in policy.collection_text_sources:
+            value = _resolve_path(item, source.text_source)
+            if value is None:
+                continue
+            rendered = str(value)
+            if source.quote_text:
+                rendered = f"“{rendered}”"
+            fragments.append(f"{source.content_label}: {rendered}" if source.content_label else rendered)
+        if fragments:
+            lines.extend(_wrapped_lines(f"MỐC {index} — " + " · ".join(fragments), width))
+        anchor_id = anchors_by_key.get(f"{anchor_prefix}{index}")
+        if anchor_id:
+            lines.extend(_anchor_lines((anchor_id,), width))
     return lines
 
 

@@ -1,8 +1,7 @@
 import unittest
 
-from gemini_live_2.gateway import CapabilityExecutionContext, GatewayExecutionError
 from gemini_live_2.search.brave import BraveImageResult, BraveSearchQuota, BraveWebResult
-from gemini_live_2.search.capabilities import build_search_capabilities
+from gemini_live_2.search.capabilities import PlanAgentSearchService, SearchExecutionError
 from gemini_live_2.search.result_store import SearchResultStore
 
 
@@ -23,27 +22,26 @@ class _SearchClient:
         )
 
 
-class SearchCapabilityTests(unittest.TestCase):
+class PlanAgentSearchServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.client = _SearchClient()
         self.store = SearchResultStore()
-        self.capabilities = {
-            item.descriptor.id: item
-            for item in build_search_capabilities(
-                domain_id="education",
-                client_factory=lambda: self.client,
-                quota=BraveSearchQuota(max_requests_per_session=2),
-                result_store=self.store,
-            )
-        }
-        self.context = CapabilityExecutionContext(session_id="session-a")
+        self.service = PlanAgentSearchService(
+            client_factory=lambda: self.client,
+            quota=BraveSearchQuota(max_requests_per_session=2),
+            result_store=self.store,
+        )
 
     def test_web_returns_provider_fields_and_image_hides_remote_url_from_agent_data(self) -> None:
-        web = self.capabilities["search_web"].handler({"query": "vòng đời bướm"}, self.context)
+        web = self.service.search_web(
+            query="vòng đời bướm", domain_id="education", session_id="session-a"
+        )
         self.assertEqual(web.data["search_results"][0]["title"], "Vòng đời bướm")
         self.assertEqual(web.data["search_results"][0]["source_url"], "https://example/butterfly")
 
-        image = self.capabilities["search_image"].handler({"query": "ảnh vòng đời bướm"}, self.context)
+        image = self.service.search_image(
+            query="ảnh vòng đời bướm", domain_id="education", session_id="session-a"
+        )
         result = image.data["search_results"][0]
         self.assertEqual(result["kind"], "image")
         self.assertEqual(result["caption"], "Vòng đời bướm")
@@ -54,13 +52,12 @@ class SearchCapabilityTests(unittest.TestCase):
         )
 
     def test_invalid_arguments_and_quota_are_safe_capability_errors(self) -> None:
-        handler = self.capabilities["search_web"].handler
-        with self.assertRaisesRegex(GatewayExecutionError, "exactly query"):
-            handler({"query": "bướm", "extra": True}, self.context)
-        handler({"query": "bướm"}, self.context)
-        handler({"query": "mèo"}, self.context)
-        with self.assertRaisesRegex(GatewayExecutionError, "quota"):
-            handler({"query": "chó"}, self.context)
+        with self.assertRaisesRegex(SearchExecutionError, "non-empty"):
+            self.service.search_web(query="", domain_id="education", session_id="session-a")
+        self.service.search_web(query="bướm", domain_id="education", session_id="session-a")
+        self.service.search_web(query="mèo", domain_id="education", session_id="session-a")
+        with self.assertRaisesRegex(SearchExecutionError, "quota"):
+            self.service.search_web(query="chó", domain_id="education", session_id="session-a")
 
 
 if __name__ == "__main__":

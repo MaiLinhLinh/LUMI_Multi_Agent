@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -13,10 +13,9 @@ from google.genai import types
 from openai import AsyncOpenAI
 
 from gemini_live_2.catalogs.domains import DomainRegistry, ManifestError
-from gemini_live_2.panel import ActiveSurfaceSummary
 from gemini_live_2.catalogs.templates import TemplateCatalogError
+from gemini_live_2.panel import ActiveSurfaceSummary
 from gemini_live_2.gateway import (
-    CapabilityDescriptor,
     CapabilityExecutionContext,
     DomainGateway,
     GatewayConfigurationError,
@@ -34,15 +33,23 @@ from gemini_live_2.panel.contracts import (
     surface_plan_command_from_dict,
 )
 from gemini_live_2.settings import Settings
+from gemini_live_2.search.capabilities import PlanAgentSearchService, SearchExecutionError
 from gemini_live_2.widgets import WidgetPropsError, WidgetRegistry
 from .prompts import SurfacePlanPromptBuilder
+from .tools import (
+    CALL_CAPABILITY,
+    DESCRIBE_TEMPLATE,
+    DESCRIBE_WIDGETS,
+    SEARCH_IMAGE,
+    SEARCH_WEB,
+    cerebras_tools,
+    gemini_tools,
+)
 
 
 logger = logging.getLogger("lumi.plan_agent")
-_MAX_TOOL_STEPS = 10
-_CALL_CAPABILITY_NAME = "call_capability"
-_DESCRIBE_WIDGETS_NAME = "describe_widgets"
-_DESCRIBE_TEMPLATE_NAME = "describe_template"
+_MAX_TOOL_STEPS = 6
+PlanTelemetryCallback = Callable[[dict[str, Any]], Awaitable[None]]
 
 
 
@@ -82,6 +89,108 @@ def _bundle_summary(bundle: DataBundle) -> dict[str, Any]:
     }
 
 
+def _bundle_for_agent(bundle: DataBundle) -> dict[str, Any]:
+    return {"data": dict(bundle.data), "aliases": [alias.to_dict() for alias in bundle.alias_catalog]}
+
+
+def _search_results(value: object, field_name: str) -> list[dict[str, Any]]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise PlanAgentError(f"{field_name} must be an array.")
+    results: list[dict[str, Any]] = []
+    for index, item in enumerate(value, start=1):
+        if not isinstance(item, Mapping):
+            raise PlanAgentError(f"{field_name}[{index}] must be an object.")
+        if item.get("kind") not in {"web", "image"} or not isinstance(item.get("result_id"), str):
+            raise PlanAgentError(
+                f"{field_name}[{index}] requires kind 'web' or 'image' and a non-empty result_id."
+            )
+        results.append(dict(item))
+    return results
+
+
+def _merge_bundles(current: DataBundle, update: DataBundle) -> DataBundle:
+    if current.domain_id != update.domain_id:
+        raise PlanAgentError("domain capability returned data for another domain.")
+    merged_data = dict(current.data)
+    update_data = dict(update.data)
+    current_results = merged_data.pop("search_results", None)
+    update_results = update_data.pop("search_results", None)
+    if current_results is not None or update_results is not None:
+        merged_data["search_results"] = [
+            *_search_results(current_results, "existing search_results"),
+            *_search_results(update_results, "capability search_results"),
+        ]
+    duplicate_keys = set(merged_data).intersection(update_data)
+    if duplicate_keys:
+        raise PlanAgentError(
+            "capability result conflicts with existing data keys: " + ", ".join(sorted(duplicate_keys)) + "."
+        )
+    aliases: tuple[DataAlias, ...] = current.alias_catalog + update.alias_catalog
+    if len({alias.id for alias in aliases}) != len(aliases):
+        raise PlanAgentError("capability result conflicts with an existing data alias.")
+    return DataBundle(domain_id=current.domain_id, data={**merged_data, **update_data}, aliases=aliases)
+
+
+def _usage_value(usage: object, *names: str) -> int | None:
+    """Read one non-negative token counter from an SDK object or mapping."""
+
+    for name in names:
+        value = usage.get(name) if isinstance(usage, Mapping) else getattr(usage, name, None)
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            return value
+    return None
+
+
+def _usage_child(usage: object, name: str) -> object | None:
+    return usage.get(name) if isinstance(usage, Mapping) else getattr(usage, name, None)
+
+
+def _usage_for_telemetry(usage: object) -> dict[str, int] | None:
+    """Normalize provider usage without ever estimating tokens locally."""
+
+    if usage is None:
+        return None
+    completion_details = _usage_child(usage, "completion_tokens_details")
+    fields = {
+        "prompt_tokens": _usage_value(usage, "prompt_tokens", "prompt_token_count"),
+        "output_tokens": _usage_value(
+            usage, "completion_tokens", "response_token_count", "candidates_token_count"
+        ),
+        "reasoning_tokens": _usage_value(
+            completion_details, "reasoning_tokens", "thoughts_token_count"
+        ),
+        "total_tokens": _usage_value(usage, "total_tokens", "total_token_count"),
+    }
+    normalized = {name: value for name, value in fields.items() if value is not None}
+    return normalized or None
+
+
+async def _emit_plan_telemetry(
+    request: "PlanAgentRequest",
+    *,
+    provider: str,
+    step: int,
+    output_kind: str,
+    tool_names: list[str],
+    usage: object,
+) -> None:
+    """Forward one real model-output usage record to the request owner."""
+
+    callback = request.telemetry_callback
+    if callback is None:
+        return
+    await callback({
+        "source": "plan_agent",
+        "provider": provider,
+        "step": step,
+        "output_kind": output_kind,
+        "tool_names": tool_names,
+        "usage": _usage_for_telemetry(usage),
+    })
+
+
 def _safe_history(value: object) -> tuple[dict[str, str], ...]:
     if not isinstance(value, tuple):
         raise PlanAgentError("recent_history must be a tuple.")
@@ -97,57 +206,6 @@ def _safe_history(value: object) -> tuple[dict[str, str], ...]:
     return tuple(safe)
 
 
-def _bundle_for_agent(bundle: DataBundle) -> dict[str, Any]:
-    return {"data": dict(bundle.data), "aliases": [alias.to_dict() for alias in bundle.alias_catalog]}
-
-
-def _merge_bundles(current: DataBundle, update: DataBundle) -> DataBundle:
-    """Keep verified data, with an append-only journal for search results."""
-
-    if current.domain_id != update.domain_id:
-        raise PlanAgentError("domain capability returned data for another domain.")
-    merged_data = dict(current.data)
-    update_data = dict(update.data)
-    current_search_results = merged_data.pop("search_results", None)
-    update_search_results = update_data.pop("search_results", None)
-    if current_search_results is not None or update_search_results is not None:
-        existing = _search_results(current_search_results, "existing search_results")
-        incoming = _search_results(update_search_results, "capability search_results")
-        merged_data["search_results"] = [*existing, *incoming]
-
-    duplicate_keys = set(merged_data).intersection(update_data)
-    if duplicate_keys:
-        raise PlanAgentError(
-            "capability result conflicts with existing data keys: " + ", ".join(sorted(duplicate_keys)) + "."
-        )
-    aliases: tuple[DataAlias, ...] = current.alias_catalog + update.alias_catalog
-    alias_ids = [alias.id for alias in aliases]
-    if len(alias_ids) != len(set(alias_ids)):
-        raise PlanAgentError("capability result conflicts with an existing data alias.")
-    return DataBundle(domain_id=current.domain_id, data={**merged_data, **update_data}, aliases=aliases)
-
-
-def _search_results(value: object, field_name: str) -> list[dict[str, Any]]:
-    """Validate the agreed append-only search journal shape at the merge boundary."""
-
-    if value is None:
-        return []
-    if not isinstance(value, list):
-        raise PlanAgentError(f"{field_name} must be an array.")
-    results: list[dict[str, Any]] = []
-    for index, item in enumerate(value, start=1):
-        if not isinstance(item, Mapping):
-            raise PlanAgentError(f"{field_name}[{index}] must be an object.")
-        kind = item.get("kind")
-        result_id = item.get("result_id")
-        if kind not in {"web", "image"} or not isinstance(result_id, str) or not result_id.strip():
-            raise PlanAgentError(
-                f"{field_name}[{index}] requires kind 'web' or 'image' and a non-empty result_id."
-            )
-        results.append(dict(item))
-    return results
-
-
 @dataclass(frozen=True, slots=True)
 class PlanAgentRequest:
     """Backend-owned context for one request that must create/replace a panel."""
@@ -160,6 +218,7 @@ class PlanAgentRequest:
     validation_feedback: Mapping[str, Any] | None = None
     runtime_feedback: Mapping[str, Any] | None = None
     session_id: str | None = None
+    telemetry_callback: PlanTelemetryCallback | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "domain_id", _text(self.domain_id, "domain_id"))
@@ -185,6 +244,8 @@ class PlanAgentRequest:
             object.__setattr__(self, "runtime_feedback", dict(self.runtime_feedback))
         if self.session_id is not None:
             object.__setattr__(self, "session_id", _text(self.session_id, "session_id"))
+        if self.telemetry_callback is not None and not callable(self.telemetry_callback):
+            raise PlanAgentError("telemetry_callback must be callable.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -193,6 +254,16 @@ class PlanAgentResult:
 
     command: SurfacePlanCommand
     data_bundle: DataBundle
+
+
+@dataclass(frozen=True, slots=True)
+class _ToolExecution:
+    """Backend result of one Plan Agent native-tool invocation."""
+
+    response: dict[str, Any]
+    data_bundle: DataBundle
+    described_widget_ids: tuple[str, ...] = ()
+    described_template_id: str | None = None
 
 
 ClientFactory = Callable[..., Any]
@@ -204,112 +275,6 @@ def _parse_command(value: object) -> SurfacePlanCommand:
         return surface_plan_command_from_dict(value)
     except ContractValidationError as exc:
         raise PlanAgentError(str(exc)) from exc
-
-
-def _native_tools(capabilities: tuple[CapabilityDescriptor, ...]) -> types.Tool:
-    """Expose shared widget discovery and only the capabilities granted by the domain."""
-
-    declarations = [
-        types.FunctionDeclaration(
-            name=_DESCRIBE_WIDGETS_NAME,
-            description=(
-                "Lấy contract đầy đủ (props, initial_state, children và interaction) "
-                "cho các widget được phép dùng trong surface mới."
-            ),
-            parametersJsonSchema={
-                "type": "object",
-                "additionalProperties": False,
-                "required": ["widget_ids"],
-                "properties": {
-                    "widget_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}},
-                },
-            },
-        ),
-        types.FunctionDeclaration(
-            name=_DESCRIBE_TEMPLATE_NAME,
-            description="Return the binding contract for one reusable layout template.",
-            parametersJsonSchema={
-                "type": "object",
-                "additionalProperties": False,
-                "required": ["template_id"],
-                "properties": {"template_id": {"type": "string"}},
-            },
-        ),
-    ]
-    if capabilities:
-        declarations.append(types.FunctionDeclaration(
-            name=_CALL_CAPABILITY_NAME,
-            description=(
-                "Gọi một capability đã được cấp quyền để lấy hoặc tạo dữ liệu tin cậy "
-                "cần cho Presentation Plan. Chỉ dùng capability_id trong danh sách được cấp."
-            ),
-            parametersJsonSchema={
-                "type": "object",
-                "additionalProperties": False,
-                "required": ["capability_id", "arguments"],
-                "properties": {
-                    "capability_id": {"type": "string", "enum": [item.id for item in capabilities]},
-                    "arguments": {"type": "object"},
-                },
-            },
-        ))
-    return types.Tool(functionDeclarations=declarations)
-
-
-def _cerebras_tools(capabilities: tuple[CapabilityDescriptor, ...]) -> list[dict[str, Any]]:
-    """Return the same native tools in Cerebras/OpenAI chat-completions form."""
-
-    declarations: list[dict[str, Any]] = [{
-        "type": "function",
-        "function": {
-            "name": _DESCRIBE_WIDGETS_NAME,
-            "description": (
-                "Lấy contract đầy đủ (props, initial_state, children và interaction) "
-                "cho các widget được phép dùng trong surface mới."
-            ),
-            "parameters": {
-                "type": "object",
-                "additionalProperties": False,
-                "required": ["widget_ids"],
-                "properties": {
-                    "widget_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}},
-                },
-            },
-        },
-    }, {
-        "type": "function",
-        "function": {
-            "name": _DESCRIBE_TEMPLATE_NAME,
-            "description": "Return the binding contract for one reusable layout template.",
-            "parameters": {
-                "type": "object",
-                "additionalProperties": False,
-                "required": ["template_id"],
-                "properties": {"template_id": {"type": "string"}},
-            },
-        },
-    }]
-    if capabilities:
-        declarations.append({
-            "type": "function",
-            "function": {
-                "name": _CALL_CAPABILITY_NAME,
-                "description": (
-                    "Gọi một capability đã được cấp quyền để lấy hoặc tạo dữ liệu tin cậy "
-                    "cần cho Presentation Plan. Chỉ dùng capability_id trong danh sách được cấp."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["capability_id", "arguments"],
-                    "properties": {
-                        "capability_id": {"type": "string", "enum": [item.id for item in capabilities]},
-                        "arguments": {"type": "object"},
-                    },
-                },
-            },
-        })
-    return declarations
 
 
 def _function_calls(response: Any) -> tuple[Any, ...]:
@@ -343,6 +308,7 @@ class PlanAgent:
         domain_registry: DomainRegistry,
         domain_gateway: DomainGateway,
         widget_registry: WidgetRegistry,
+        search_service: PlanAgentSearchService | None = None,
         client_factory: ClientFactory = genai.Client,
         cerebras_client_factory: CerebrasClientFactory = AsyncOpenAI,
         max_tool_steps: int = _MAX_TOOL_STEPS,
@@ -353,6 +319,7 @@ class PlanAgent:
         self._domain_registry = domain_registry
         self._domain_gateway = domain_gateway
         self._widget_registry = widget_registry
+        self._search_service = search_service
         self._client_factory = client_factory
         self._cerebras_client_factory = cerebras_client_factory
         self._max_tool_steps = max_tool_steps
@@ -392,7 +359,7 @@ class PlanAgent:
             "[PLAN_AGENT_CONTEXT] provider=gemini assets=%d templates=%d widgets=%d capabilities=%s verified=%s",
             len(resources.assets.assets),
             len(resources.templates.for_plan_agent()),
-            len(resources.manifest.allowed_widget_ids),
+            len(self._widget_registry.widget_ids()),
             [capability.id for capability in capabilities],
             _log_payload(_bundle_summary(bundle)),
         )
@@ -403,9 +370,7 @@ class PlanAgent:
             "canvas": {"columns": 16, "rows": 10},
             "assets": resources.assets.plan_agent_catalog(),
             "template_catalog": resources.templates.for_plan_agent(),
-            "widget_index": self._widget_registry.widget_index(
-                resources.manifest.allowed_widget_ids
-            ),
+            "widget_index": self._widget_registry.widget_index(),
             "capabilities": [capability.for_plan_agent() for capability in capabilities],
             "tool_budget": {"max_native_calls": self._max_tool_steps},
         "verified_data": _bundle_for_agent(bundle),
@@ -425,7 +390,7 @@ class PlanAgent:
         client = self._client_factory(api_key=self._settings.plan_agent_api_key)
         config = types.GenerateContentConfig(
             system_instruction=self._prompt_builder.build(domain_instruction=resources.plan_instruction),
-            tools=[_native_tools(capabilities)],
+            tools=[gemini_tools(capabilities)],
             automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
         )
         tool_call_count = 0
@@ -436,6 +401,14 @@ class PlanAgent:
         while True:
             response = await self._generate_response(client, messages, config)
             calls = _function_calls(response)
+            await _emit_plan_telemetry(
+                request,
+                provider="gemini",
+                step=tool_call_count + 1,
+                output_kind="tool_call" if calls else "final_json",
+                tool_names=[str(getattr(call, "name", "")) for call in calls],
+                usage=getattr(response, "usage_metadata", None),
+            )
             logger.info(
                 "[PLAN_AGENT_MODEL_STEP] provider=gemini tool_calls_used=%d/%d calls=%s",
                 tool_call_count,
@@ -486,46 +459,19 @@ class PlanAgent:
                         )
                     ))
                     continue
-                if name == _DESCRIBE_WIDGETS_NAME:
-                    response_data = self._describe_widgets(
-                        widget_ids=arguments.get("widget_ids"),
-                        allowed_widget_ids=resources.manifest.allowed_widget_ids,
-                    )
-                    described_widget_ids.update(item["id"] for item in response_data["widgets"])
-                elif name == _DESCRIBE_TEMPLATE_NAME:
-                    response_data = self._describe_template(
-                        template_id=arguments.get("template_id"),
-                        resources=resources,
-                    )
-                    described_template_ids.add(response_data["template_id"])
-                elif name == _CALL_CAPABILITY_NAME:
-                    capability_id = _text(arguments.get("capability_id"), "capability_id")
-                    capability_arguments = _mapping(arguments.get("arguments"), "capability arguments")
-                    try:
-                        update = self._domain_gateway.execute(
-                            domain_id=request.domain_id,
-                            capability_id=capability_id,
-                            arguments=capability_arguments,
-                            execution_context=(
-                                CapabilityExecutionContext(session_id=request.session_id)
-                                if request.session_id is not None else None
-                            ),
-                        )
-                    except GatewayExecutionError as exc:
-                        response_data = {
-                            "capability_id": capability_id,
-                            "error": {"message": str(exc)},
-                        }
-                    except (GatewayConfigurationError, GatewayPermissionError) as exc:
-                        raise PlanAgentError(str(exc)) from exc
-                    else:
-                        bundle = _merge_bundles(bundle, update)
-                        response_data = {
-                            "capability_id": capability_id,
-                            "verified_data": _bundle_for_agent(update),
-                        }
-                else:
-                    raise PlanAgentError("Plan Agent called an unsupported native function.")
+                tool_result = self._execute_tool(
+                    name=name,
+                    arguments=arguments,
+                    domain_id=request.domain_id,
+                    resources=resources,
+                    data_bundle=bundle,
+                    session_id=request.session_id,
+                )
+                response_data = tool_result.response
+                bundle = tool_result.data_bundle
+                described_widget_ids.update(tool_result.described_widget_ids)
+                if tool_result.described_template_id is not None:
+                    described_template_ids.add(tool_result.described_template_id)
                 logger.info(
                     "[PLAN_AGENT_TOOL_RESPONSE] provider=gemini step=%d name=%s response=%s bundle=%s",
                     tool_call_count + call_index,
@@ -559,7 +505,7 @@ class PlanAgent:
             "[PLAN_AGENT_CONTEXT] provider=cerebras assets=%d templates=%d widgets=%d capabilities=%s verified=%s",
             len(resources.assets.assets),
             len(resources.templates.for_plan_agent()),
-            len(resources.manifest.allowed_widget_ids),
+            len(self._widget_registry.widget_ids()),
             [capability.id for capability in capabilities],
             _log_payload(_bundle_summary(bundle)),
         )
@@ -570,7 +516,7 @@ class PlanAgent:
             "canvas": {"columns": 16, "rows": 10},
             "assets": resources.assets.plan_agent_catalog(),
             "template_catalog": resources.templates.for_plan_agent(),
-            "widget_index": self._widget_registry.widget_index(resources.manifest.allowed_widget_ids),
+            "widget_index": self._widget_registry.widget_index(),
             "capabilities": [capability.for_plan_agent() for capability in capabilities],
             "tool_budget": {"max_native_calls": self._max_tool_steps},
             "verified_data": _bundle_for_agent(bundle),
@@ -605,8 +551,9 @@ class PlanAgent:
                 completion = await client.chat.completions.create(
                     model=self._settings.cerebras_planner_model,
                     messages=messages,
-                    tools=_cerebras_tools(capabilities),
+                    tools=cerebras_tools(capabilities),
                     parallel_tool_calls=False,
+                    reasoning_effort="low"
                 )
             except Exception as exc:
                 logger.warning(
@@ -620,6 +567,17 @@ class PlanAgent:
                 raise PlanAgentError("Cerebras returned no planning choice.")
             message = choices[0].message
             calls = tuple(getattr(message, "tool_calls", None) or ())
+            await _emit_plan_telemetry(
+                request,
+                provider="cerebras",
+                step=tool_call_count + 1,
+                output_kind="tool_call" if calls else "final_json",
+                tool_names=[
+                    str(getattr(getattr(call, "function", None), "name", ""))
+                    for call in calls
+                ],
+                usage=getattr(completion, "usage", None),
+            )
             logger.info(
                 "[PLAN_AGENT_MODEL_STEP] provider=cerebras tool_calls_used=%d/%d calls=%s",
                 tool_call_count,
@@ -672,46 +630,19 @@ class PlanAgent:
                         "content": json.dumps(response_data, ensure_ascii=False),
                     })
                     continue
-                if name == _DESCRIBE_WIDGETS_NAME:
-                    response_data = self._describe_widgets(
-                        widget_ids=arguments.get("widget_ids"),
-                        allowed_widget_ids=resources.manifest.allowed_widget_ids,
-                    )
-                    described_widget_ids.update(item["id"] for item in response_data["widgets"])
-                elif name == _DESCRIBE_TEMPLATE_NAME:
-                    response_data = self._describe_template(
-                        template_id=arguments.get("template_id"),
-                        resources=resources,
-                    )
-                    described_template_ids.add(response_data["template_id"])
-                elif name == _CALL_CAPABILITY_NAME:
-                    capability_id = _text(arguments.get("capability_id"), "capability_id")
-                    capability_arguments = _mapping(arguments.get("arguments"), "capability arguments")
-                    try:
-                        update = self._domain_gateway.execute(
-                            domain_id=request.domain_id,
-                            capability_id=capability_id,
-                            arguments=capability_arguments,
-                            execution_context=(
-                                CapabilityExecutionContext(session_id=request.session_id)
-                                if request.session_id is not None else None
-                            ),
-                        )
-                    except GatewayExecutionError as exc:
-                        response_data = {
-                            "capability_id": capability_id,
-                            "error": {"message": str(exc)},
-                        }
-                    except (GatewayConfigurationError, GatewayPermissionError) as exc:
-                        raise PlanAgentError(str(exc)) from exc
-                    else:
-                        bundle = _merge_bundles(bundle, update)
-                        response_data = {
-                            "capability_id": capability_id,
-                            "verified_data": _bundle_for_agent(update),
-                        }
-                else:
-                    raise PlanAgentError("Plan Agent called an unsupported native function.")
+                tool_result = self._execute_tool(
+                    name=name,
+                    arguments=arguments,
+                    domain_id=request.domain_id,
+                    resources=resources,
+                    data_bundle=bundle,
+                    session_id=request.session_id,
+                )
+                response_data = tool_result.response
+                bundle = tool_result.data_bundle
+                described_widget_ids.update(tool_result.described_widget_ids)
+                if tool_result.described_template_id is not None:
+                    described_template_ids.add(tool_result.described_template_id)
                 logger.info(
                     "[PLAN_AGENT_TOOL_RESPONSE] provider=cerebras step=%d name=%s response=%s bundle=%s",
                     tool_call_count + call_index,
@@ -730,18 +661,14 @@ class PlanAgent:
         self,
         *,
         widget_ids: object,
-        allowed_widget_ids: tuple[str, ...],
     ) -> dict[str, Any]:
         if not isinstance(widget_ids, list) or not widget_ids:
             raise PlanAgentError("describe_widgets.widget_ids must be a non-empty array.")
         normalized_ids = tuple(_text(item, "widget_id") for item in widget_ids)
         if len(normalized_ids) != len(set(normalized_ids)):
             raise PlanAgentError("describe_widgets.widget_ids must not contain duplicates.")
-        allowed = set(allowed_widget_ids)
         widgets: list[dict[str, Any]] = []
         for widget_id in normalized_ids:
-            if widget_id not in allowed:
-                raise PlanAgentError(f"widget_id '{widget_id}' is not allowed by the active domain.")
             try:
                 widget = self._widget_registry.get(widget_id)
             except WidgetPropsError as exc:
@@ -783,6 +710,124 @@ class PlanAgent:
             "blocks": [block.to_dict() for block in template.blocks],
             "bindings": [binding.to_dict() for binding in template.bindings],
         }
+
+    def _execute_tool(
+        self,
+        *,
+        name: object,
+        arguments: Mapping[str, Any],
+        domain_id: str,
+        resources: Any,
+        data_bundle: DataBundle,
+        session_id: str | None,
+    ) -> _ToolExecution:
+        """Dispatch a declared tool to the backend service that implements it."""
+
+        if name == DESCRIBE_WIDGETS:
+            response = self._describe_widgets(
+                widget_ids=arguments.get("widget_ids"),
+            )
+            return _ToolExecution(
+                response=response,
+                data_bundle=data_bundle,
+                described_widget_ids=tuple(widget["id"] for widget in response["widgets"]),
+            )
+        if name == DESCRIBE_TEMPLATE:
+            response = self._describe_template(
+                template_id=arguments.get("template_id"), resources=resources
+            )
+            return _ToolExecution(
+                response=response,
+                data_bundle=data_bundle,
+                described_template_id=response["template_id"],
+            )
+        if name == SEARCH_WEB:
+            if set(arguments) != {"query"}:
+                return _ToolExecution(
+                    response={"error": {"message": "search arguments must contain exactly query."}},
+                    data_bundle=data_bundle,
+                )
+            return self._execute_search(
+                tool_name=SEARCH_WEB,
+                query=arguments.get("query"),
+                domain_id=domain_id,
+                data_bundle=data_bundle,
+                session_id=session_id,
+            )
+        if name == SEARCH_IMAGE:
+            if set(arguments) != {"query"}:
+                return _ToolExecution(
+                    response={"error": {"message": "search arguments must contain exactly query."}},
+                    data_bundle=data_bundle,
+                )
+            return self._execute_search(
+                tool_name=SEARCH_IMAGE,
+                query=arguments.get("query"),
+                domain_id=domain_id,
+                data_bundle=data_bundle,
+                session_id=session_id,
+            )
+        if name != CALL_CAPABILITY:
+            raise PlanAgentError("Plan Agent called an unsupported native function.")
+
+        capability_id = _text(arguments.get("capability_id"), "capability_id")
+        capability_arguments = _mapping(arguments.get("arguments"), "capability arguments")
+        try:
+            update = self._domain_gateway.execute(
+                domain_id=domain_id,
+                capability_id=capability_id,
+                arguments=capability_arguments,
+                execution_context=(
+                    CapabilityExecutionContext(session_id=session_id) if session_id else None
+                ),
+            )
+        except GatewayExecutionError as exc:
+            return _ToolExecution(
+                response={"capability_id": capability_id, "error": {"message": str(exc)}},
+                data_bundle=data_bundle,
+            )
+        except (GatewayConfigurationError, GatewayPermissionError) as exc:
+            raise PlanAgentError(str(exc)) from exc
+        merged_bundle = _merge_bundles(data_bundle, update)
+        return _ToolExecution(
+            response={"capability_id": capability_id, "verified_data": _bundle_for_agent(update)},
+            data_bundle=merged_bundle,
+        )
+
+    def _execute_search(
+        self,
+        *,
+        tool_name: str,
+        query: object,
+        domain_id: str,
+        data_bundle: DataBundle,
+        session_id: str | None,
+    ) -> _ToolExecution:
+        if self._search_service is None:
+            return _ToolExecution(
+                response={"error": {"message": "Plan Agent search service is not configured."}},
+                data_bundle=data_bundle,
+            )
+        try:
+            update = (
+                self._search_service.search_web(
+                    query=query, domain_id=domain_id, session_id=session_id
+                )
+                if tool_name == SEARCH_WEB
+                else self._search_service.search_image(
+                    query=query, domain_id=domain_id, session_id=session_id
+                )
+            )
+        except SearchExecutionError as exc:
+            return _ToolExecution(
+                response={"error": {"message": str(exc)}},
+                data_bundle=data_bundle,
+            )
+        merged_bundle = _merge_bundles(data_bundle, update)
+        return _ToolExecution(
+            response={"verified_data": _bundle_for_agent(update)},
+            data_bundle=merged_bundle,
+        )
 
     async def _generate_response(
         self,

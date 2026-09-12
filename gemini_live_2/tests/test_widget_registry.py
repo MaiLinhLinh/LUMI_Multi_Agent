@@ -1,12 +1,13 @@
 import unittest
 
-from gemini_live_2.widgets import WidgetPropsError, build_default_widget_registry
+from gemini_live_2.widgets import WidgetPropsError
+from gemini_live_2.tests.runtime_registry import runtime_widget_registry
 
 
 class WidgetRegistryTests(unittest.TestCase):
 
     def test_choice_exposes_its_children_anchor_and_select_event(self) -> None:
-        registry = build_default_widget_registry()
+        registry = runtime_widget_registry()
         choice = registry.get("choice")
         self.assertEqual(choice.validate({}), {})
         self.assertEqual(choice.anchors_for({})[0].key, "choice")
@@ -52,12 +53,12 @@ class WidgetRegistryTests(unittest.TestCase):
             },
         )
     def setUp(self) -> None:
-        self.registry = build_default_widget_registry()
+        self.registry = runtime_widget_registry()
 
     def test_default_widget_ids(self) -> None:
         self.assertEqual(
             self.registry.widget_ids(),
-            ("text", "image", "object_group", "answer", "number_display", "choice", "flashcard"),
+            ("answer", "choice", "flashcard", "image", "number_display", "object_group", "text", "timeline"),
         )
 
     def test_flashcard_declares_two_faces_flip_rule_and_card_anchor(self) -> None:
@@ -80,18 +81,14 @@ class WidgetRegistryTests(unittest.TestCase):
         with self.assertRaisesRegex(WidgetPropsError, "exactly front and back"):
             flashcard.validate({"front": props["front"]})
 
-    def test_widget_index_is_short_and_respects_domain_allow_list(self) -> None:
-        self.assertEqual(
-            self.registry.widget_index(("text", "image")),
-            (
-                {"id": "text", "purpose": "Hiển thị văn bản tự do như tiêu đề, nhãn hoặc nội dung ngắn."},
-                {"id": "image", "purpose": "Hiển thị một ảnh từ Asset Catalog hoặc kết quả search ảnh đã được backend xác minh."},
-            ),
-        )
+    def test_widget_index_is_the_short_full_discovery_catalog(self) -> None:
+        index = self.registry.widget_index()
+        self.assertEqual({item["id"] for item in index}, set(self.registry.widget_ids()))
+        self.assertTrue(all(set(item) >= {"id", "purpose"} for item in index))
 
     def test_widget_index_marks_discoverable_composite_and_interactive_widgets(self) -> None:
         self.assertEqual(
-            self.registry.widget_index(("choice", "flashcard")),
+            tuple(item for item in self.registry.widget_index() if item["id"] in {"choice", "flashcard"}),
             (
                 {
                     "id": "choice",

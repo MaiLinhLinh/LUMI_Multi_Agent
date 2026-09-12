@@ -25,7 +25,7 @@ Template Catalog vẫn là catalog một tầng, ngắn gọn. Plan Agent nhận
 - Plan Agent không tạo block ID hoặc `anchor_id`.
 - Compiler sinh block ID tuần tự và anchor ngắn cho Gemini Live.
 - `describe_widgets` là tool hạ tầng dùng chung, không thuộc một domain.
-- Tool chỉ mô tả widget được phép trong `allowed_widget_ids` của domain hiện hành.
+- Tool mô tả mọi widget extension đang được Widget Registry nạp.
 - Capability lấy/tạo dữ liệu vẫn nằm trong `domains/<domain>/tools.py` và vẫn bị manifest kiểm soát.
 
 ## Checkpoint
@@ -55,10 +55,10 @@ trước CP-W6 đã được gỡ; runtime hiện tại chỉ dùng `widget_id`.
 
 - [x] Thêm API Registry tạo Widget Index ngắn: `id` + `purpose`.
 - [x] Plan Agent chỉ nhận Widget Index ở payload khởi đầu.
-- [x] Bảo đảm index bị lọc theo `allowed_widget_ids` của domain.
+- [x] Dùng Widget Registry toàn cục, không lọc widget theo domain.
 
 **Kết quả:** `WidgetRegistry.widget_index()` chỉ xuất `id` và `purpose`; payload
-khởi đầu của Plan Agent dùng index này và lấy allow-list từ manifest. Compiler và
+khởi đầu của Plan Agent dùng toàn bộ index extension đã nạp. Compiler và
 Plan Agent dùng cùng Widget Registry. Không còn API catalog cũ trên Widget Registry;
 `AssetCatalog.plan_agent_catalog()` là API riêng, hiện vẫn dùng để gửi Asset Catalog
 an toàn cho Plan Agent.
@@ -72,7 +72,7 @@ an toàn cho Plan Agent.
 
 **Kết quả:** `describe_widgets` luôn được cấp như native tool chung, kể cả khi
 domain chưa có capability nghiệp vụ. Tool xác thực danh sách ID không rỗng,
-không trùng lặp và thuộc `allowed_widget_ids`, rồi trả `id`, `purpose`, props
+không trùng lặp và đã được Widget Registry nạp, rồi trả `id`, `purpose`, props
 contract theo đúng function call ID. `call_capability` vẫn chỉ được khai báo khi
 domain có capability được cấp quyền.
 

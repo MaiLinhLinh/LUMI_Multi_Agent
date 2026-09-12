@@ -364,8 +364,7 @@ Viết hướng dẫn thêm một domain mới chỉ bằng:
 - Template Catalog vẫn được gửi trực tiếp theo một tầng (`id`, `purpose`, `supports`,
   `domains`), không thêm `describe_templates`.
 - Khi cần tự tạo plan, Plan Agent gọi native tool chung `describe_widgets(widget_ids)`;
-  tool lọc widget theo `allowed_widget_ids` của domain và chỉ trả contract props chi
-  tiết của widget được yêu cầu.
+  tool tra Widget Registry chung và chỉ trả contract props chi tiết của widget được yêu cầu.
 - Output `create_plan` cuối cùng chỉ chứa `plan.blocks` gồm `widget_id`, `grid`, `props`;
   `domain_id` lấy từ `route_request` đã kiểm chứng, không do Plan Agent sinh. Compiler sinh
   block ID tuần tự và anchor.

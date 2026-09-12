@@ -14,10 +14,7 @@ class CatalogTests(unittest.TestCase):
     def test_education_manifest_loads_assets_without_domain_branching(self) -> None:
         resources = DomainRegistry(PROJECT_ROOT / "domains").load("education")
         self.assertEqual(resources.manifest.domain_id, "education")
-        self.assertEqual(
-            resources.manifest.allowed_widget_ids,
-            ("text", "image", "object_group", "answer", "number_display", "choice", "flashcard"),
-        )
+        self.assertEqual(resources.manifest.for_plan_agent()["domain_id"], "education")
         self.assertIn("cô giáo thân thiện", resources.presentation_instruction)
         self.assertIn("domain giáo dục", resources.plan_instruction)
         asset_ids = [asset["id"] for asset in resources.assets.plan_agent_catalog()]

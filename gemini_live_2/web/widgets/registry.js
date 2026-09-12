@@ -1,22 +1,30 @@
-import { renderTextWidget } from "./text.js?v=text-fit-20260903";
-import { renderImageWidget } from "./image.js?v=anchor-id-20260825";
-import { renderObjectGroupWidget } from "./object_group.js?v=anchor-id-20260825";
-import { renderAnswerWidget } from "./answer.js?v=anchor-id-20260825";
-import { renderNumberDisplayWidget } from "./number_display.js?v=anchor-id-20260825";
-import { renderChoiceWidget } from "./choice.js?v=choice-anchor-20260825";
-import { renderFlashcardWidget } from "./flashcard.js?v=surface-document-sd8";
+const WIDGET_RENDERERS = new Map();
 
-// Widget modules own their DOM shape; the SurfaceDocument renderer owns grid
-// placement and assigns compiler-owned anchors to those DOM regions.
-const WIDGET_RENDERERS = new Map([
-  ["text", renderTextWidget],
-  ["image", renderImageWidget],
-  ["object_group", renderObjectGroupWidget],
-  ["answer", renderAnswerWidget],
-  ["number_display", renderNumberDisplayWidget],
-  ["choice", renderChoiceWidget],
-  ["flashcard", renderFlashcardWidget],
-]);
+export async function loadWidgetCatalog(entries) {
+  if (!Array.isArray(entries)) throw new TypeError("widget catalog must be an array.");
+  await Promise.all(entries.map(async (entry) => {
+    const id = typeof entry?.id === "string" ? entry.id : "";
+    const rendererUrl = typeof entry?.renderer === "string" ? entry.renderer : "";
+    const expectedActions = entry?.interaction_actions;
+    if (!id || !rendererUrl || !Array.isArray(expectedActions)) {
+      throw new TypeError("widget catalog entry requires id, renderer, and interaction_actions.");
+    }
+    if (!expectedActions.every((action) => typeof action === "string" && action)) {
+      throw new TypeError(`widget '${id}' interaction_actions must contain non-empty strings.`);
+    }
+    if (WIDGET_RENDERERS.has(id)) return;
+    const module = await import(rendererUrl);
+    if (typeof module.render !== "function") {
+      throw new TypeError(`widget '${id}' renderer must export render().`);
+    }
+    if (!Array.isArray(module.interactionActions)
+      || module.interactionActions.length !== expectedActions.length
+      || module.interactionActions.some((action, index) => action !== expectedActions[index])) {
+      throw new TypeError(`widget '${id}' interactionActions must match its validated catalog contract.`);
+    }
+    WIDGET_RENDERERS.set(id, module.render);
+  }));
+}
 
 export function widgetRendererFor(widgetType) {
   return WIDGET_RENDERERS.get(widgetType) || null;

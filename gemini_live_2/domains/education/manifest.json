@@ -6,6 +6,5 @@
   "presentation_prompt_constant": "EDUCATION_PRESENTATION_INSTRUCTION",
   "plan_prompt_path": "plan_prompt.py",
   "plan_prompt_constant": "EDUCATION_PLAN_INSTRUCTION",
-  "allowed_widget_ids": ["text", "image", "object_group", "answer", "number_display", "choice", "flashcard"],
-  "tool_capabilities": ["search_web", "search_image"]
+  "tool_capabilities": []
 }

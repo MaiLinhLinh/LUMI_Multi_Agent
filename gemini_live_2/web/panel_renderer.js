@@ -1,4 +1,4 @@
-import { widgetRendererFor } from "./widgets/registry.js?v=text-fit-20260903";
+import { widgetRendererFor } from "/assets/widgets/registry.js";
 
 export function renderSurfaceDocument(surface, assets = [], {
   revealedComponentIds = new Set(),
@@ -57,8 +57,21 @@ export function renderSurfaceDocument(surface, assets = [], {
     try {
       node = renderer(materializedComponent, {
         anchorsByKey: anchorsByComponent.get(component.id) || {},
-        surfaceId: surface?.surface_id || "",
         renderChild: (child) => renderComponentChild(child, assetUrls),
+        emitInteraction: ({ anchor_id, action } = {}) => {
+          if (typeof anchor_id !== "string" || !anchor_id || typeof action !== "string" || !action) {
+            diagnose("interaction_emit_failed", { status: "invalid_event" });
+            return;
+          }
+          grid.dispatchEvent(new CustomEvent("panel:interaction", {
+            bubbles: true,
+            detail: {
+              surface_id: surface?.surface_id || "",
+              anchor_id,
+              action,
+            },
+          }));
+        },
       });
     } catch (error) {
       diagnose("widget_render_failed", { status: "exception", name: String(error?.name || "Error") });
@@ -125,6 +138,7 @@ function renderComponentChild(child, assetUrls) {
   return renderer(withAssetUrl({ ...child, state: { visibility: "visible" } }, assetUrls), {
     anchorsByKey: {},
     renderChild: (nestedChild) => renderComponentChild(nestedChild, assetUrls),
+    emitInteraction: () => {},
   });
 }
 

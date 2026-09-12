@@ -13,7 +13,7 @@ from gemini_live_2.panel import (
     render_visual_stage_map,
     surface_document_client_payload,
 )
-from gemini_live_2.widgets import build_default_widget_registry
+from gemini_live_2.tests.runtime_registry import runtime_widget_registry
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -21,7 +21,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 class PanelRendererTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.registry = build_default_widget_registry()
+        self.registry = runtime_widget_registry()
         self.resources = DomainRegistry(PROJECT_ROOT / "domains").load("education")
         self.document = PanelCompiler(self.registry).compile_surface_document(
             domain_resources=self.resources,

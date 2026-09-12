@@ -37,6 +37,7 @@ from gemini_live_2.panel import (
 )
 from gemini_live_2.plan_agent import PlanAgent, PlanAgentError, PlanAgentRequest
 from gemini_live_2.trace import trace
+from gemini_live_2.extension_loader import EffectRegistry
 
 from .memory import SessionMemoryStore
 from .session_protocol import LiveSessionState, can_transition
@@ -100,11 +101,13 @@ class LiveSessionOrchestrator:
         domain_registry: DomainRegistry | None = None,
         plan_agent: PlanAgent | None = None,
         panel_compiler: PanelCompiler | None = None,
+        effect_registry: EffectRegistry | None = None,
     ) -> None:
         self._memory_store = memory_store or SessionMemoryStore()
         self._domain_registry = domain_registry
         self._plan_agent = plan_agent
         self._panel_compiler = panel_compiler
+        self._effect_registry = effect_registry
         self._technical_states: dict[str, LiveSessionState] = {}
         self._active_panels: dict[str, ActivePanelState] = {}
         self._pending_template_candidates: dict[str, PendingTemplateCandidate] = {}
@@ -155,7 +158,7 @@ class LiveSessionOrchestrator:
                 widget_registry=self._panel_compiler.widget_registry,
                 asset_catalog=resources.assets,
             ),
-            "visual_effects": _visual_effects(state.document),
+            "visual_effects": _visual_effects(state.document, self._effect_registry),
         }
 
     def runtime_repair_presentation_context(
@@ -179,6 +182,7 @@ class LiveSessionOrchestrator:
         session_id: str,
         tool_name: str,
         arguments: dict[str, Any],
+        telemetry_callback: Any = None,
         **_: Any,
     ) -> OrchestratedToolResult:
         if tool_name != "route_request":
@@ -194,16 +198,23 @@ class LiveSessionOrchestrator:
                 if item.get("role") in {"user", "assistant"} and item.get("content")
             )
             validation_feedback: dict[str, Any] | None = None
+            # A compiler repair must reuse the verified data collected by the
+            # failed plan.  Remote result IDs are valid within this session and
+            # re-searching only wastes the next tool budget.
+            repair_bundle = None
             active_surface_summary = self.active_surface_summary(session_id)
             for repair_attempt in range(self._MAX_PLAN_REPAIR_ATTEMPTS + 1):
                 planned = await self._plan_agent.plan(PlanAgentRequest(
                     domain_id=route.domain_id,
                     intent=route.intent,
                     recent_history=history,
+                    initial_bundle=repair_bundle,
                     active_surface_summary=active_surface_summary,
                     validation_feedback=validation_feedback,
                     session_id=session_id,
+                    telemetry_callback=telemetry_callback,
                 ))
+                repair_bundle = planned.data_bundle
                 try:
                     state = self._apply_surface_command(
                         session_id=session_id,
@@ -255,7 +266,7 @@ class LiveSessionOrchestrator:
                 widget_registry=self._panel_compiler.widget_registry,
                 asset_catalog=resources.assets,
             ),
-            "visual_effects": _visual_effects(state.document),
+            "visual_effects": _visual_effects(state.document, self._effect_registry),
         }
         return OrchestratedToolResult(response=response, presentation=RenderedPresentation(panel=payload))
 
@@ -295,17 +306,22 @@ class LiveSessionOrchestrator:
                 if item.get("role") in {"user", "assistant"} and item.get("content")
             )
             validation_feedback: dict[str, Any] | None = None
+            # Keep all verified data from a failed runtime-repair plan for its
+            # compiler retry; do not force the Agent to search again.
+            repair_bundle = None
             active_surface_summary = self.active_surface_summary(session_id)
             for repair_attempt in range(self._MAX_PLAN_REPAIR_ATTEMPTS + 1):
                 planned = await self._plan_agent.plan(PlanAgentRequest(
                     domain_id=route.domain_id,
                     intent=route.intent,
                     recent_history=history,
+                    initial_bundle=repair_bundle,
                     active_surface_summary=active_surface_summary,
                     validation_feedback=validation_feedback,
                     runtime_feedback=runtime_feedback,
                     session_id=session_id,
                 ))
+                repair_bundle = planned.data_bundle
                 try:
                     state = self._apply_surface_command(
                         session_id=session_id,
@@ -344,7 +360,7 @@ class LiveSessionOrchestrator:
                 widget_registry=self._panel_compiler.widget_registry,
                 asset_catalog=resources.assets,
             ),
-            "visual_effects": _visual_effects(state.document),
+            "visual_effects": _visual_effects(state.document, self._effect_registry),
         }
         return OrchestratedToolResult(response=response, presentation=RenderedPresentation(panel=payload))
 
@@ -882,7 +898,7 @@ class LiveSessionOrchestrator:
             "surface_id": updated_document.surface_id,
             "revision": updated_document.revision,
             "visual_stage_map": visual_stage_map,
-            "visual_effects": _visual_effects(updated_state.document),
+            "visual_effects": _visual_effects(updated_state.document, self._effect_registry),
         }
         return PanelActionResult(response=response, panel_update=payload)
 
@@ -921,17 +937,29 @@ class LiveSessionOrchestrator:
         memory.append("assistant", assistant_text)
 
 
-def _visual_effects(panel: Any) -> list[dict[str, str]]:
+def _visual_effects(
+    panel: Any,
+    effect_registry: EffectRegistry | None = None,
+) -> list[dict[str, str]]:
     """Expose only effect IDs granted by the compiler-owned anchor map."""
 
     effect_ids = sorted({effect for anchor in panel.anchors for effect in anchor.allowed_effect_ids})
-    return [
-        {
-            "id": effect_id,
-            "description": "Làm nổi bật vùng đang nói tới." if effect_id == "highlight" else "Khoanh rõ vùng đang nói tới.",
-        }
-        for effect_id in effect_ids
-    ]
+    effects: list[dict[str, str]] = []
+    for effect_id in effect_ids:
+        if effect_registry is None:
+            # Compatibility for direct unit construction of the orchestrator.
+            effects.append({"id": effect_id, "description": "Hiệu ứng trình bày cho vùng đang nói tới."})
+            continue
+        try:
+            definition = effect_registry.get(effect_id)
+        except ValueError as exc:
+            raise RuntimeError(f"effect '{effect_id}' is allowed by a widget but is not installed.") from exc
+        effects.append({
+            "id": definition.effect_id,
+            "description": definition.description,
+            "usage_guidance": definition.usage_guidance,
+        })
+    return effects
 
 
 def _next_runtime_component_id(component_ids: Any) -> int:

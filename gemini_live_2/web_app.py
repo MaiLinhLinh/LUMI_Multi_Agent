@@ -26,14 +26,14 @@ from gemini_live_2.live.orchestrator import LiveSessionOrchestrator
 from gemini_live_2.live.persistent_transport import PersistentLiveTransportStore
 from gemini_live_2.live.registry import LiveToolRegistry
 from gemini_live_2.catalogs.domains import DomainRegistry, ManifestError
+from gemini_live_2.extension_loader import ExtensionLoader
 from gemini_live_2.gateway import DomainGateway
 from gemini_live_2.panel import PanelCompiler
 from gemini_live_2.plan_agent import PlanAgent
 from gemini_live_2.search import BraveSearchClient, BraveSearchQuota, SearchResultStore
-from gemini_live_2.search.capabilities import build_search_capabilities
+from gemini_live_2.search.capabilities import PlanAgentSearchService
 from gemini_live_2.settings import load_settings
 from gemini_live_2.trace import TRACE_LEVEL, trace
-from gemini_live_2.widgets import build_default_widget_registry
 
 ROOT = Path(__file__).resolve().parent
 WEB = ROOT / "web"
@@ -64,7 +64,10 @@ configure_logging()
 settings = load_settings()
 domain_registry = DomainRegistry(ROOT / "domains")
 domain_gateway = DomainGateway(domain_registry)
-widget_registry = build_default_widget_registry()
+loaded_extensions = ExtensionLoader(ROOT / "extensions").load()
+widget_registry = loaded_extensions.widget_registry
+effect_registry = loaded_extensions.effect_registry
+browser_extension_catalog = loaded_extensions.browser_catalog(url_prefix="/extensions")
 search_result_store = SearchResultStore(ttl_seconds=30 * 60)
 search_quota = BraveSearchQuota(max_requests_per_session=settings.brave_search_max_requests_per_session)
 
@@ -78,25 +81,25 @@ def _brave_search_client() -> BraveSearchClient:
     )
 
 
-for capability in build_search_capabilities(
-    domain_id="education",
+plan_agent_search_service = PlanAgentSearchService(
     client_factory=_brave_search_client,
     quota=search_quota,
     result_store=search_result_store,
-):
-    domain_gateway.register(capability)
+)
 panel_compiler = PanelCompiler(widget_registry, search_result_store=search_result_store)
 plan_agent = PlanAgent(
     settings,
     domain_registry=domain_registry,
     domain_gateway=domain_gateway,
     widget_registry=widget_registry,
+    search_service=plan_agent_search_service,
 )
 registry = LiveToolRegistry(domain_registry.available_domain_ids())
 orchestrator = LiveSessionOrchestrator(
     domain_registry=domain_registry,
     plan_agent=plan_agent,
     panel_compiler=panel_compiler,
+    effect_registry=effect_registry,
 )
 live_session = GeminiLiveSession(settings=settings, registry=registry, orchestrator=orchestrator)
 persistent_transports = PersistentLiveTransportStore()
@@ -159,6 +162,16 @@ async def domain_asset(request: Any) -> FileResponse | PlainTextResponse:
     return FileResponse(asset.path, media_type=asset.mime_type, headers={"Cache-Control": "public, max-age=3600"})
 
 
+async def extension_asset(request: Any) -> FileResponse | PlainTextResponse:
+    """Serve only module/style files listed in the startup-validated catalog."""
+
+    try:
+        asset = loaded_extensions.browser_asset(str(request.path_params["asset_path"]))
+    except (ValueError, ManifestError):
+        return PlainTextResponse("Extension asset not found.", status_code=404)
+    return FileResponse(asset, headers={"Cache-Control": "no-store"})
+
+
 async def client_debug(request: Any) -> JSONResponse:
     try:
         payload = await request.json()
@@ -216,6 +229,7 @@ async def live_socket(websocket: WebSocket) -> None:
 
             await connect()
             orchestrator.reset_session_state(session_id)
+            await event({"type": "extensions:catalog", "catalog": browser_extension_catalog})
             await event({"type": "live:session_ready", "session_id": session_id})
             await event({"type": "live:state", "state": orchestrator.session_state(session_id)})
             logger.info("[WEB:PERSISTENT_CONNECTED] session=%s reused=%s", session_id, persistent_transports.get(session_id).connected)
@@ -365,6 +379,7 @@ app = Starlette(routes=[
     Route("/", home),
     Route("/assets/app.js", app_js),
     Route("/assets/domains/{domain_id}/{asset_id}", domain_asset),
+    Route("/extensions/{asset_path:path}", extension_asset),
     Route("/api/health", health),
     Route("/api/client-debug", client_debug, methods=["POST"]),
     WebSocketRoute("/ws/live", live_socket),

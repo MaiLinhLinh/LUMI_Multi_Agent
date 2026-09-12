@@ -40,7 +40,6 @@ def _relative_path(value: object, field: str) -> Path | None:
 class DomainManifest:
     domain_id: str
     asset_catalog_path: Path
-    allowed_widget_ids: tuple[str, ...]
     template_catalog_path: Path | None = None
     tool_capabilities: tuple[str, ...] = ()
     presentation_prompt_path: Path | None = None
@@ -52,7 +51,7 @@ class DomainManifest:
         object.__setattr__(self, "domain_id", _text(self.domain_id, "manifest.domain_id"))
         if not isinstance(self.asset_catalog_path, Path):
             raise ManifestError("manifest.asset_catalog_path must be a Path.")
-        for field_name in ("allowed_widget_ids", "tool_capabilities"):
+        for field_name in ("tool_capabilities",):
             values = getattr(self, field_name)
             if not isinstance(values, tuple) or not all(isinstance(value, str) and value.strip() for value in values):
                 raise ManifestError(f"manifest.{field_name} must be an array of non-empty strings.")
@@ -93,7 +92,6 @@ class DomainManifest:
     def for_plan_agent(self) -> dict[str, Any]:
         return {
             "domain_id": self.domain_id,
-            "allowed_widget_ids": list(self.allowed_widget_ids),
             "tool_capabilities": list(self.tool_capabilities),
         }
 
@@ -187,15 +185,13 @@ class DomainRegistry:
 
     @staticmethod
     def _parse_manifest(data: Mapping[str, Any], domain_root: Path) -> DomainManifest:
-        raw_widgets = data.get("allowed_widget_ids")
         raw_capabilities = data.get("tool_capabilities", [])
-        if not isinstance(raw_widgets, list) or not isinstance(raw_capabilities, list):
-            raise ManifestError("manifest widget types and tool capabilities must be arrays.")
+        if not isinstance(raw_capabilities, list):
+            raise ManifestError("manifest.tool_capabilities must be an array.")
         return DomainManifest(
             domain_id=data.get("domain_id"),
             asset_catalog_path=_relative_path(data.get("asset_catalog_path"), "manifest.asset_catalog_path"),
             template_catalog_path=_relative_path(data.get("template_catalog_path"), "manifest.template_catalog_path"),
-            allowed_widget_ids=tuple(raw_widgets),
             tool_capabilities=tuple(raw_capabilities),
             presentation_prompt_path=_relative_path(
                 data.get("presentation_prompt_path"), "manifest.presentation_prompt_path"

@@ -11,7 +11,7 @@ from gemini_live_2.catalogs.templates import load_template_catalog
 from gemini_live_2.catalogs.templates import TemplateCatalogError
 from gemini_live_2.catalogs import LayoutTemplate, LayoutTemplateMaterializer, TemplateExtractor
 from gemini_live_2.panel import DataBundle, GridRect, PanelCompiler, PlanBlock, PresentationPlan
-from gemini_live_2.widgets import build_default_widget_registry
+from gemini_live_2.tests.runtime_registry import runtime_widget_registry
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -48,7 +48,7 @@ class TemplateCatalogTests(unittest.TestCase):
                 "$block_3_label": "Mèo 2",
             },
         )
-        document = PanelCompiler(build_default_widget_registry()).compile_surface_document(
+        document = PanelCompiler(runtime_widget_registry()).compile_surface_document(
             surface_id="catalogued-surface",
             plan=plan,
             data_bundle=DataBundle(domain_id="education", data={}),
@@ -65,7 +65,7 @@ class TemplateCatalogTests(unittest.TestCase):
             self.resources.templates.load_layout_template("does_not_exist")
 
     def test_catalog_persists_and_loads_a_layout_template(self) -> None:
-        layout = TemplateExtractor(build_default_widget_registry()).extract(
+        layout = TemplateExtractor(runtime_widget_registry()).extract(
             plan=PresentationPlan(
                 domain_id="education",
                 blocks=(PlanBlock("image", GridRect(1, 1, 12, 10), {"asset_id": "dog"}),),

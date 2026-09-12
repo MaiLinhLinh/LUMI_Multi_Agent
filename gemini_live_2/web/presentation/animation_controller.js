@@ -1,4 +1,4 @@
-import { effectHandlerFor } from "./effects/registry.js?v=circle-effect-20260822";
+import { effectHandlerFor } from "/assets/presentation/effects/registry.js";
 
 /** Shared visual-cue lifecycle. It is intentionally independent of every domain. */
 export class AnimationController {

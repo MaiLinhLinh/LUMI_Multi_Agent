@@ -24,7 +24,7 @@ from gemini_live_2.panel.contracts import (
 )
 from gemini_live_2.plan_agent import PlanAgent, PlanAgentError, PlanAgentRequest
 from gemini_live_2.settings import Settings
-from gemini_live_2.widgets import build_default_widget_registry
+from gemini_live_2.tests.runtime_registry import runtime_widget_registry
 
 
 class _Response:
@@ -115,16 +115,13 @@ class PlanAgentTests(unittest.TestCase):
             self.assertNotIn('"decision":"create_plan"', config.system_instruction)
             self.assertEqual(
                 [item.name for item in config.tools[0].function_declarations],
-                ["describe_widgets", "describe_template"],
+                ["describe_widgets", "describe_template", "search_web", "search_image"],
             )
             payload = json.loads(client.models.calls[0]["contents"][0].parts[0].text)
             self.assertIsNone(payload["active_surface_summary"])
             self.assertEqual(
-                payload["widget_index"],
-                [
-                    {"id": "text", "purpose": "Hiển thị văn bản tự do như tiêu đề, nhãn hoặc nội dung ngắn."},
-                    {"id": "image", "purpose": "Hiển thị một ảnh từ Asset Catalog hoặc kết quả search ảnh đã được backend xác minh."},
-                ],
+                {item["id"] for item in payload["widget_index"]},
+                set(runtime_widget_registry().widget_ids()),
             )
 
     def test_runtime_feedback_is_sent_as_structured_plan_agent_context(self) -> None:
@@ -198,7 +195,7 @@ class PlanAgentTests(unittest.TestCase):
             config = client.models.calls[0]["config"]
             self.assertEqual(
                 [item.name for item in config.tools[0].function_declarations],
-                ["describe_widgets", "describe_template", "call_capability"],
+                ["describe_widgets", "describe_template", "search_web", "search_image", "call_capability"],
             )
             function_responses = [
                 part.function_response
@@ -432,7 +429,7 @@ class PlanAgentTests(unittest.TestCase):
             )
 
     def test_create_plan_accepts_initial_state_after_widget_discovery(self) -> None:
-        with _domain_root([], allowed_widget_ids=["answer"]) as root:
+        with _domain_root([]) as root:
             client = _Client([
                 _Response(calls=[types.FunctionCall(
                     id="native-widget-1", name="describe_widgets", args={"widget_ids": ["answer"]},
@@ -464,7 +461,7 @@ class PlanAgentTests(unittest.TestCase):
             )
 
     def test_describe_flashcard_returns_state_and_flip_contract(self) -> None:
-        with _domain_root([], allowed_widget_ids=["flashcard"]) as root:
+        with _domain_root([]) as root:
             client = _Client([
                 _Response(calls=[types.FunctionCall(
                     id="native-widget-1", name="describe_widgets", args={"widget_ids": ["flashcard"]},
@@ -496,7 +493,7 @@ class PlanAgentTests(unittest.TestCase):
             self.assertEqual(response["interactions"][0]["state_rule"], {"flipped": {"op": "toggle"}})
 
     def test_create_plan_with_choice_requires_describing_the_choice_and_its_children(self) -> None:
-        with _domain_root([], allowed_widget_ids=["choice", "image", "text"]) as root:
+        with _domain_root([]) as root:
             client = _Client([
                 _Response(calls=[types.FunctionCall(
                     id="native-widget-1",
@@ -529,7 +526,7 @@ class PlanAgentTests(unittest.TestCase):
             self.assertEqual([child.widget_id for child in choice.children], ["image", "text"])
 
     def test_create_plan_allows_choice_child_without_describing_it_first(self) -> None:
-        with _domain_root([], allowed_widget_ids=["choice", "image", "text"]) as root:
+        with _domain_root([]) as root:
             client = _Client([
                 _Response(calls=[types.FunctionCall(
                     id="native-widget-1",
@@ -556,16 +553,25 @@ class PlanAgentTests(unittest.TestCase):
             self.assertIsInstance(result.command, CreateSurfacePlan)
             self.assertEqual(result.command.blocks[0].children[0].widget_id, "image")
 
-    def test_describe_widgets_rejects_widget_outside_domain_scope(self) -> None:
+    def test_describe_widgets_allows_any_installed_widget(self) -> None:
         with _domain_root([]) as root:
             client = _Client([_Response(calls=[types.FunctionCall(
                 id="native-widget-1", name="describe_widgets",
                 args={"widget_ids": ["object_group"]},
-            )])])
+            )]), _Response(json.dumps({
+                "action": "create_surface_plan",
+                "template_description": "x",
+                "surface": {"blocks": [{
+                    "widget_id": "object_group",
+                    "grid": {"col": 1, "row": 1, "col_span": 4, "row_span": 4},
+                    "props": {"asset_id": "dog", "count": 1},
+                }]},
+            }))])
             agent = _agent(root, DomainGateway(DomainRegistry(root)), client)
 
-            with self.assertRaisesRegex(PlanAgentError, "not allowed by the active domain"):
-                asyncio.run(agent.plan(PlanAgentRequest(domain_id="education", intent="Tạo nhóm.")))
+            result = asyncio.run(agent.plan(PlanAgentRequest(domain_id="education", intent="Tạo nhóm.")))
+            self.assertIsInstance(result.command, CreateSurfacePlan)
+            self.assertEqual(result.command.blocks[0].widget_id, "object_group")
 
     def test_gateway_rejects_ungranted_native_capability(self) -> None:
         with _domain_root([]) as root:
@@ -675,7 +681,7 @@ class _CerebrasProviderTests(unittest.TestCase):
                 settings,
                 domain_registry=DomainRegistry(root),
                 domain_gateway=DomainGateway(DomainRegistry(root)),
-                widget_registry=build_default_widget_registry(),
+                widget_registry=runtime_widget_registry(),
                 cerebras_client_factory=lambda **kwargs: (factory_calls.append(kwargs) or client),
             )
 
@@ -714,7 +720,7 @@ def _agent(
 ) -> PlanAgent:
     return PlanAgent(
         _settings(), domain_registry=DomainRegistry(root), domain_gateway=gateway,
-        widget_registry=build_default_widget_registry(),
+        widget_registry=runtime_widget_registry(),
         client_factory=lambda **_kwargs: client,
         max_tool_steps=max_tool_steps,
     )
@@ -725,7 +731,6 @@ def _domain_root(
     capabilities: list[str],
     *,
     layout_template: bool = False,
-    allowed_widget_ids: list[str] | None = None,
 ):
     with tempfile.TemporaryDirectory() as temporary_directory:
         root = Path(temporary_directory)
@@ -740,7 +745,6 @@ def _domain_root(
             "presentation_prompt_constant": "PRESENTATION_INSTRUCTION",
             "plan_prompt_path": "plan_prompt.py",
             "plan_prompt_constant": "PLAN_INSTRUCTION",
-            "allowed_widget_ids": allowed_widget_ids or ["text", "image"],
             "tool_capabilities": capabilities,
         }
         if layout_template:

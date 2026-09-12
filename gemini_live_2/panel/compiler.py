@@ -111,10 +111,6 @@ class PanelCompiler:
         anchor_requests: list[tuple[ComponentNode, Any]] = []
 
         for index, block in enumerate(plan.blocks, start=1):
-            if block.widget_id not in domain_resources.manifest.allowed_widget_ids:
-                raise PanelCompilationError(
-                    f"widget '{block.widget_id}' is not allowed by domain '{plan.domain_id}'."
-                )
             try:
                 widget = self.widget_registry.get(block.widget_id)
                 normalized_props = widget.validate(_resolve_aliases(block.props, aliases))
@@ -238,11 +234,6 @@ class PanelCompiler:
         for child_index, (child, child_widget_id) in enumerate(
             zip(block.children, child_widget_ids, strict=True), start=1
         ):
-            if child_widget_id not in domain_resources.manifest.allowed_widget_ids:
-                raise PanelCompilationError(
-                    f"component child {child_index} widget '{child_widget_id}' is not allowed "
-                    f"by the active domain."
-                )
             try:
                 child_widget = self.widget_registry.get(child_widget_id)
                 child_props = child_widget.validate(_resolve_aliases(child.props, aliases))
