@@ -59,7 +59,7 @@ class PanelContractsTests(unittest.TestCase):
                     ),
                 ),
             ),
-            anchors=(AnchorBinding("a", "1", "choice", ("highlight", "circle")),),
+            anchors=(AnchorBinding("a", "1", "choice"),),
         )
 
         payload = document.to_dict()
@@ -96,7 +96,7 @@ class PanelContractsTests(unittest.TestCase):
                 domain_id="education",
                 revision=1,
                 components=(sample_component("1"),),
-                anchors=(AnchorBinding("a", "missing", "image", ("highlight",)),),
+                anchors=(AnchorBinding("a", "missing", "image"),),
             )
 
     def test_surface_document_requires_positive_revision(self) -> None:
@@ -171,7 +171,7 @@ class PanelContractsTests(unittest.TestCase):
                 domain_id="education",
                 revision=1,
                 components=(sample_component(),),
-                anchors=(AnchorBinding("a", "1", "image", ("highlight",)),),
+                anchors=(AnchorBinding("a", "1", "image"),),
             ),
             purpose="So sánh hai con vật",
         )

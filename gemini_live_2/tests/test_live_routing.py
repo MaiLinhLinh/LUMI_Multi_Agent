@@ -9,6 +9,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from gemini_live_2.catalogs.domains import DomainRegistry
+from gemini_live_2.extension_loader import ExtensionLoader
 from gemini_live_2.gateway import DomainGateway
 from gemini_live_2.live.orchestrator import LiveSessionOrchestrator
 from gemini_live_2.live.gemini_session import GeminiLiveSession
@@ -121,6 +122,7 @@ class LiveRoutingTests(unittest.TestCase):
             domain_registry=self.registry,
             plan_agent=self.agent,  # type: ignore[arg-type]
             panel_compiler=PanelCompiler(runtime_widget_registry()),
+            effect_registry=ExtensionLoader(PROJECT_ROOT / "extensions").load().effect_registry,
         )
 
     def test_registry_exposes_only_route_request_with_registered_domain_enum(self) -> None:
@@ -253,7 +255,7 @@ class LiveRoutingTests(unittest.TestCase):
         self.assertEqual(context["surface_id"], self.orchestrator.active_panel("s1").document.surface_id)
         self.assertEqual(context["revision"], 1)
 
-    def test_reconnect_instruction_contains_history_and_active_panel_context(self) -> None:
+    def test_connection_instruction_contains_static_guidance_and_recent_history_only(self) -> None:
         self.orchestrator.remember_turn(
             session_id="s1", user_text="Cho bé xem chó và mèo.", assistant_text="Được chứ."
         )
@@ -274,11 +276,10 @@ class LiveRoutingTests(unittest.TestCase):
         )
         instruction = session._instruction("s1")
         self.assertIn("Cho bé xem chó và mèo.", instruction)
-        self.assertIn("cô giáo thân thiện", instruction)
-        self.assertIn("PANEL HIỆN TẠI", instruction)
-        self.assertIn("VISUAL STAGE MAP", instruction)
-        self.assertIn("surface_id:", instruction)
-        self.assertIn("base_revision: 1", instruction)
+        self.assertIn("NGUỒN THÔNG TIN", instruction)
+        self.assertNotIn("cô giáo thân thiện", instruction)
+        self.assertNotIn("PANEL HIỆN TẠI", instruction)
+        self.assertNotIn("surface_id:", instruction)
 
     def test_delete_surface_requires_current_revision_then_removes_panel(self) -> None:
         asyncio.run(self.orchestrator.execute_tool_call_result(
@@ -319,8 +320,16 @@ class LiveRoutingTests(unittest.TestCase):
         )
         self.assertEqual(cue["panel_revision"], 1)
         self.assertEqual(cue["anchor_id"], "b")
+        self.assertEqual(
+            self.orchestrator.present_visual(
+                session_id="s1", anchor_id="b", effect_id="spotlight"
+            )["effect_id"],
+            "spotlight",
+        )
         with self.assertRaisesRegex(ValueError, "unknown anchor_id"):
             self.orchestrator.present_visual(session_id="s1", anchor_id="missing", effect_id="highlight")
+        with self.assertRaisesRegex(ValueError, "unknown effect_id"):
+            self.orchestrator.present_visual(session_id="s1", anchor_id="b", effect_id="not_installed")
 
     def test_update_surface_state_reveals_hidden_blocks_in_place_and_rejects_repeat(self) -> None:
         document = SurfaceDocument(
@@ -341,7 +350,6 @@ class LiveRoutingTests(unittest.TestCase):
                     anchor_id="a",
                     component_id="1",
                     anchor_key="image",
-                    allowed_effect_ids=("highlight", "circle"),
                 ),
             ),
         )
@@ -388,7 +396,7 @@ class LiveRoutingTests(unittest.TestCase):
                     ),
                 ),
             ),
-            anchors=(AnchorBinding("b", "1", "choice", ("highlight", "circle")),),
+            anchors=(AnchorBinding("b", "1", "choice"),),
         )
         self.orchestrator._active_panels["s1"] = ActivePanelState(document=document, purpose="Bài test")  # type: ignore[attr-defined]
 
@@ -436,7 +444,7 @@ class LiveRoutingTests(unittest.TestCase):
                     state={"visibility": "visible", "flipped": False},
                 ),
             ),
-            anchors=(AnchorBinding("b", "1", "card", ("highlight", "circle")),),
+            anchors=(AnchorBinding("b", "1", "card"),),
         )
         self.orchestrator._active_panels["s1"] = ActivePanelState(document=document, purpose="Bài test")  # type: ignore[attr-defined]
 
@@ -470,7 +478,7 @@ class LiveRoutingTests(unittest.TestCase):
                     props={"asset_id": "cat"}, state={"visibility": "hidden"},
                 ),
             ),
-            anchors=(AnchorBinding("a", "1", "image", ("highlight",)),),
+            anchors=(AnchorBinding("a", "1", "image"),),
         )
         self.orchestrator._active_panels["s1"] = ActivePanelState(document=document, purpose="Bài test")  # type: ignore[attr-defined]
         with self.assertRaisesRegex(ValueError, "unknown anchor_id"):
@@ -498,8 +506,8 @@ class LiveRoutingTests(unittest.TestCase):
                 ComponentNode("2", "answer", GridRect(6, 1, 2, 2), {"value": "3"}, {"visibility": "hidden"}),
             ),
             anchors=(
-                AnchorBinding("a", "1", "image", ("highlight",)),
-                AnchorBinding("b", "2", "answer", ("circle",)),
+                AnchorBinding("a", "1", "image"),
+                AnchorBinding("b", "2", "answer"),
             ),
         )
         self.orchestrator._active_panels["s1"] = ActivePanelState(document=document, purpose="Bài test")  # type: ignore[attr-defined]
@@ -530,7 +538,7 @@ class LiveRoutingTests(unittest.TestCase):
                 id="1", type="image", layout=GridRect(1, 1, 4, 4),
                 props={"asset_id": "cat"}, state={"visibility": "visible"},
             ),),
-            anchors=(AnchorBinding("a", "1", "image", ("highlight",)),),
+            anchors=(AnchorBinding("a", "1", "image"),),
         )
         self.orchestrator._active_panels["s1"] = ActivePanelState(document=document, purpose="Bài test")  # type: ignore[attr-defined]
         with self.assertRaisesRegex(ValueError, "base_revision"):

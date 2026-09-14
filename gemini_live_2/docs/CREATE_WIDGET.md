@@ -41,7 +41,7 @@ Các path chỉ được trỏ tới file trong chính package. `styles.css` ph�
 
 `contract.py` export `WIDGET_EXTENSION`, là `WidgetDefinition` **chưa gắn ID**. Loader tự `.bind_id()` từ manifest.
 
-Contract phải khai báo `purpose`, `validate_props`, `props`, `state_fields`, `interactions`, `anchor_policy`, `stage_map_policy` và `declared_effect_ids` khi widget cần effect. `declared_effect_ids` chỉ kiểm tra dependency lúc startup; `WidgetAnchor.allowed_effect_ids` mới là quyền effect thật trên từng anchor.
+Contract phải khai báo `purpose`, `validate_props`, `props`, `state_fields`, `interactions`, `anchor_policy` và `stage_map_policy`. `anchor_policy` chỉ khai báo target mà widget render; effect là catalog global, không khai báo trong widget contract.
 
 Nếu widget có danh sách động, sinh một anchor cho mỗi item từ props, gắn `data-anchor-id` lên chính DOM item
 và dùng `StageMapPolicy.collection_source`, `collection_anchor_prefix`, `collection_text_sources` để Gemini

@@ -27,11 +27,10 @@ _VISIBILITY = WidgetStateDefinition(name="visibility", value_type="string", defa
 
 WIDGET_EXTENSION = WidgetDefinition(
     validate_props=_validate_props,
-    anchor_policy=lambda props: (WidgetAnchor("group", ("highlight", "circle")), *(WidgetAnchor(f"item_{index}", ("highlight", "circle")) for index in range(1, props["count"] + 1))),
+    anchor_policy=lambda props: (WidgetAnchor("group"), *(WidgetAnchor(f"item_{index}") for index in range(1, props["count"] + 1))),
     purpose="Hiển thị một nhóm nhiều bản sao của cùng asset.",
     props=(WidgetPropDefinition("asset_id", "string", True, "ID của asset được lặp trong nhóm.", source="asset_catalog.id", template_value_kind="binding"), WidgetPropDefinition("count", "integer", True, "Số lượng bản sao của asset trong nhóm.", minimum=1, template_value_kind="binding"), WidgetPropDefinition("label", "string", False, "Nhãn ngắn cho cả nhóm.", template_value_kind="binding")),
     state_fields=(_VISIBILITY,),
     stage_map_policy=StageMapPolicy(kind="object_group", content_label="NHÓM", asset_source="props.asset_id", asset_text_source="asset.caption", count_source="props.count", anchor_key="group", item_anchor_prefix="item_", text_rendered=False),
     asset_references=(WidgetAssetReferenceDefinition(path="props.asset_id"),),
-    declared_effect_ids=("highlight", "circle"),
 )

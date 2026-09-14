@@ -1,6 +1,6 @@
 """Widget contracts independent of any domain, panel renderer or LLM.
 
-The registry deliberately owns widget props and visual permissions.  A plan
+The registry deliberately owns widget props and visual anchor requests.  A plan
 only names a widget and supplies its props; later the compiler asks the widget
 for the anchors it is allowed to materialize.  Therefore the Plan Agent never
 creates DOM targets or anchor identifiers directly.
@@ -30,19 +30,16 @@ def _positive_integer(value: object, field_name: str) -> int:
 
 @dataclass(frozen=True, slots=True)
 class WidgetAnchor:
-    """A widget-local anchor request; the compiler assigns final anchor IDs."""
+    """A widget-local anchor request; the compiler assigns final anchor IDs.
+
+    Effects are global capabilities owned by ``EffectRegistry``. An anchor
+    names only a render target; it does not grant or deny individual effects.
+    """
 
     key: str
-    allowed_effect_ids: tuple[str, ...]
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "key", _text(self.key, "widget anchor key"))
-        if not self.allowed_effect_ids:
-            raise WidgetPropsError("widget anchor must allow at least one effect.")
-        normalized = tuple(_text(effect, "widget anchor effect") for effect in self.allowed_effect_ids)
-        if len(normalized) != len(set(normalized)):
-            raise WidgetPropsError("widget anchor effects must be unique.")
-        object.__setattr__(self, "allowed_effect_ids", normalized)
 
 
 AnchorPolicy = Callable[[Mapping[str, Any]], tuple[WidgetAnchor, ...]]
@@ -423,9 +420,6 @@ class WidgetDefinition:
     interactions: tuple[WidgetInteractionDefinition, ...] = ()
     stage_map_policy: StageMapPolicy | None = None
     asset_references: tuple[WidgetAssetReferenceDefinition, ...] = ()
-    # Startup-only dependency declaration. AnchorPolicy remains the source of
-    # truth for permission on one concrete component/anchor at runtime.
-    declared_effect_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.widget_id is not None:
@@ -457,10 +451,6 @@ class WidgetDefinition:
         reference_paths = tuple(item.path for item in self.asset_references)
         if len(reference_paths) != len(set(reference_paths)):
             raise WidgetPropsError("widget asset reference paths must be unique.")
-        effects = tuple(_text(value, "widget declared effect") for value in self.declared_effect_ids)
-        if len(effects) != len(set(effects)):
-            raise WidgetPropsError("widget declared effects must be unique.")
-        object.__setattr__(self, "declared_effect_ids", effects)
 
     def bind_id(self, widget_id: str) -> "WidgetDefinition":
         """Return the registered form of an extension-owned definition.

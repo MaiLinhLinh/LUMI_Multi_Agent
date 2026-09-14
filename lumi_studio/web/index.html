@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lumi Studio</title>
+  <link rel="stylesheet" href="/static/studio.css">
+</head>
+<body>
+  <header class="topbar">
+    <div><span class="eyebrow">LOCAL DEVELOPER TOOL</span><h1>Lumi Studio</h1></div>
+    <div id="projectStatus" class="status">Đang đọc workspace...</div>
+  </header>
+  <main class="layout">
+    <aside class="sidebar">
+      <section><h2>Prompt Catalog</h2><p class="muted">Chọn prompt để xem owner, trigger và tạo draft.</p><div id="promptList" class="prompt-list"></div></section>
+      <section class="rule"><h2>Draft hiện tại</h2><button id="validateButton" class="secondary">Validate draft</button><div id="validationResult" class="result"></div></section>
+      <section class="rule"><h2>Sandbox test</h2><button id="startSandboxButton" class="primary">Cập nhật sandbox test</button><p class="muted">Lần đầu tạo sandbox. Các lần sau dừng và làm mới sandbox đang chạy bằng draft hiện tại; không ghi vào gemini_live_2.</p><div id="sandboxList" class="result"></div></section>
+    </aside>
+    <section class="content">
+      <div id="emptyPrompt" class="empty"><h2>Prompt Explorer</h2><p>Chọn một prompt ở cột trái để xem nó thuộc về phần nào, được gửi khi nào và tạo bản draft riêng.</p></div>
+      <article id="promptEditor" hidden>
+        <div class="article-head"><div><span id="promptOwner" class="badge"></span><h2 id="promptTitle"></h2><p id="promptDescription" class="muted"></p></div><span id="draftBadge" class="draft-badge"></span></div>
+        <dl class="metadata"><div><dt>File nguồn</dt><dd id="promptPath"></dd></div><div><dt>Được dùng khi</dt><dd id="promptTrigger"></dd></div></dl>
+        <label for="promptContent">Nội dung prompt</label>
+        <textarea id="promptContent" spellcheck="false"></textarea>
+        <div class="actions"><button id="savePromptButton" class="primary">Lưu vào draft</button><span id="saveStatus" class="muted"></span></div>
+        <details><summary>So sánh với bản gốc</summary><pre id="originalPrompt"></pre></details>
+      </article>
+      <article class="domain-form">
+        <div class="article-head"><div><span class="badge">DOMAIN STUDIO</span><h2>Tạo domain thử nghiệm</h2><p class="muted">Domain chỉ được tạo trong draft. Sandbox mới nhìn thấy domain này.</p></div></div>
+        <label>Domain ID<input id="domainId" placeholder="history" autocomplete="off"></label>
+        <label>Prompt Gemini Live / phong cách trình bày<textarea id="presentationPrompt" placeholder="Bạn là Lumi..." spellcheck="false"></textarea></label>
+        <label>Prompt Plan Agent<textarea id="planPrompt" placeholder="Đây là domain ..." spellcheck="false"></textarea></label>
+        <div class="actions"><button id="createDomainButton" class="primary">Tạo domain vào draft</button><span id="domainStatus" class="muted"></span></div>
+        <div id="domainList" class="result"></div>
+      </article>
+    </section>
+  </main>
+  <template id="promptTemplate"><button class="prompt-item"><span class="prompt-item-owner"></span><strong class="prompt-item-title"></strong><small class="prompt-item-trigger"></small></button></template>
+  <script type="module" src="/static/studio.js"></script>
+</body>
+</html>

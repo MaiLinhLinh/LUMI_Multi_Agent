@@ -32,7 +32,7 @@ _VISIBILITY = WidgetStateDefinition(
 
 WIDGET_EXTENSION = WidgetDefinition(
     validate_props=_validate_props,
-    anchor_policy=lambda _: (WidgetAnchor("text", ("highlight", "circle")),),
+    anchor_policy=lambda _: (WidgetAnchor("text"),),
     purpose="Hiển thị văn bản tự do như tiêu đề, nhãn hoặc nội dung ngắn.",
     props=(
         WidgetPropDefinition("content", "string", True, "Nội dung văn bản cần hiển thị.", template_value_kind="binding"),
@@ -40,5 +40,4 @@ WIDGET_EXTENSION = WidgetDefinition(
     ),
     state_fields=(_VISIBILITY,),
     stage_map_policy=StageMapPolicy(kind="text", content_label="CHỮ", quote_text=True, text_source="props.content", anchor_key="text"),
-    declared_effect_ids=("highlight", "circle"),
 )

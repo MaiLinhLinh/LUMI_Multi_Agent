@@ -77,8 +77,7 @@ hai nguồn state song song; adapter tạm thời nếu có phải xóa ở SD10
     {
       "anchor_id": "b",
       "component_id": "2",
-      "anchor_key": "card",
-      "allowed_effect_ids": ["highlight", "circle"]
+      "anchor_key": "card"
     }
   ]
 }
@@ -235,8 +234,7 @@ Compiler tạo binding:
 {
   "anchor_id": "b",
   "component_id": "2",
-  "anchor_key": "card",
-  "allowed_effect_ids": ["highlight", "circle"]
+  "anchor_key": "card"
 }
 ```
 
@@ -266,8 +264,8 @@ function response Gemini và snapshot browser.
 
 ### 7.2. `present_visual`
 
-Không đổi state/revision. Runtime đọc document, xác minh anchor/effect trong
-`allowed_effect_ids`, rồi phát cue animation tạm thời.
+Không đổi state/revision. Runtime đọc document, xác minh anchor tồn tại và effect có
+trong `EffectRegistry`, rồi phát cue animation tạm thời.
 
 ### 7.3. `delete_surface`
 

@@ -191,7 +191,6 @@ class PanelCompiler:
                 anchor_id=anchor_id,
                 component_id=component.id,
                 anchor_key=anchor.key,
-                allowed_effect_ids=anchor.allowed_effect_ids,
             ))
         return tuple(bindings)
 

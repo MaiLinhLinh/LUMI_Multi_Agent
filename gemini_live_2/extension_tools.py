@@ -43,7 +43,6 @@ WIDGET_EXTENSION = WidgetDefinition(
     props=(),
     state_fields=(_VISIBILITY,),
     stage_map_policy=StageMapPolicy(kind="{extension_id}", text_rendered=False),
-    declared_effect_ids=(),
 )
 '''
 _WIDGET_RENDERER = '''export const interactionActions = [];

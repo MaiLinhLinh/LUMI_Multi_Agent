@@ -219,7 +219,6 @@ WidgetDefinition (unbound)
   anchor_policy: object
   stage_map_policy: object
   asset_policy: object
-  declared_effect_ids: list[str]  # dependency check khi startup
 
   discovery_summary() -> WidgetDiscoverySummary
   public_contract() -> WidgetPublicContract
@@ -274,9 +273,8 @@ minh props/asset, sinh anchor và dựng VISUAL STAGE MAP sau khi Surface Plan h
 event thẳng tới Gemini. `actions` chỉ mô tả thao tác UI có thể xảy ra; Runtime xác minh
 event, còn Gemini Live quyết định ngữ nghĩa của thao tác.
 
-`declared_effect_ids` chỉ để `ExtensionLoader` kiểm tra dependency một lần khi startup.
-Nó không cấp quyền effect trên anchor; quyền cuối vẫn nằm ở `allowed_effect_ids` của
-anchor được `anchor_policy` tạo khi có props thật.
+`anchor_policy` chỉ tạo các target mà widget thật sự render. Effect là capability global
+của `EffectRegistry`, không thuộc quyền của widget hay một anchor cụ thể.
 
 `renderer.js` của mọi widget phải có named export chuẩn sau:
 
@@ -343,11 +341,10 @@ Gemini. Mỗi effect hợp lệ phải kèm `id`, `description`, `usage_guidance
 chỉ giữ luật gọi `present_visual`; không hard-code ý nghĩa của `circle`, `highlight`,
 hay effect cụ thể khác.
 
-Không có trường `anchor_kinds` ở giai đoạn này. Khi gọi `present_visual`, Runtime đã
-xác minh `anchor_id` có trên SurfaceDocument và effect có trong `allowed_effect_ids`
-của chính anchor đó; Browser tìm DOM target bằng `data-anchor-id`. Vì vậy effect chung
-như `circle` có thể khoanh bất kỳ vùng nào mà widget đã cấp phép. Chỉ khi sau này có
-effect thật sự đòi một cấu trúc DOM đặc biệt mới cần thiết kế compatibility contract mới.
+Không có trường `anchor_kinds` ở giai đoạn này. Khi gọi `present_visual`, Runtime xác
+minh `anchor_id` có trên SurfaceDocument và `effect_id` có trong `EffectRegistry`; Browser
+tìm DOM target bằng `data-anchor-id`. Mọi effect đã cài có thể dùng trên mọi anchor. Effect
+mới phải target-agnostic hoặc có fallback an toàn nếu target không có cấu trúc chuyên biệt.
 
 ### 4.3. Vai trò từng file trong package
 

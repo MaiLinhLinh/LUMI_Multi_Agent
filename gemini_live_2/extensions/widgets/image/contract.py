@@ -30,7 +30,7 @@ _VISIBILITY = WidgetStateDefinition(name="visibility", value_type="string", defa
 
 WIDGET_EXTENSION = WidgetDefinition(
     validate_props=_validate_props,
-    anchor_policy=lambda _: (WidgetAnchor("image", ("highlight", "circle")),),
+    anchor_policy=lambda _: (WidgetAnchor("image"),),
     purpose="Hiển thị một ảnh từ Asset Catalog hoặc kết quả search ảnh đã được backend xác minh.",
     props=(
         WidgetPropDefinition("asset_id", "string", False, "ID của asset ảnh sẽ hiển thị.", source="asset_catalog.id", template_value_kind="binding"),
@@ -40,5 +40,4 @@ WIDGET_EXTENSION = WidgetDefinition(
     state_fields=(_VISIBILITY,),
     stage_map_policy=StageMapPolicy(kind="image", content_label="ẢNH", asset_source="props.asset_id", asset_text_source="asset.caption", anchor_key="image", text_rendered=False),
     asset_references=(WidgetAssetReferenceDefinition(path="props.asset_id", allowed_kinds=("image", "icon"), required=False),),
-    declared_effect_ids=("highlight", "circle"),
 )

@@ -93,7 +93,6 @@ class PanelRendererTests(unittest.TestCase):
             "anchor_id": "b",
             "component_id": "2",
             "anchor_key": "image",
-            "allowed_effect_ids": ["highlight", "circle"],
         })
         self.assertEqual(payload["assets"], [
             {"id": "cat", "url": "/assets/domains/education/cat"},

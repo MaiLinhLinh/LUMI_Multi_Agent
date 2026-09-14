@@ -16,12 +16,11 @@ class ExtensionLoaderTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir) / "extensions"
             self._write_effect(root, "circle")
-            self._write_widget(root, "card", declared_effect_ids=("circle",))
+            self._write_widget(root, "card")
 
             loaded = ExtensionLoader(root).load()
 
             self.assertEqual(loaded.widgets[0].definition.widget_id, "card")
-            self.assertEqual(loaded.widgets[0].definition.declared_effect_ids, ("circle",))
             self.assertEqual(loaded.widget_registry.widget_ids(), ("card",))
             self.assertEqual(loaded.effect_registry.effect_ids(), ("circle",))
             self.assertEqual(
@@ -35,19 +34,20 @@ class ExtensionLoaderTests(unittest.TestCase):
             )
             self.assertEqual(loaded.browser_catalog()["effects"][0]["id"], "circle")
 
-    def test_rejects_missing_effect_dependency_before_runtime(self) -> None:
+    def test_widget_contract_does_not_depend_on_installed_effects(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir) / "extensions"
-            self._write_widget(root, "card", declared_effect_ids=("circle",))
+            self._write_widget(root, "card")
 
-            with self.assertRaisesRegex(ExtensionManifestError, "not installed"):
-                ExtensionLoader(root).load()
+            loaded = ExtensionLoader(root).load()
+            self.assertEqual(loaded.widget_registry.widget_ids(), ("card",))
+            self.assertEqual(loaded.effect_registry.effect_ids(), ())
 
     def test_rejects_manifest_id_that_does_not_match_package_directory(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir) / "extensions"
             self._write_effect(root, "circle")
-            self._write_widget(root, "card", declared_effect_ids=(), manifest_id="wrong")
+            self._write_widget(root, "card", manifest_id="wrong")
 
             with self.assertRaisesRegex(ExtensionManifestError, "must match package directory"):
                 ExtensionLoader(root).load()
@@ -66,7 +66,7 @@ class ExtensionLoaderTests(unittest.TestCase):
     def test_rejects_contract_that_repeats_manifest_owned_id(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir) / "extensions"
-            self._write_widget(root, "card", declared_effect_ids=(), bound_id="card")
+            self._write_widget(root, "card", bound_id="card")
 
             with self.assertRaisesRegex(ExtensionManifestError, "must not declare widget_id"):
                 ExtensionLoader(root).load()
@@ -77,7 +77,6 @@ class ExtensionLoaderTests(unittest.TestCase):
             self._write_widget(
                 root,
                 "card",
-                declared_effect_ids=(),
                 interaction_actions=("flip",),
                 renderer_actions=(),
             )
@@ -91,7 +90,6 @@ class ExtensionLoaderTests(unittest.TestCase):
             self._write_widget(
                 root,
                 "card",
-                declared_effect_ids=(),
                 interaction_actions=("flip",),
                 emitted_actions=(),
             )
@@ -103,7 +101,7 @@ class ExtensionLoaderTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir) / "extensions"
             self._write_effect(root, "circle")
-            self._write_widget(root, "card", declared_effect_ids=("circle",))
+            self._write_widget(root, "card")
 
             loaded = ExtensionLoader(root).load()
 
@@ -127,7 +125,7 @@ class ExtensionLoaderTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir) / "extensions"
             self._write_effect(root, "circle")
-            self._write_widget(root, "card", declared_effect_ids=("circle",))
+            self._write_widget(root, "card")
             loaded = ExtensionLoader(root).load()
 
             widgets = loaded.widget_registry
@@ -151,7 +149,6 @@ class ExtensionLoaderTests(unittest.TestCase):
         self.assertEqual(flashcard.validate(props), props)
         self.assertEqual(flashcard.default_state, {"visibility": "visible", "flipped": False})
         self.assertEqual(flashcard.anchors_for(props)[0].key, "card")
-        self.assertEqual(flashcard.anchors_for(props)[0].allowed_effect_ids, ("highlight", "circle"))
         self.assertEqual(flashcard.interaction_state_changes(
             action="flip", current_state=flashcard.default_state
         ), {"flipped": True})
@@ -200,7 +197,6 @@ class ExtensionLoaderTests(unittest.TestCase):
         self.assertEqual(props["items"][1]["title"], "Sâu")
         anchors = timeline.anchors_for(props)
         self.assertEqual([anchor.key for anchor in anchors], ["milestone_1", "milestone_2"])
-        self.assertEqual(anchors[0].allowed_effect_ids, ("highlight", "circle", "pulse", "spotlight"))
         spotlight = loaded.effect_registry.get("spotlight")
         self.assertIn("Làm tối", spotlight.description)
         self.assertIn("hướng ánh nhìn", spotlight.usage_guidance)
@@ -257,7 +253,6 @@ class ExtensionLoaderTests(unittest.TestCase):
         root: Path,
         package_id: str,
         *,
-        declared_effect_ids: tuple[str, ...],
         interaction_actions: tuple[str, ...] = (),
         renderer_actions: tuple[str, ...] | None = None,
         emitted_actions: tuple[str, ...] | None = None,
@@ -279,7 +274,6 @@ class ExtensionLoaderTests(unittest.TestCase):
             encoding="utf-8",
         )
         (package / "styles.css").write_text(".card {}", encoding="utf-8")
-        effects_literal = repr(declared_effect_ids)
         widget_id_line = f"    widget_id={bound_id!r},\n" if bound_id is not None else ""
         contract = (
             "from gemini_live_2.widgets import WidgetDefinition, WidgetInteractionDefinition\n"
@@ -289,7 +283,6 @@ class ExtensionLoaderTests(unittest.TestCase):
             "    purpose='Test widget',\n"
             "    props=(),\n"
             + widget_id_line
-            + f"    declared_effect_ids={effects_literal},\n"
             + f"    interactions=tuple(WidgetInteractionDefinition(action, 'Test action') for action in {interaction_actions!r}),\n"
             + ")\n"
         )

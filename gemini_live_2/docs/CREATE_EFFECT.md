@@ -1,6 +1,6 @@
 # Tạo effect extension
 
-Effect do Gemini Live chọn, nhưng chỉ chạy khi Runtime đã xác minh `anchor_id` và effect được `allowed_effect_ids` của anchor cho phép. Effect không tự tìm target, sửa state hay gọi Gemini.
+Effect do Gemini Live chọn, nhưng chỉ chạy khi Runtime đã xác minh `anchor_id` thuộc SurfaceDocument hiện tại và `effect_id` đã được `EffectRegistry` nạp. Effect không tự tìm target, sửa state hay gọi Gemini.
 
 ## 1. Tạo khung package
 
@@ -36,16 +36,9 @@ export function run(context, command) {
 
 `target` và `rect` đã được Runtime xác minh. `overlay` là SVG presentation overlay nếu cần vẽ bên ngoài target. Nếu thêm class, SVG node, timer hoặc listener, phải trả cleanup. `AnimationController` gọi cleanup trước effect mới, khi lượt bị ngắt hoặc panel đổi revision.
 
-## 4. Cho widget dùng effect
+## 4. Điều kiện tương thích
 
-Widget cần khai báo effect ở cả dependency và anchor policy:
-
-```python
-declared_effect_ids=("spotlight",)
-anchor_policy=lambda props: (WidgetAnchor("root", ("spotlight",)),)
-```
-
-Trường đầu chỉ chặn dependency thiếu lúc startup; danh sách trong `WidgetAnchor` là quyền thực tế khi Runtime xử lý `present_visual`.
+Effect phải target-agnostic: chỉ dùng `target`, `overlay` và `rect` core truyền vào, không giả định widget ID hay cấu trúc DOM đặc biệt. Khi cần hành vi chuyên biệt, effect phải có fallback an toàn trên target thông thường.
 
 ## 5. Test và validation
 

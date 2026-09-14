@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+import time
 from typing import Any, Mapping
 
 from gemini_live_2.catalogs.domains import DomainRegistry, ManifestError
@@ -71,6 +72,13 @@ class SurfaceDeleteResult:
     """A validated surface close and the response returned to Gemini Live."""
 
     response: dict[str, Any]
+
+
+async def _emit_route_telemetry(callback: Any, event: str, **payload: Any) -> None:
+    """Emit timing-only route lifecycle events when a caller requested telemetry."""
+
+    if callback is not None:
+        await callback({"source": "orchestrator", "event": event, **payload})
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,8 +166,18 @@ class LiveSessionOrchestrator:
                 widget_registry=self._panel_compiler.widget_registry,
                 asset_catalog=resources.assets,
             ),
-            "visual_effects": _visual_effects(state.document, self._effect_registry),
+            "visual_effects": _visual_effects(self._effect_registry),
         }
+
+    def domain_presentation_instruction(self, domain_id: object) -> str | None:
+        """Return the one domain-level speaking/style instruction for Live."""
+
+        if not isinstance(domain_id, str) or self._domain_registry is None:
+            return None
+        try:
+            return self._domain_registry.load(domain_id).presentation_instruction
+        except ManifestError:
+            return None
 
     def runtime_repair_presentation_context(
         self, *, session_id: str, surface_id: str, revision: object
@@ -183,12 +201,14 @@ class LiveSessionOrchestrator:
         tool_name: str,
         arguments: dict[str, Any],
         telemetry_callback: Any = None,
+        plan_run_id: str | None = None,
         **_: Any,
     ) -> OrchestratedToolResult:
         if tool_name != "route_request":
             return OrchestratedToolResult({"status": "unsupported", "detail": "Unknown Live tool."})
         if self._domain_registry is None or self._plan_agent is None or self._panel_compiler is None:
             return OrchestratedToolResult({"status": "error", "detail": "Panel routing is not configured."})
+        run_started = time.perf_counter()
         try:
             route = RouteRequest.from_dict(arguments)
             resources = self._domain_registry.load(route.domain_id)
@@ -213,9 +233,18 @@ class LiveSessionOrchestrator:
                     validation_feedback=validation_feedback,
                     session_id=session_id,
                     telemetry_callback=telemetry_callback,
+                    plan_run_id=plan_run_id,
+                    plan_attempt=repair_attempt + 1,
                 ))
                 repair_bundle = planned.data_bundle
                 try:
+                    compile_started = time.perf_counter()
+                    await _emit_route_telemetry(
+                        telemetry_callback,
+                        "compiler_started",
+                        plan_run_id=plan_run_id,
+                        plan_attempt=repair_attempt + 1,
+                    )
                     state = self._apply_surface_command(
                         session_id=session_id,
                         route=route,
@@ -223,13 +252,38 @@ class LiveSessionOrchestrator:
                         data_bundle=planned.data_bundle,
                         domain_resources=resources,
                     )
+                    await _emit_route_telemetry(
+                        telemetry_callback,
+                        "compiler_completed",
+                        plan_run_id=plan_run_id,
+                        plan_attempt=repair_attempt + 1,
+                        compiler_elapsed_ms=round((time.perf_counter() - compile_started) * 1000),
+                        revision=state.revision,
+                        component_count=len(state.document.components),
+                        anchor_count=len(state.document.anchors),
+                    )
                     if repair_attempt:
                         trace("PLAN_COMPILE_REPAIR_SUCCEEDED attempt=%s", repair_attempt + 1)
                     break
                 except PanelCompilationError as exc:
+                    await _emit_route_telemetry(
+                        telemetry_callback,
+                        "compiler_rejected",
+                        plan_run_id=plan_run_id,
+                        plan_attempt=repair_attempt + 1,
+                        compiler_elapsed_ms=round((time.perf_counter() - compile_started) * 1000),
+                        code=exc.code,
+                    )
                     if repair_attempt >= self._MAX_PLAN_REPAIR_ATTEMPTS:
                         raise
                     validation_feedback = exc.for_plan_agent()
+                    await _emit_route_telemetry(
+                        telemetry_callback,
+                        "plan_repair_started",
+                        plan_run_id=plan_run_id,
+                        next_plan_attempt=repair_attempt + 2,
+                        reason_code=exc.code,
+                    )
                     trace(
                         "PLAN_COMPILE_REPAIR_REQUIRED attempt=%s code=%s details=%s",
                         repair_attempt + 1,
@@ -244,6 +298,13 @@ class LiveSessionOrchestrator:
             PlanAgentError,
             ValueError,
         ) as exc:
+            await _emit_route_telemetry(
+                telemetry_callback,
+                "plan_run_failed",
+                plan_run_id=plan_run_id,
+                total_elapsed_ms=round((time.perf_counter() - run_started) * 1000),
+                error_type=type(exc).__name__,
+            )
             return OrchestratedToolResult({"status": "error", "detail": str(exc)})
 
         self._active_panels[session_id] = state
@@ -266,8 +327,15 @@ class LiveSessionOrchestrator:
                 widget_registry=self._panel_compiler.widget_registry,
                 asset_catalog=resources.assets,
             ),
-            "visual_effects": _visual_effects(state.document, self._effect_registry),
+            "visual_effects": _visual_effects(self._effect_registry),
         }
+        await _emit_route_telemetry(
+            telemetry_callback,
+            "plan_run_completed",
+            plan_run_id=plan_run_id,
+            total_elapsed_ms=round((time.perf_counter() - run_started) * 1000),
+            revision=state.revision,
+        )
         return OrchestratedToolResult(response=response, presentation=RenderedPresentation(panel=payload))
 
     async def repair_runtime_diagnostic(
@@ -360,7 +428,7 @@ class LiveSessionOrchestrator:
                 widget_registry=self._panel_compiler.widget_registry,
                 asset_catalog=resources.assets,
             ),
-            "visual_effects": _visual_effects(state.document, self._effect_registry),
+            "visual_effects": _visual_effects(self._effect_registry),
         }
         return OrchestratedToolResult(response=response, presentation=RenderedPresentation(panel=payload))
 
@@ -692,8 +760,12 @@ class LiveSessionOrchestrator:
         anchor = state.document.anchor_map.get(anchor_id)
         if anchor is None:
             raise ValueError("unknown anchor_id for the active panel")
-        if effect_id not in anchor.allowed_effect_ids:
-            raise ValueError("effect_id is not allowed for this anchor")
+        if self._effect_registry is None:
+            raise RuntimeError("effect registry is not configured")
+        try:
+            self._effect_registry.get(effect_id)
+        except ValueError as exc:
+            raise ValueError("unknown effect_id") from exc
         return {
             "anchor_id": anchor.anchor_id,
             "effect_id": effect_id,
@@ -898,7 +970,7 @@ class LiveSessionOrchestrator:
             "surface_id": updated_document.surface_id,
             "revision": updated_document.revision,
             "visual_stage_map": visual_stage_map,
-            "visual_effects": _visual_effects(updated_state.document, self._effect_registry),
+            "visual_effects": _visual_effects(self._effect_registry),
         }
         return PanelActionResult(response=response, panel_update=payload)
 
@@ -937,23 +1009,13 @@ class LiveSessionOrchestrator:
         memory.append("assistant", assistant_text)
 
 
-def _visual_effects(
-    panel: Any,
-    effect_registry: EffectRegistry | None = None,
-) -> list[dict[str, str]]:
-    """Expose only effect IDs granted by the compiler-owned anchor map."""
+def _visual_effects(effect_registry: EffectRegistry | None = None) -> list[dict[str, str]]:
+    """Expose every installed target-agnostic effect to Gemini Live."""
 
-    effect_ids = sorted({effect for anchor in panel.anchors for effect in anchor.allowed_effect_ids})
+    if effect_registry is None:
+        return []
     effects: list[dict[str, str]] = []
-    for effect_id in effect_ids:
-        if effect_registry is None:
-            # Compatibility for direct unit construction of the orchestrator.
-            effects.append({"id": effect_id, "description": "Hiệu ứng trình bày cho vùng đang nói tới."})
-            continue
-        try:
-            definition = effect_registry.get(effect_id)
-        except ValueError as exc:
-            raise RuntimeError(f"effect '{effect_id}' is allowed by a widget but is not installed.") from exc
+    for definition in effect_registry.definitions():
         effects.append({
             "id": definition.effect_id,
             "description": definition.description,

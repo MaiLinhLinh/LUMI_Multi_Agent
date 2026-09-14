@@ -1,1 +1,12 @@
-.lumi-highlight { outline: 3px solid #0ea5e9 !important; outline-offset: 4px; box-shadow: 0 0 0 8px #0ea5e922 !important; }
+.presentation-overlay .lumi-overlay-highlight {
+  fill: rgb(14 165 233 / .08);
+  stroke: #0ea5e9;
+  stroke-width: 3;
+  filter: drop-shadow(0 0 5px rgb(14 165 233 / .38));
+  animation: lumi-highlight-frame-in 180ms ease-out both;
+}
+
+@keyframes lumi-highlight-frame-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}

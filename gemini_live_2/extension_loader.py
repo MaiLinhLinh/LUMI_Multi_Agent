@@ -286,7 +286,6 @@ class ExtensionLoader:
         effects = tuple(self._load_effect(path) for path in self._package_paths(self._effects_root))
         self._reject_duplicate_ids(widgets, label="widget")
         self._reject_duplicate_ids(effects, label="effect")
-        self._validate_widget_effect_dependencies(widgets, effects)
         return LoadedExtensions(
             root=self._root,
             widgets=widgets,
@@ -405,19 +404,6 @@ class ExtensionLoader:
         duplicates = sorted({value for value in values if values.count(value) > 1})
         if duplicates:
             raise ExtensionManifestError(f"duplicate {label} ids: {duplicates}.")
-
-    def _validate_widget_effect_dependencies(
-        self,
-        widgets: tuple[LoadedWidgetPackage, ...],
-        effects: tuple[EffectExtension, ...],
-    ) -> None:
-        effect_ids = {effect.effect_id for effect in effects}
-        for widget in widgets:
-            missing = sorted(set(widget.definition.declared_effect_ids) - effect_ids)
-            if missing:
-                raise ExtensionManifestError(
-                    f"widget '{widget.widget_id}' allows effects that are not installed: {missing}."
-                )
 
     @staticmethod
     def _validate_runtime_actions(definition: WidgetDefinition) -> None:

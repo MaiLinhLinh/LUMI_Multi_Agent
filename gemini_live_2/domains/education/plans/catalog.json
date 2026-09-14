@@ -5,21 +5,6 @@
       "id": "two_subject_comparison",
       "description": "So sánh trực quan hai đối tượng ngang hàng: mỗi bên có ảnh lớn và nhãn ngắn, phù hợp khi trẻ quan sát hai chủ thể.",
       "layout_path": "plans/two_subject_comparison.layout.json"
-    },
-    {
-      "id": "tm1",
-      "description": "Tiêu đề ở trên, ảnh minh họa lớn ở giữa, câu hỏi phía dưới ảnh, ba thẻ lựa chọn ngang hàng và vùng đáp án ẩn ở dưới cùng.",
-      "layout_path": "layouts/tm1.layout.json"
-    },
-    {
-      "id": "tm2",
-      "description": "Tiêu đề trên cùng, ảnh minh họa lớn giữa trang, câu hỏi phía dưới ảnh, ba thẻ lựa chọn ngang hàng, và vùng đáp án ẩn ở cuối.",
-      "layout_path": "layouts/tm2.layout.json"
-    },
-    {
-      "id": "tm3",
-      "description": "Tiêu đề trên cùng, ảnh minh họa lớn ở giữa, câu hỏi phía dưới ảnh, ba thẻ lựa chọn ngang hàng và vùng phản hồi ẩn ở dưới cùng.",
-      "layout_path": "layouts/tm3.layout.json"
     }
   ]
 }

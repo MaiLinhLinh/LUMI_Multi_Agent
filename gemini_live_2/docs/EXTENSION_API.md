@@ -67,7 +67,6 @@ WidgetDefinition (unbound)
   anchor_policy: object
   stage_map_policy: object
   asset_policy: object
-  declared_effect_ids: list[str]
   discovery_summary() -> WidgetDiscoverySummary
   public_contract() -> WidgetPublicContract
 ```
@@ -99,7 +98,7 @@ Agent không cần nhận `stage_map_policy`, `asset_references`, anchor policy 
 
 `actions` mô tả thao tác UI có thể xảy ra, không tự chấm đúng/sai hoặc tự đổi panel. Runtime xác minh event; Gemini Live quyết định ý nghĩa nghiệp vụ.
 
-`declared_effect_ids` là dependency tĩnh chỉ để Loader kiểm tra một lần khi startup: mọi effect có thể được `anchor_policy` cho phép phải có package đã cài. Nó không cấp quyền cho anchor nào; lúc chạy, `anchor_policy.allowed_effect_ids` vẫn là policy quyết định cuối cùng.
+`anchor_policy` chỉ sinh các target anchor mà widget thực sự render. Effect không phải quyền của widget hay anchor: mọi effect đã được `EffectRegistry` nạp đều có thể chạy trên mọi anchor hiện có.
 
 Với widget render danh sách động, `anchor_policy(props)` có thể trả một anchor cho từng phần tử, ví dụ
 `milestone_1`, `milestone_2`, … . Renderer phải gắn `data-anchor-id` lên đúng DOM item tương ứng.
@@ -167,7 +166,7 @@ export function run(context, command) {
 
 Target đã được core tìm từ anchor hợp lệ. `AnimationController` sở hữu lifecycle: trước effect mới, khi lượt bị ngắt, hoặc Surface đổi revision, core gọi cleanup của effect cũ nếu có. Effect không tự chọn target và không tự dọn effect khác.
 
-Effect không có `anchor_kinds` hay `supports`. Quyền dùng effect nằm ở `anchor_policy.allowed_effect_ids` của widget: Runtime chỉ chạy effect khi anchor tồn tại và effect nằm trong danh sách đó. Do đó effect tổng quát như `circle` có thể áp dụng lên bất kỳ anchor nào widget cho phép.
+Effect không có `anchor_kinds`, `supports` hay policy theo widget. Runtime chỉ chạy effect khi `anchor_id` thuộc SurfaceDocument hiện tại và `effect_id` tồn tại trong `EffectRegistry`. Vì effect là target-agnostic, Gemini có thể chọn bất kỳ effect đã cài cho bất kỳ anchor hiện có.
 
 ## 4. Nạp và phân phối extension
 

@@ -1,5 +1,5 @@
 import { AnimationController } from "/assets/presentation/animation_controller.js?v=extension-registry-ef9a";
-import { renderSurfaceDocument } from "/assets/panel_renderer.js?v=extension-registry-ef9a";
+import { renderSurfaceComponent, renderSurfaceDocument } from "/assets/panel_renderer.js?v=incremental-surface-update-ef11";
 import {
   appendEffectExtensionStyles,
   appendWidgetExtensionStyles,
@@ -44,6 +44,8 @@ let audioContext = null, sampleRate = null, nextAudioAt = 0, pendingAudioMarker 
 let pendingAudioChunkTurnId = null, activeAudioTurnId = null;
 let activePanelRevision = null;
 let activePanelSurfaceId = null;
+let activePanelPayload = null;
+let activePanelContent = null;
 let sources = new Set(), inputTranscriptBubble = null, traceBubble = null;
 let microphoneStream = null, microphoneContext = null, microphoneSource = null, microphoneProcessor = null, muteGain = null;
 let recording = false, openingMicrophone = false;
@@ -253,8 +255,9 @@ async function renderPanel(panel, { isUpdate = false } = {}) {
   const isSurfaceDocument = panel?.ui_type === "surface_document" && panel?.surface
     && Array.isArray(panel.surface.components);
   if (!isSurfaceDocument) return;
-  const revealedComponentIds = isUpdate ? hiddenComponentIdsInCurrentSurface() : new Set();
   const revision = Number(panel.surface?.revision);
+  if (isUpdate && patchSurfaceComponents(panel)) return;
+  const revealedComponentIds = isUpdate ? hiddenComponentIdsInCurrentSurface() : new Set();
   activePanelRevision = Number.isInteger(revision) && revision > 0 ? revision : null;
   activePanelSurfaceId = typeof panel.surface?.surface_id === "string" ? panel.surface.surface_id : null;
   contentPanel.hidden = false; weatherView.hidden = false; welcome.hidden = true;
@@ -280,6 +283,8 @@ async function renderPanel(panel, { isUpdate = false } = {}) {
     { revealedComponentIds, onRuntimeDiagnostic: reportRuntimeDiagnostic },
   ));
   root.append(style, content);
+  activePanelPayload = panel;
+  activePanelContent = content;
   // The first layout pass can happen before the shadow stylesheet arrives.
   // Refit once it has supplied the real grid and widget dimensions.
   const panelStyles = [coreStyle, ...widgetStyles];
@@ -295,6 +300,65 @@ async function renderPanel(panel, { isUpdate = false } = {}) {
     widgetStyles: panelStyles,
   });
   animationController.clear();
+}
+
+function patchSurfaceComponents(panel) {
+  const previous = activePanelPayload;
+  const content = activePanelContent;
+  const grid = content?.querySelector(".surface-document-grid");
+  const surfaceId = typeof panel.surface?.surface_id === "string" ? panel.surface.surface_id : null;
+  const revision = Number(panel.surface?.revision);
+  if (
+    !previous || !content || !grid || !surfaceId || surfaceId !== activePanelSurfaceId ||
+    !Number.isInteger(revision) || revision <= 0 ||
+    !sameComponentIds(previous.surface?.components, panel.surface?.components)
+  ) return false;
+
+  const previousById = new Map(previous.surface.components.map((component) => [component.id, component]));
+  const changed = panel.surface.components.filter((component) => (
+    JSON.stringify(previousById.get(component.id)) !== JSON.stringify(component)
+  ));
+  activePanelRevision = revision;
+  activePanelSurfaceId = surfaceId;
+
+  for (const component of changed) {
+    const oldComponent = previousById.get(component.id);
+    const oldNode = grid.querySelector(`[data-component-id="${CSS.escape(component.id)}"]`);
+    if (!oldNode) return false;
+    const replacement = renderSurfaceComponent(
+      panel.surface,
+      component,
+      Array.isArray(panel.assets) ? panel.assets : [],
+      {
+        interactionTarget: grid,
+        revealedComponentIds: oldComponent?.state?.visibility === "hidden" && component?.state?.visibility === "visible"
+          ? new Set([component.id]) : new Set(),
+        onRuntimeDiagnostic: reportRuntimeDiagnostic,
+      },
+    );
+    if (!replacement) return false;
+    oldNode.replaceWith(replacement);
+  }
+
+  activePanelPayload = panel;
+  fitPresentationToHost(content);
+  void confirmSurfaceRendered({
+    surfaceId,
+    revision,
+    content,
+    widgetStyles: [...templateHost.shadowRoot.querySelectorAll('link[rel="stylesheet"]')],
+  });
+  reportVisualDiagnostic("panel_update_components_patched", {
+    revision,
+    component_ids: changed.map((component) => component.id),
+  });
+  return true;
+}
+
+function sameComponentIds(previousComponents, nextComponents) {
+  if (!Array.isArray(previousComponents) || !Array.isArray(nextComponents)) return false;
+  if (previousComponents.length !== nextComponents.length) return false;
+  return previousComponents.every((component, index) => component?.id === nextComponents[index]?.id);
 }
 
 function waitForWidgetStyles(widgetStyles) {
@@ -361,6 +425,8 @@ function clearPanel({ surface_id: surfaceId, revision } = {}) {
   templateHost.shadowRoot?.replaceChildren();
   activePanelRevision = null;
   activePanelSurfaceId = null;
+  activePanelPayload = null;
+  activePanelContent = null;
   contentPanel.hidden = true;
   weatherView.hidden = true;
   welcome.hidden = false;

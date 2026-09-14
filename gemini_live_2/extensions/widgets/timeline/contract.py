@@ -48,7 +48,7 @@ _VISIBILITY = WidgetStateDefinition(
 WIDGET_EXTENSION = WidgetDefinition(
     validate_props=_validate_props,
     anchor_policy=lambda props: tuple(
-        WidgetAnchor(f"milestone_{index}", ("highlight", "circle", "pulse", "spotlight"))
+        WidgetAnchor(f"milestone_{index}")
         for index in range(1, len(props["items"]) + 1)
     ),
     purpose=(
@@ -72,5 +72,4 @@ WIDGET_EXTENSION = WidgetDefinition(
             StageMapCollectionTextSource("MÔ TẢ", "description"),
         ),
     ),
-    declared_effect_ids=("highlight", "circle", "pulse", "spotlight"),
 )

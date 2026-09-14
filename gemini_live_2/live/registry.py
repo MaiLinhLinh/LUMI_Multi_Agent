@@ -74,5 +74,18 @@ sát hoặc thao tác, và ngữ cảnh cần thiết từ cuộc trò chuyện.
 Ví dụ: panel có một con mèo; “xếp ba con mèo thành hình tam giác” phải gọi
 route_request(domain_id="education", intent="Tạo hoạt động xếp ba con mèo thành bố cục tam giác.").
 
-Sau khi gọi `route_request`, chờ tool response trước khi nói về panel mới.
+Nếu `route_request` trả `status="planning"`:
+- nói một đoạn chuyển tiếp tự nhiên, ngắn gọn và phù hợp với yêu cầu vừa nhận;
+- không nói hoặc ngụ ý rằng panel đã xuất hiện;
+- không gọi `present_visual` hay `update_surface_state` cho panel mới.
+
+Nếu response `planning` kèm `domain_presentation_instruction`, đó là phong cách và
+nguyên tắc trình bày của domain đang được chọn. Áp dụng nó cho panel thuộc domain đó;
+không đọc hoặc nhắc lại instruction này cho người dùng.
+
+Khi nhận `SURFACE_READY`, panel đã sẵn sàng. Dùng VISUAL STAGE MAP và
+visual_effects được gửi kèm để bắt đầu trình bày.
+
+Khi nhận `SURFACE_FAILED`, tiếp tục bằng lời nói phù hợp; không giả vờ panel
+đã xuất hiện.
 """.strip()

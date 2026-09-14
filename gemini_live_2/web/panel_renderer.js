@@ -3,6 +3,7 @@ import { widgetRendererFor } from "/assets/widgets/registry.js";
 export function renderSurfaceDocument(surface, assets = [], {
   revealedComponentIds = new Set(),
   onRuntimeDiagnostic = null,
+  interactionTarget = null,
 } = {}) {
   const grid = document.createElement("main");
   grid.className = "surface-document-grid";
@@ -63,7 +64,7 @@ export function renderSurfaceDocument(surface, assets = [], {
             diagnose("interaction_emit_failed", { status: "invalid_event" });
             return;
           }
-          grid.dispatchEvent(new CustomEvent("panel:interaction", {
+          (interactionTarget || grid).dispatchEvent(new CustomEvent("panel:interaction", {
             bubbles: true,
             detail: {
               surface_id: surface?.surface_id || "",
@@ -87,6 +88,17 @@ export function renderSurfaceDocument(surface, assets = [], {
     grid.append(node);
   }
   return grid;
+}
+
+// Used by the frontend incremental-update path.  It preserves the existing
+// grid, event listener and loaded styles while materializing one changed node.
+export function renderSurfaceComponent(surface, component, assets = [], options = {}) {
+  const grid = renderSurfaceDocument(
+    { ...surface, components: [component] },
+    assets,
+    options,
+  );
+  return grid.firstElementChild;
 }
 
 function firstAnchor(anchorsByKey) {

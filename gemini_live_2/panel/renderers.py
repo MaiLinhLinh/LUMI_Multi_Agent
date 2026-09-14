@@ -40,7 +40,6 @@ def surface_document_client_payload(
                     "anchor_id": anchor.anchor_id,
                     "component_id": anchor.component_id,
                     "anchor_key": anchor.anchor_key,
-                    "allowed_effect_ids": list(anchor.allowed_effect_ids),
                 }
                 for anchor in document.anchors
             ],

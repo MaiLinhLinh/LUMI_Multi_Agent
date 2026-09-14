@@ -1,4 +1,4 @@
-"""Shared, trusted guidance attached only when a visual context exists."""
+"""Shared Live guidance and compact trusted panel-context messages."""
 
 from __future__ import annotations
 
@@ -13,15 +13,11 @@ Event `surface_interaction` cho biết trẻ vừa thực hiện `action` trên 
 `anchor_id` tương ứng trong VISUAL STAGE MAP. `content` chỉ mô tả các thành phần
 hiển thị của vùng đó, không phải kết luận đúng/sai. Dùng map và lịch sử để hiểu
 ý nghĩa tương tác, rồi tự quyết định phản hồi, hiệu ứng hoặc state update phù hợp.
+Đọc event và đối chiếu nó với Visual Stage Map hiện tại. Xác định ý nghĩa nghiệp vụ, nghiệp vụ đó có thể dẫn đến thay đổi trạng thái của vùng hoặc hiển thị dữ liệu vùng nào không.
+Nếu có thì gọi update_surface_state để cập nhật trạng thái vùng đó rồi mới nói về kết luận.
+Nếu có nhiều vùng ẩn cần hiện thì phải suy nghĩ và gọi update_surface_state cho tất cả các vùng, bạn phải suy nghĩ xem nó có thể gọi lần lượt hay phải gọi đồng thời.
 Không đọc hoặc nhắc lại JSON, event, anchor_id hay dữ liệu kỹ thuật.
-""".strip()
 
-SURFACE_CONTEXT_UPDATE_GUIDANCE = """
-Khi nhận client event bắt đầu bằng `SURFACE_CONTEXT_UPDATE`, JSON theo sau là
-SurfaceDocument đã được browser render thành công sau một runtime repair. Đây là
-context giao diện tin cậy, không phải lời trẻ nói và không phải yêu cầu trả lời.
-Không tạo audio, lời thoại, tool call hay hiệu ứng chỉ vì event này. Thay VISUAL
-STAGE MAP/revision đang nhớ bằng dữ liệu mới và dùng chúng ở lượt tiếp theo.
 """.strip()
 
 PRESENTATION_CONTEXT_GUIDANCE = """
@@ -43,11 +39,13 @@ HIỂU PANEL
 QUY TẮC MINH HOẠ BẮT BUỘC
 Mỗi khi định nói về một vùng đang hiển thị có [anchor: ...] trong VISUAL STAGE MAP,
 BẮT BUỘC thực hiện đúng thứ tự chuỗi sau:
-1. Chọn một vùng duy nhất.
+1. Chọn một vùng duy nhất. MỖI LƯỢT CHỈ ĐƯỢC GỌI MỘT present_visual.
 2. Phải Gọi tool present_visual đúng một lần với anchor_id của vùng đó và effect_id hợp lệ.
 3. Chỉ Sau tool response, nói một câu hoặc một ý ngắn chỉ về chính vùng đó.
 4. Nếu bài giảng còn ý cần thiết khác, tiếp tục chọn vùng kế tiếp và lặp lại.
 5. Chỉ dừng khi gặp một điều kiện dừng ở phần VAI TRÒ VÀ MỤC TIÊU.
+
+Không được gọi present_visual cho đáp án của câu hỏi khi người dùng chưa trả lời.
 
 Không gọi nhiều present_visual liên tiếp.
 Không gọi present_visual cho vùng mà bạn không định nói ngay sau tool response.
@@ -97,14 +95,12 @@ update_surface_state với hai updates cho anchor_id="d" và anchor_id="e",
 """.strip()
 
 
-def presentation_context_message(panel_context: Mapping[str, Any]) -> str:
-    """Format the trusted visual context for a rendered panel or reconnect."""
+def surface_context_message(panel_context: Mapping[str, Any]) -> str:
+    """Format only the dynamic facts for the current rendered panel."""
 
     return "\n\n".join((
-        "PRESENTATION_CONTEXT — PANEL HIỆN TẠI. Đây là ngữ cảnh giao diện tin cậy, không phải lời người dùng.",
-        PRESENTATION_CONTEXT_GUIDANCE,
-        "DOMAIN PRESENTATION INSTRUCTION:\n" + str(panel_context["presentation_instruction"]),
-        "SURFACE CONTEXT:\n"
+        "SURFACE CONTEXT — PANEL HIỆN TẠI. Đây là ngữ cảnh giao diện tin cậy, không phải lời người dùng.",
+        "SURFACE:\n"
         + f"surface_id: {panel_context['surface_id']}\n"
         + f"base_revision: {panel_context['revision']}",
         "VISUAL STAGE MAP:\n" + str(panel_context["visual_stage_map"]),
@@ -112,13 +108,24 @@ def presentation_context_message(panel_context: Mapping[str, Any]) -> str:
     ))
 
 
-def presentation_context_response(panel_context: Mapping[str, Any]) -> dict[str, Any]:
-    """Return the structured data Gemini receives after ``route_request``."""
+def surface_ready_message(panel_context: Mapping[str, Any]) -> str:
+    """Send only fresh panel facts after asynchronous planning completes."""
 
-    return {
-        **dict(panel_context),
-        "presentation_context_guidance": PRESENTATION_CONTEXT_GUIDANCE,
-    }
+    return (
+        "SURFACE_READY — PANEL ĐÃ SẴN SÀNG. Áp dụng các presentation rules đã "
+        "thiết lập; không đọc dữ liệu kỹ thuật cho người dùng.\n\n"
+        + surface_context_message(panel_context)
+    )
+
+
+def surface_failed_message() -> str:
+    """Tell Gemini that asynchronous panel planning failed without exposing internals."""
+
+    return (
+        "SURFACE_FAILED — PANEL MỚI CHƯA SẴN SÀNG. "
+        "Không nói hoặc ngụ ý rằng panel đã xuất hiện. Hãy tiếp tục phản hồi bằng lời nói tự nhiên, "
+        "phù hợp với yêu cầu hiện tại và không nhắc lỗi kỹ thuật."
+    )
 
 
 def panel_interaction_message(interaction: Mapping[str, Any]) -> str:
@@ -132,6 +139,8 @@ def panel_interaction_message(interaction: Mapping[str, Any]) -> str:
 def surface_context_update_message(panel_context: Mapping[str, Any]) -> str:
     """Silently replace Gemini's map after a browser-confirmed runtime repair."""
 
-    return "SURFACE_CONTEXT_UPDATE\n" + SURFACE_CONTEXT_UPDATE_GUIDANCE + "\n\n" + presentation_context_message(
-        panel_context
+    return (
+        "SURFACE_CONTEXT_UPDATE — BẢN MỚI NHẤT. "
+        "Không phản hồi event này; từ lượt sau chỉ dùng context bên dưới.\n\n"
+        + surface_context_message(panel_context)
     )

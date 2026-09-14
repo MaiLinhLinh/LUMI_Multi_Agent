@@ -13,8 +13,8 @@ def _validate_props(props: Mapping[str, Any]) -> dict[str, Any]:
 
 _VISIBILITY = WidgetStateDefinition(name="visibility", value_type="string", default_value="visible", allowed_values=("visible", "hidden"), transitions={"visible": ("hidden",), "hidden": ("visible",)})
 WIDGET_EXTENSION = WidgetDefinition(
-    validate_props=_validate_props, anchor_policy=lambda _: (WidgetAnchor("answer", ("highlight", "circle")),),
+    validate_props=_validate_props, anchor_policy=lambda _: (WidgetAnchor("answer"),),
     purpose="Hiển thị một đáp án số hoặc chữ ngắn; khi hidden hiển thị dấu ?, khi visible hiển thị value.",
     props=(WidgetPropDefinition("value", "string", True, "Đáp án hoặc từ ngắn cần hiển thị.", template_value_kind="binding"),),
-    state_fields=(_VISIBILITY,), stage_map_policy=StageMapPolicy(kind="answer", content_label="KẾT QUẢ", text_source="props.value", anchor_key="answer"), declared_effect_ids=("highlight", "circle"),
+    state_fields=(_VISIBILITY,), stage_map_policy=StageMapPolicy(kind="answer", content_label="KẾT QUẢ", text_source="props.value", anchor_key="answer"),
 )

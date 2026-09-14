@@ -627,23 +627,16 @@ class DataBundle:
 
 @dataclass(frozen=True, slots=True)
 class AnchorBinding:
-    """Compiler-owned visual permission. Plan Agent never creates this directly."""
+    """Compiler-owned visual target. Plan Agent never creates this directly."""
 
     anchor_id: str
     component_id: str
     anchor_key: str
-    allowed_effect_ids: tuple[str, ...]
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "anchor_id", _required_text(self.anchor_id, "anchor.anchor_id"))
         object.__setattr__(self, "component_id", _required_text(self.component_id, "anchor.component_id"))
         object.__setattr__(self, "anchor_key", _required_text(self.anchor_key, "anchor.anchor_key"))
-        if not isinstance(self.allowed_effect_ids, tuple) or not self.allowed_effect_ids:
-            raise ContractValidationError("anchor.allowed_effect_ids must not be empty.")
-        effects = tuple(_required_text(effect, "anchor.allowed_effect_ids") for effect in self.allowed_effect_ids)
-        if len(effects) != len(set(effects)):
-            raise ContractValidationError("anchor.allowed_effect_ids contains duplicates.")
-        object.__setattr__(self, "allowed_effect_ids", effects)
 
 @dataclass(frozen=True, slots=True)
 class ComponentNode:
@@ -743,7 +736,6 @@ class SurfaceDocument:
                     "anchor_id": anchor.anchor_id,
                     "component_id": anchor.component_id,
                     "anchor_key": anchor.anchor_key,
-                    "allowed_effect_ids": list(anchor.allowed_effect_ids),
                 }
                 for anchor in self.anchors
             ],

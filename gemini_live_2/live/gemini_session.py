@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 import logging
 import re
+import time
 import uuid
 from collections.abc import Awaitable, Callable
 from datetime import datetime
@@ -20,8 +23,9 @@ from gemini_live_2.trace import begin_turn, trace, warning
 from .orchestrator import LiveSessionOrchestrator
 from .guide_prompt import (
     panel_interaction_message,
-    presentation_context_message,
-    presentation_context_response,
+    PRESENTATION_CONTEXT_GUIDANCE,
+    surface_failed_message,
+    surface_ready_message,
     surface_context_update_message,
 )
 from .delete_surface import DELETE_SURFACE_TOOL
@@ -101,12 +105,12 @@ class GeminiLiveSession:
             for item in memory.history[-6:]
             if item.get("role") in {"user", "assistant"} and item.get("content")
         ]
-        sections = [self._registry.prompt_guidance()]
+        sections = [
+            self._registry.prompt_guidance(),
+            PRESENTATION_CONTEXT_GUIDANCE,
+        ]
         if history:
             sections.append("Recent conversation (context only):\n" + "\n".join(history))
-        panel_context = self._orchestrator.active_panel_presentation_context(session_id)
-        if panel_context is not None:
-            sections.append(presentation_context_message(panel_context))
         return "\n\n".join(section for section in sections if section)
 
     def _connection_config(self, session_id: str) -> types.LiveConnectConfig:
@@ -206,6 +210,7 @@ class PersistentGeminiLiveConversation:
         self._usage_metadata: dict[str, int] | None = None
         self._sample_rate: int | None = None
         self._audio_started = False
+        self._speech_started_monotonic: float | None = None
         self._ui_pending_text_trace: list[str] = []
         self._ui_pending_text_trace_timestamp: str | None = None
         self._ui_pending_text_trace_turn_id: str | None = None
@@ -216,6 +221,10 @@ class PersistentGeminiLiveConversation:
         # signal until Gemini begins producing the typed turn.
         self._text_barge_in_pending = False
         self._output_turn_id: str | None = None
+        self._pending_route_task: asyncio.Task[None] | None = None
+        self._pending_surface_ready: dict[str, Any] | None = None
+        self._route_bridge_turn_pending = False
+        self._loaded_domain_presentation_ids: set[str] = set()
 
     @property
     def state(self) -> LiveSessionState:
@@ -353,9 +362,11 @@ class PersistentGeminiLiveConversation:
                         "summary": summary,
                     })
                     self._reset_voice_turn_tracking()
+                    await self._complete_route_bridge_if_needed()
         raise GeminiLiveSessionError("Gemini Live connection closed while microphone streaming.")
 
     async def close(self) -> None:
+        await self._cancel_pending_route_task(wait=True)
         await self._transport.close()
         self._orchestrator.reset_session_state(self._session_id)
         await self._on_event({"type": "live:state", "state": LiveSessionState.IDLE})
@@ -368,6 +379,7 @@ class PersistentGeminiLiveConversation:
         self._usage_metadata = None
         self._sample_rate = None
         self._audio_started = False
+        self._speech_started_monotonic = None
         self._ui_pending_text_trace = []
         self._ui_pending_text_trace_timestamp = None
         self._ui_pending_text_trace_turn_id = None
@@ -389,6 +401,7 @@ class PersistentGeminiLiveConversation:
         self._usage_metadata = None
         self._sample_rate = None
         self._audio_started = False
+        self._speech_started_monotonic = None
         self._ui_pending_text_trace = []
         self._ui_pending_text_trace_timestamp = None
         self._ui_pending_text_trace_turn_id = None
@@ -462,22 +475,94 @@ class PersistentGeminiLiveConversation:
         )
 
     async def _emit_plan_telemetry(self, payload: dict[str, Any]) -> None:
-        """Show a Plan Agent model output in the same browser trace as Live calls."""
+        """Render bounded Plan/Compiler lifecycle facts in the browser trace."""
 
-        tool_names = [
-            str(name) for name in payload.get("tool_names", [])
-            if isinstance(name, str) and name
-        ]
-        output_kind = "tool call: " + ", ".join(tool_names) if tool_names else "final JSON"
+        event = str(payload.get("event") or "plan_event")
+        run_id = str(payload.get("plan_run_id") or "?")
+        attempt = payload.get("plan_attempt")
+        attempt_prefix = f"attempt={attempt} · " if isinstance(attempt, int) else ""
+        provider = str(payload.get("provider") or "")
+        step = payload.get("step")
+        if event == "plan_run_received":
+            content = f"run={run_id} · domain={payload.get('domain_id') or '?'} · intent_chars={payload.get('intent_chars', 0)}"
+        elif event == "plan_task_started":
+            content = f"run={run_id} · queue_wait={payload.get('queue_wait_ms')}ms"
+        elif event == "plan_context_built":
+            content = (
+                f"run={run_id} · {attempt_prefix}provider={provider} · build={payload.get('context_build_ms')}ms · "
+                f"payload={payload.get('payload_bytes')}B · system={payload.get('system_prompt_bytes')}B · "
+                f"history={payload.get('history_items')} · assets={payload.get('assets')} · "
+                f"templates={payload.get('templates')} · widgets={payload.get('widgets')} · "
+                f"capabilities={payload.get('capabilities')} · initial_search_results={payload.get('prior_search_results')}"
+            )
+        elif event == "plan_model_request_sent":
+            content = (
+                f"run={run_id} · {attempt_prefix}provider={provider} · step={step} · "
+                f"messages={payload.get('model_messages')} · prior_tool_results={payload.get('prior_tool_results')}"
+            )
+        elif event == "plan_model_response_received":
+            tool_names = [str(name) for name in payload.get("tool_names", []) if isinstance(name, str) and name]
+            output_kind = "toolcall: " + ", ".join(tool_names) if tool_names else "final_json"
+            usage = self._format_usage(payload.get("usage"))
+            usage_data = payload.get("usage") if isinstance(payload.get("usage"), dict) else {}
+            cached = usage_data.get("cached_input_tokens", "not_reported")
+            content = (
+                f"run={run_id} · {attempt_prefix}Plan Agent/{provider} · step={step} · {output_kind} · "
+                f"model={payload.get('model_elapsed_ms')}ms · {usage} · cached_input={cached}"
+            )
+        elif event == "plan_tool_execution_started":
+            content = (
+                f"run={run_id} · {attempt_prefix}provider={provider} · step={step} · "
+                f"toolcall started: {payload.get('tool_name')} · arguments={payload.get('arguments_bytes')}B"
+            )
+        elif event == "plan_tool_result_received":
+            bundle = payload.get("bundle") if isinstance(payload.get("bundle"), dict) else {}
+            content = (
+                f"run={run_id} · {attempt_prefix}provider={provider} · step={step} · "
+                f"toolcall result: {payload.get('tool_name')} · elapsed={payload.get('tool_elapsed_ms')}ms · "
+                f"result={payload.get('result_bytes')}B · search_results={bundle.get('search_result_count', 0)}"
+            )
+        elif event == "plan_tool_results_appended":
+            content = (
+                f"run={run_id} · {attempt_prefix}provider={provider} · "
+                f"appended={payload.get('appended_results')} · next_step={payload.get('next_step')}"
+            )
+        elif event == "plan_final_json_parsed":
+            content = (
+                f"run={run_id} · {attempt_prefix}provider={provider} · step={step} · "
+                f"action={payload.get('action')} · parse={payload.get('parse_ms')}ms"
+            )
+        elif event == "compiler_started":
+            content = f"run={run_id} · attempt={attempt or '?'}"
+        elif event == "compiler_completed":
+            content = (
+                f"run={run_id} · attempt={attempt or '?'} · elapsed={payload.get('compiler_elapsed_ms')}ms · "
+                f"revision={payload.get('revision')} · components={payload.get('component_count')} · anchors={payload.get('anchor_count')}"
+            )
+        elif event == "compiler_rejected":
+            content = (
+                f"run={run_id} · attempt={attempt or '?'} · elapsed={payload.get('compiler_elapsed_ms')}ms · code={payload.get('code')}"
+            )
+        elif event == "plan_repair_started":
+            content = f"run={run_id} · next_attempt={payload.get('next_plan_attempt')} · reason={payload.get('reason_code')}"
+        elif event == "plan_run_completed":
+            content = f"run={run_id} · total={payload.get('total_elapsed_ms')}ms · revision={payload.get('revision')}"
+        elif event == "plan_run_failed":
+            content = f"run={run_id} · total={payload.get('total_elapsed_ms')}ms · error={payload.get('error_type')}"
+        else:
+            content = f"run={run_id}"
         await self._on_event({
             "type": "live:debug_trace",
             "timestamp": _ui_trace_timestamp(),
-            "event": "tokens",
-            "turn_id": self._ensure_output_turn_id(),
-            "content": (
-                f"Plan Agent/{payload.get('provider', 'unknown')} · bước {payload.get('step', '?')} "
-                f"· {output_kind} · {self._format_usage(payload.get('usage'))}"
+            "event": (
+                f"toolcall_started: {payload.get('tool_name')}"
+                if event == "plan_tool_execution_started"
+                else f"toolcall_result: {payload.get('tool_name')}"
+                if event == "plan_tool_result_received"
+                else event
             ),
+            "turn_id": self._ensure_output_turn_id(),
+            "content": content,
         })
 
     async def _emit_live_usage(self) -> None:
@@ -519,6 +604,10 @@ class PersistentGeminiLiveConversation:
                     self._reset_voice_turn_tracking()
                     continue
                 if await self._handle_turn_complete():
+                    bridge_turn_completed = self._route_bridge_turn_pending
+                    await self._complete_route_bridge_if_needed()
+                    if bridge_turn_completed:
+                        continue
                     return self._finish_turn()
         raise GeminiLiveSessionError("Gemini Live connection closed before the turn completed.")
 
@@ -578,6 +667,13 @@ class PersistentGeminiLiveConversation:
                 response_tool_names.append(name)
                 await self._on_event({"type": "tool_result", "name": name, "response": response})
                 continue
+            if name == "route_request":
+                await self._start_route_request(args)
+                response = self._route_planning_response(args)
+                responses.append(types.FunctionResponse(id=call_id, name=name, response={"result": response}))
+                response_tool_names.append(name)
+                await self._on_event({"type": "tool_result", "name": name, "response": response})
+                continue
             await self._set_state(LiveSessionState.WAITING_FOR_TOOL)
             result = await self._orchestrator.execute_tool_call_result(
                 session_id=self._session_id,
@@ -587,8 +683,6 @@ class PersistentGeminiLiveConversation:
                 telemetry_callback=self._emit_plan_telemetry,
             )
             response = result.response
-            if isinstance(response, dict) and "presentation_instruction" in response:
-                response = presentation_context_response(response)
             if isinstance(response, dict):
                 effect_count = len(response.get("visual_effects", []))
                 presentation_context = {
@@ -620,6 +714,167 @@ class PersistentGeminiLiveConversation:
             "TOOL_RESPONSE_SENT_TO_GEMINI effects=%s",
             effect_count,
         )
+
+    async def _start_route_request(self, arguments: dict[str, Any]) -> None:
+        """Replace any pending route with one background planning task."""
+
+        await self._cancel_pending_route_task(wait=False)
+        self._route_bridge_turn_pending = True
+        plan_run_id = uuid.uuid4().hex[:8]
+        domain_id = arguments.get("domain_id")
+        intent = arguments.get("intent")
+        await self._emit_plan_telemetry({
+            "source": "gemini_session",
+            "event": "plan_run_received",
+            "plan_run_id": plan_run_id,
+            "domain_id": domain_id if isinstance(domain_id, str) else None,
+            "intent_chars": len(intent) if isinstance(intent, str) else 0,
+        })
+        enqueued_monotonic = time.perf_counter()
+        task = asyncio.create_task(
+            self._complete_route_request(arguments, plan_run_id, enqueued_monotonic),
+            name=f"lumi-route-request:{self._session_id}",
+        )
+        self._pending_route_task = task
+        trace("ROUTE_REQUEST_PLANNING_STARTED")
+
+    def _route_planning_response(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Attach a domain's style instruction at most once per Live connection."""
+
+        response: dict[str, Any] = {"status": "planning"}
+        domain_id = arguments.get("domain_id")
+        if not isinstance(domain_id, str) or domain_id in self._loaded_domain_presentation_ids:
+            return response
+        instruction = self._orchestrator.domain_presentation_instruction(domain_id)
+        if not instruction:
+            return response
+        self._loaded_domain_presentation_ids.add(domain_id)
+        response["domain_presentation_instruction"] = instruction
+        return response
+
+    async def _cancel_pending_route_task(self, *, wait: bool) -> None:
+        """Cancel the one in-flight route task and discard its pending context."""
+
+        task, self._pending_route_task = self._pending_route_task, None
+        self._pending_surface_ready = None
+        self._route_bridge_turn_pending = False
+        if task is None or task.done():
+            return
+        task.cancel()
+        trace("ROUTE_REQUEST_PLANNING_CANCELLED")
+        if wait:
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+    async def _complete_route_request(
+        self,
+        arguments: dict[str, Any],
+        plan_run_id: str,
+        enqueued_monotonic: float,
+    ) -> None:
+        """Run existing orchestration in the background, then queue trusted context."""
+
+        this_task = asyncio.current_task()
+        run_started = time.perf_counter()
+
+        async def telemetry(payload: dict[str, Any]) -> None:
+            await self._emit_plan_telemetry({"plan_run_id": plan_run_id, **payload})
+
+        await telemetry({
+            "event": "plan_task_started",
+            "queue_wait_ms": round((run_started - enqueued_monotonic) * 1000),
+        })
+
+        try:
+            result = await self._orchestrator.execute_tool_call_result(
+                session_id=self._session_id,
+                tool_name="route_request",
+                arguments=arguments,
+                telemetry_callback=telemetry,
+                plan_run_id=plan_run_id,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.exception("[LIVE:ROUTE_REQUEST_PLANNING_FAILED] session=%s", self._session_id)
+            await telemetry({
+                "event": "plan_run_failed",
+                "total_elapsed_ms": round((time.perf_counter() - run_started) * 1000),
+                "error_type": type(exc).__name__,
+            })
+            await self._queue_surface_result(this_task, None)
+            return
+
+        if this_task is not self._pending_route_task:
+            return
+        response = result.response if isinstance(result.response, dict) else {}
+        presentation = result.presentation
+        panel = getattr(presentation, "panel", None)
+        if response.get("status") != "completed" or not isinstance(panel, dict):
+            await self._queue_surface_result(this_task, None)
+            return
+
+        panel_context = {
+            "surface_id": response.get("panel_id"),
+            "revision": response.get("revision"),
+            "presentation_instruction": response.get("presentation_instruction"),
+            "visual_stage_map": response.get("visual_stage_map"),
+            "visual_effects": response.get("visual_effects"),
+        }
+        if (
+            not isinstance(panel_context["surface_id"], str)
+            or not isinstance(panel_context["revision"], int)
+            or not isinstance(panel_context["presentation_instruction"], str)
+            or not isinstance(panel_context["visual_stage_map"], str)
+            or not isinstance(panel_context["visual_effects"], list)
+        ):
+            await self._queue_surface_result(this_task, None)
+            return
+
+        await self._on_event({"type": "panel", "panel": panel})
+        await self._queue_surface_result(this_task, panel_context)
+
+    async def _queue_surface_result(
+        self,
+        source_task: asyncio.Task[None] | None,
+        panel_context: dict[str, Any] | None,
+    ) -> None:
+        """Keep only the current task's ready/failure result and deliver at a safe point."""
+
+        if source_task is not self._pending_route_task:
+            return
+        self._pending_surface_ready = (
+            {"kind": "ready", "panel_context": panel_context}
+            if panel_context is not None
+            else {"kind": "failed"}
+        )
+        if not self._route_bridge_turn_pending:
+            await self._deliver_pending_surface_result()
+
+    async def _complete_route_bridge_if_needed(self) -> None:
+        """Release a planned surface once Gemini has finished its bridge turn."""
+
+        if self._route_bridge_turn_pending:
+            self._route_bridge_turn_pending = False
+            await self._deliver_pending_surface_result()
+
+    async def _deliver_pending_surface_result(self) -> None:
+        """Inject the completed planning result as a new trusted Gemini input."""
+
+        pending = self._pending_surface_ready
+        if pending is None:
+            return
+        if pending["kind"] == "ready":
+            payload = surface_ready_message(pending["panel_context"])
+            trace("SURFACE_READY_SENT_TO_GEMINI")
+        else:
+            payload = surface_failed_message()
+            trace("SURFACE_FAILED_SENT_TO_GEMINI")
+        await self._transport.send_text(payload)
+        if self._pending_surface_ready is pending:
+            self._pending_surface_ready = None
+            self._pending_route_task = None
+
 
     async def _handle_present_visual(self, args: dict[str, Any]) -> dict[str, Any]:
         anchor_id = args.get("anchor_id")
@@ -742,7 +997,15 @@ class PersistentGeminiLiveConversation:
             self._audio_bytes += len(pcm)
             if not self._audio_started:
                 self._audio_started = True
+                self._speech_started_monotonic = time.perf_counter()
                 trace("GEMINI_AUDIO_FIRST_PCM")
+                await self._on_event({
+                    "type": "live:debug_trace",
+                    "timestamp": _ui_trace_timestamp(),
+                    "event": "gemini_speech_started",
+                    "turn_id": output_turn_id,
+                    "content": f"turn={output_turn_id}",
+                })
             marker = self._pending_visual_marker
             self._pending_visual_marker = None
             if marker is not None:
@@ -770,26 +1033,25 @@ class PersistentGeminiLiveConversation:
             })
 
     async def _flush_ui_text_trace(self) -> None:
-        """Emit one readable text segment between successive tool calls."""
+        """Discard trace-only transcript text; the Browser still receives text events."""
 
-        text = "".join(self._ui_pending_text_trace).strip()
-        timestamp = self._ui_pending_text_trace_timestamp
-        output_turn_id = self._ui_pending_text_trace_turn_id
         self._ui_pending_text_trace = []
         self._ui_pending_text_trace_timestamp = None
         self._ui_pending_text_trace_turn_id = None
-        if not text or timestamp is None:
-            return
-        await self._on_event({
-            "type": "live:debug_trace",
-            "timestamp": timestamp,
-            "event": "text",
-            "turn_id": output_turn_id,
-            "content": text,
-        })
 
     async def _handle_turn_complete(self) -> bool:
         await self._flush_ui_text_trace()
+        if self._speech_started_monotonic is not None:
+            await self._on_event({
+                "type": "live:debug_trace",
+                "timestamp": _ui_trace_timestamp(),
+                "event": "gemini_speech_completed",
+                "turn_id": self._ensure_output_turn_id(),
+                "content": (
+                    f"turn={self._ensure_output_turn_id()} · "
+                    f"duration={round((time.perf_counter() - self._speech_started_monotonic) * 1000)}ms"
+                ),
+            })
         await self._emit_live_usage()
         if self._pending_visual_marker is not None:
             warning(

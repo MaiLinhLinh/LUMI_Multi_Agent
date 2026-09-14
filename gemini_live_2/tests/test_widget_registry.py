@@ -135,13 +135,10 @@ class WidgetRegistryTests(unittest.TestCase):
         self.assertEqual(self.registry.get("text").anchors_for({"content": "Xin chào"})[0].key, "text")
         anchors = self.registry.get("image").anchors_for({"asset_id": "dog", "label": "Chó"})
         self.assertEqual(anchors[0].key, "image")
-        self.assertEqual(anchors[0].allowed_effect_ids, ("highlight", "circle"))
         answer = self.registry.get("answer").anchors_for({"value": "3"})
         self.assertEqual(answer[0].key, "answer")
-        self.assertEqual(answer[0].allowed_effect_ids, ("highlight", "circle"))
         number = self.registry.get("number_display").anchors_for({"value": "12"})
         self.assertEqual(number[0].key, "number")
-        self.assertEqual(number[0].allowed_effect_ids, ("highlight", "circle"))
 
     def test_object_group_declares_group_and_per_item_anchors(self) -> None:
         anchors = self.registry.get("object_group").anchors_for({"asset_id": "dog", "count": 3})

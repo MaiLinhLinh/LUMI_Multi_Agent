@@ -78,7 +78,7 @@ _FLIPPED = WidgetStateDefinition(name="flipped", value_type="boolean", default_v
 
 WIDGET_EXTENSION = WidgetDefinition(
     validate_props=_validate_props,
-    anchor_policy=lambda _: (WidgetAnchor("card", ("highlight", "circle")),),
+    anchor_policy=lambda _: (WidgetAnchor("card"),),
     purpose="Hiển thị thẻ từ vựng có thể lật giữa mặt ảnh và mặt kiến thức.",
     props=(
         WidgetPropDefinition(
@@ -112,5 +112,4 @@ WIDGET_EXTENSION = WidgetDefinition(
         ),
     ),
     asset_references=(WidgetAssetReferenceDefinition(path="props.front.asset_id", required=False),),
-    declared_effect_ids=("highlight", "circle"),
 )

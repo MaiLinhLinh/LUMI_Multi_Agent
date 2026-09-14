@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -77,6 +78,16 @@ def _log_payload(value: object, *, limit: int = 2_000) -> str:
     except (TypeError, ValueError):  # pragma: no cover - defensive logging only.
         text = repr(value)
     return text if len(text) <= limit else f"{text[:limit]}…<truncated>"
+
+
+def _payload_bytes(value: object) -> int:
+    """Report serialized context/result size without logging its content."""
+
+    try:
+        encoded = json.dumps(value, ensure_ascii=False, default=str, separators=(",", ":")).encode("utf-8")
+    except (TypeError, ValueError):  # pragma: no cover - telemetry only.
+        encoded = repr(value).encode("utf-8", errors="replace")
+    return len(encoded)
 
 
 def _bundle_summary(bundle: DataBundle) -> dict[str, Any]:
@@ -153,6 +164,14 @@ def _usage_for_telemetry(usage: object) -> dict[str, int] | None:
     if usage is None:
         return None
     completion_details = _usage_child(usage, "completion_tokens_details")
+    prompt_details = _usage_child(usage, "prompt_tokens_details")
+    cached_input_tokens = _usage_value(
+        usage, "cached_input_tokens", "cached_tokens", "cache_read_input_tokens"
+    )
+    if cached_input_tokens is None:
+        cached_input_tokens = _usage_value(
+            prompt_details, "cached_tokens", "cached_input_tokens", "cache_read_input_tokens"
+        )
     fields = {
         "prompt_tokens": _usage_value(usage, "prompt_tokens", "prompt_token_count"),
         "output_tokens": _usage_value(
@@ -162,9 +181,31 @@ def _usage_for_telemetry(usage: object) -> dict[str, int] | None:
             completion_details, "reasoning_tokens", "thoughts_token_count"
         ),
         "total_tokens": _usage_value(usage, "total_tokens", "total_token_count"),
+        # Cache usage is provider-owned.  Keep it absent when the provider
+        # does not report it; callers must never infer a cache hit locally.
+        "cached_input_tokens": cached_input_tokens,
     }
     normalized = {name: value for name, value in fields.items() if value is not None}
     return normalized or None
+
+
+async def _emit_plan_event(
+    request: "PlanAgentRequest",
+    event: str,
+    **payload: Any,
+) -> None:
+    """Forward one bounded lifecycle event to the route owner's telemetry UI."""
+
+    callback = request.telemetry_callback
+    if callback is None:
+        return
+    await callback({
+        "source": "plan_agent",
+        "event": event,
+        "plan_run_id": request.plan_run_id,
+        "plan_attempt": request.plan_attempt,
+        **payload,
+    })
 
 
 async def _emit_plan_telemetry(
@@ -175,20 +216,46 @@ async def _emit_plan_telemetry(
     output_kind: str,
     tool_names: list[str],
     usage: object,
+    model_elapsed_ms: int,
 ) -> None:
     """Forward one real model-output usage record to the request owner."""
 
-    callback = request.telemetry_callback
-    if callback is None:
-        return
-    await callback({
-        "source": "plan_agent",
-        "provider": provider,
-        "step": step,
-        "output_kind": output_kind,
-        "tool_names": tool_names,
-        "usage": _usage_for_telemetry(usage),
-    })
+    await _emit_plan_event(
+        request,
+        "plan_model_response_received",
+        provider=provider,
+        step=step,
+        output_kind=output_kind,
+        tool_names=tool_names,
+        usage=_usage_for_telemetry(usage),
+        model_elapsed_ms=model_elapsed_ms,
+    )
+
+
+async def _emit_plan_context_built(
+    request: "PlanAgentRequest",
+    *,
+    provider: str,
+    payload: Mapping[str, Any],
+    system_instruction: str,
+    context_build_ms: int,
+) -> None:
+    await _emit_plan_event(
+        request,
+        "plan_context_built",
+        provider=provider,
+        context_build_ms=context_build_ms,
+        payload_bytes=_payload_bytes(payload),
+        system_prompt_bytes=len(system_instruction.encode("utf-8")),
+        history_items=len(request.recent_history),
+        assets=len(payload.get("assets", [])),
+        templates=len(payload.get("template_catalog", [])),
+        widgets=len(payload.get("widget_index", [])),
+        capabilities=len(payload.get("capabilities", [])),
+        prior_search_results=_bundle_summary(request.initial_bundle).get("search_result_count", 0)
+        if request.initial_bundle is not None
+        else 0,
+    )
 
 
 def _safe_history(value: object) -> tuple[dict[str, str], ...]:
@@ -219,6 +286,8 @@ class PlanAgentRequest:
     runtime_feedback: Mapping[str, Any] | None = None
     session_id: str | None = None
     telemetry_callback: PlanTelemetryCallback | None = None
+    plan_run_id: str | None = None
+    plan_attempt: int = 1
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "domain_id", _text(self.domain_id, "domain_id"))
@@ -246,6 +315,10 @@ class PlanAgentRequest:
             object.__setattr__(self, "session_id", _text(self.session_id, "session_id"))
         if self.telemetry_callback is not None and not callable(self.telemetry_callback):
             raise PlanAgentError("telemetry_callback must be callable.")
+        if self.plan_run_id is not None:
+            object.__setattr__(self, "plan_run_id", _text(self.plan_run_id, "plan_run_id"))
+        if isinstance(self.plan_attempt, bool) or not isinstance(self.plan_attempt, int) or self.plan_attempt < 1:
+            raise PlanAgentError("plan_attempt must be a positive integer.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -348,6 +421,7 @@ class PlanAgent:
 
         if not self._settings.plan_agent_api_key:
             raise PlanAgentError("GEMINI_API_KEY is not configured for the Plan Agent.")
+        context_started = time.perf_counter()
         try:
             resources = self._domain_registry.load(request.domain_id)
             capabilities = self._domain_gateway.capability_catalog(request.domain_id)
@@ -384,12 +458,20 @@ class PlanAgent:
             payload["compiler_feedback"] = dict(request.validation_feedback)
         if request.runtime_feedback is not None:
             payload["runtime_feedback"] = dict(request.runtime_feedback)
+        system_instruction = self._prompt_builder.build(domain_instruction=resources.plan_instruction)
+        await _emit_plan_context_built(
+            request,
+            provider="gemini",
+            payload=payload,
+            system_instruction=system_instruction,
+            context_build_ms=round((time.perf_counter() - context_started) * 1000),
+        )
         messages: list[types.Content] = [
             types.Content(role="user", parts=[types.Part(text=json.dumps(payload, ensure_ascii=False))])
         ]
         client = self._client_factory(api_key=self._settings.plan_agent_api_key)
         config = types.GenerateContentConfig(
-            system_instruction=self._prompt_builder.build(domain_instruction=resources.plan_instruction),
+            system_instruction=system_instruction,
             tools=[gemini_tools(capabilities)],
             automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
         )
@@ -399,15 +481,27 @@ class PlanAgent:
         described_template_ids: set[str] = set()
 
         while True:
+            step = tool_call_count + 1
+            await _emit_plan_event(
+                request,
+                "plan_model_request_sent",
+                provider="gemini",
+                step=step,
+                model_messages=len(messages),
+                prior_tool_results=tool_call_count,
+            )
+            model_started = time.perf_counter()
             response = await self._generate_response(client, messages, config)
+            model_elapsed_ms = round((time.perf_counter() - model_started) * 1000)
             calls = _function_calls(response)
             await _emit_plan_telemetry(
                 request,
                 provider="gemini",
-                step=tool_call_count + 1,
+                step=step,
                 output_kind="tool_call" if calls else "final_json",
                 tool_names=[str(getattr(call, "name", "")) for call in calls],
                 usage=getattr(response, "usage_metadata", None),
+                model_elapsed_ms=model_elapsed_ms,
             )
             logger.info(
                 "[PLAN_AGENT_MODEL_STEP] provider=gemini tool_calls_used=%d/%d calls=%s",
@@ -416,7 +510,8 @@ class PlanAgent:
                 [getattr(call, "name", None) for call in calls],
             )
             if not calls:
-                return self._final_result(
+                final_parse_started = time.perf_counter()
+                result = self._final_result(
                     response,
                     request.domain_id,
                     resources,
@@ -424,6 +519,15 @@ class PlanAgent:
                     described_widget_ids=described_widget_ids,
                     described_template_ids=described_template_ids,
                 )
+                await _emit_plan_event(
+                    request,
+                    "plan_final_json_parsed",
+                    provider="gemini",
+                    step=step,
+                    parse_ms=round((time.perf_counter() - final_parse_started) * 1000),
+                    action=result.command.to_dict()["action"],
+                )
+                return result
             if tool_limit_feedback_sent:
                 raise PlanAgentError("Plan Agent called a tool after receiving tool_limit_reached.")
 
@@ -459,6 +563,15 @@ class PlanAgent:
                         )
                     ))
                     continue
+                await _emit_plan_event(
+                    request,
+                    "plan_tool_execution_started",
+                    provider="gemini",
+                    step=tool_call_count + call_index,
+                    tool_name=str(name),
+                    arguments_bytes=_payload_bytes(arguments),
+                )
+                tool_started = time.perf_counter()
                 tool_result = self._execute_tool(
                     name=name,
                     arguments=arguments,
@@ -472,6 +585,16 @@ class PlanAgent:
                 described_widget_ids.update(tool_result.described_widget_ids)
                 if tool_result.described_template_id is not None:
                     described_template_ids.add(tool_result.described_template_id)
+                await _emit_plan_event(
+                    request,
+                    "plan_tool_result_received",
+                    provider="gemini",
+                    step=tool_call_count + call_index,
+                    tool_name=str(name),
+                    tool_elapsed_ms=round((time.perf_counter() - tool_started) * 1000),
+                    result_bytes=_payload_bytes(response_data),
+                    bundle=_bundle_summary(bundle),
+                )
                 logger.info(
                     "[PLAN_AGENT_TOOL_RESPONSE] provider=gemini step=%d name=%s response=%s bundle=%s",
                     tool_call_count + call_index,
@@ -488,12 +611,21 @@ class PlanAgent:
                 ))
             tool_call_count += min(len(calls), max(0, remaining_tool_calls))
             messages.append(types.Content(role="user", parts=function_responses))
+            await _emit_plan_event(
+                request,
+                "plan_tool_results_appended",
+                provider="gemini",
+                step=tool_call_count,
+                appended_results=len(function_responses),
+                next_step=tool_call_count + 1,
+            )
 
     async def _plan_with_cerebras(self, request: PlanAgentRequest) -> PlanAgentResult:
         """Run the same agent loop through Cerebras' OpenAI-compatible API."""
 
         if not self._settings.cerebras_api_key:
             raise PlanAgentError("CEREBRAS_API_KEY is not configured for the Plan Agent.")
+        context_started = time.perf_counter()
         try:
             resources = self._domain_registry.load(request.domain_id)
             capabilities = self._domain_gateway.capability_catalog(request.domain_id)
@@ -530,10 +662,18 @@ class PlanAgent:
             payload["compiler_feedback"] = dict(request.validation_feedback)
         if request.runtime_feedback is not None:
             payload["runtime_feedback"] = dict(request.runtime_feedback)
+        system_instruction = self._prompt_builder.build(domain_instruction=resources.plan_instruction)
+        await _emit_plan_context_built(
+            request,
+            provider="cerebras",
+            payload=payload,
+            system_instruction=system_instruction,
+            context_build_ms=round((time.perf_counter() - context_started) * 1000),
+        )
         messages: list[dict[str, Any]] = [
             {
                 "role": "system",
-                "content": self._prompt_builder.build(domain_instruction=resources.plan_instruction),
+                "content": system_instruction,
             },
             {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
         ]
@@ -547,6 +687,16 @@ class PlanAgent:
         described_template_ids: set[str] = set()
 
         while True:
+            step = tool_call_count + 1
+            await _emit_plan_event(
+                request,
+                "plan_model_request_sent",
+                provider="cerebras",
+                step=step,
+                model_messages=len(messages),
+                prior_tool_results=tool_call_count,
+            )
+            model_started = time.perf_counter()
             try:
                 completion = await client.chat.completions.create(
                     model=self._settings.cerebras_planner_model,
@@ -562,6 +712,8 @@ class PlanAgent:
                 )
                 raise PlanAgentError("Plan Agent did not return a planning response.") from exc
 
+            model_elapsed_ms = round((time.perf_counter() - model_started) * 1000)
+
             choices = getattr(completion, "choices", None) or ()
             if not choices:
                 raise PlanAgentError("Cerebras returned no planning choice.")
@@ -570,13 +722,14 @@ class PlanAgent:
             await _emit_plan_telemetry(
                 request,
                 provider="cerebras",
-                step=tool_call_count + 1,
+                step=step,
                 output_kind="tool_call" if calls else "final_json",
                 tool_names=[
                     str(getattr(getattr(call, "function", None), "name", ""))
                     for call in calls
                 ],
                 usage=getattr(completion, "usage", None),
+                model_elapsed_ms=model_elapsed_ms,
             )
             logger.info(
                 "[PLAN_AGENT_MODEL_STEP] provider=cerebras tool_calls_used=%d/%d calls=%s",
@@ -585,7 +738,8 @@ class PlanAgent:
                 [getattr(getattr(call, "function", None), "name", None) for call in calls],
             )
             if not calls:
-                return self._final_result_from_text(
+                final_parse_started = time.perf_counter()
+                result = self._final_result_from_text(
                     getattr(message, "content", None),
                     request.domain_id,
                     resources,
@@ -593,6 +747,15 @@ class PlanAgent:
                     described_widget_ids=described_widget_ids,
                     described_template_ids=described_template_ids,
                 )
+                await _emit_plan_event(
+                    request,
+                    "plan_final_json_parsed",
+                    provider="cerebras",
+                    step=step,
+                    parse_ms=round((time.perf_counter() - final_parse_started) * 1000),
+                    action=result.command.to_dict()["action"],
+                )
+                return result
             if tool_limit_feedback_sent:
                 raise PlanAgentError("Plan Agent called a tool after receiving tool_limit_reached.")
 
@@ -630,6 +793,15 @@ class PlanAgent:
                         "content": json.dumps(response_data, ensure_ascii=False),
                     })
                     continue
+                await _emit_plan_event(
+                    request,
+                    "plan_tool_execution_started",
+                    provider="cerebras",
+                    step=tool_call_count + call_index,
+                    tool_name=str(name),
+                    arguments_bytes=_payload_bytes(arguments),
+                )
+                tool_started = time.perf_counter()
                 tool_result = self._execute_tool(
                     name=name,
                     arguments=arguments,
@@ -643,6 +815,16 @@ class PlanAgent:
                 described_widget_ids.update(tool_result.described_widget_ids)
                 if tool_result.described_template_id is not None:
                     described_template_ids.add(tool_result.described_template_id)
+                await _emit_plan_event(
+                    request,
+                    "plan_tool_result_received",
+                    provider="cerebras",
+                    step=tool_call_count + call_index,
+                    tool_name=str(name),
+                    tool_elapsed_ms=round((time.perf_counter() - tool_started) * 1000),
+                    result_bytes=_payload_bytes(response_data),
+                    bundle=_bundle_summary(bundle),
+                )
                 logger.info(
                     "[PLAN_AGENT_TOOL_RESPONSE] provider=cerebras step=%d name=%s response=%s bundle=%s",
                     tool_call_count + call_index,
@@ -655,6 +837,14 @@ class PlanAgent:
                     "tool_call_id": getattr(call, "id", None),
                     "content": json.dumps(response_data, ensure_ascii=False),
                 })
+                await _emit_plan_event(
+                    request,
+                    "plan_tool_results_appended",
+                    provider="cerebras",
+                    step=tool_call_count + call_index,
+                    appended_results=1,
+                    next_step=tool_call_count + call_index + 1,
+                )
             tool_call_count += min(len(calls), max(0, remaining_tool_calls))
 
     def _describe_widgets(

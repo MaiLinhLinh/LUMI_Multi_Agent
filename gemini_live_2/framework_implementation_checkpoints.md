@@ -294,7 +294,7 @@ công sau khi CP11 nối `present_visual` với PanelIR.
 **Tiêu chí xong:** Gemini gọi anchor trong PanelIR, effect đúng vùng và đồng bộ audio như project cũ.
 
 **Kết quả:** `present_visual` nay xác thực trực tiếp trên `ActivePanelState.panel_ir.anchor_map`:
-anchor phải tồn tại trong PanelIR hiện hành, effect phải thuộc `allowed_effect_ids`, rồi backend
+anchor phải tồn tại trong PanelIR hiện hành, effect phải tồn tại trong `EffectRegistry`, rồi backend
 trả target compiler đã tạo. Lớp `ActivePresentationState` cũ đã bị gỡ để không còn hai nguồn
 anchor map. Cue giữ nguyên cơ chế server marker → PCM → AudioContext → effect, đồng thời mang
 `panel_id` và `panel_revision`. Payload PanelIR gửi browser cũng mang revision; browser chỉ arm
@@ -306,10 +306,12 @@ anchor PanelIR, revision browser payload và từ chối anchor lạ. Toàn bộ
 **Bổ sung sau CP11:** `DomainManifest` nay có `presentation_prompt_path` và
 `presentation_prompt_constant`; `DomainRegistry` generic nạp prompt thành
 `DomainResources.presentation_instruction`. Education đã khai báo
-`prompt.py:EDUCATION_PRESENTATION_INSTRUCTION`. Sau `route_request`, function response
-trả prompt domain + ASCII map + effects; khi Live mở/kết nối lại, system instruction
-khôi phục history gần + prompt domain + ASCII map + effects của ActivePanel hiện tại.
-Đã chạy 36 unit tests, `compileall` và import `web_app` thành công.
+`prompt.py:EDUCATION_PRESENTATION_INSTRUCTION`. Khi Gemini Live mở, system instruction
+chỉ chứa Core Live guidance, Presentation context guidance chung và history gần. Lần đầu
+Gemini gọi `route_request` cho một domain trong connection hiện tại, tool response
+`status="planning"` kèm đúng một `domain_presentation_instruction`. Sau Plan/Compiler,
+`SURFACE_READY` chỉ gửi `surface_id`, `revision`, Visual Stage Map và `visual_effects`,
+kèm nhắc ngắn áp dụng các presentation rules đã thiết lập.
 
 **Bổ sung sau CP11 — ASCII và anchor cho Live:** Compiler nay cấp anchor ngắn
 theo thứ tự trực quan `a`, `b`, `c`… cùng effect policy kỹ thuật của widget.
