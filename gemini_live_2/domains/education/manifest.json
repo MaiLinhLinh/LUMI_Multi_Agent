@@ -1,10 +1,7 @@
 {
   "domain_id": "education",
-  "asset_catalog_path": "assets/catalog.json",
-  "template_catalog_path": "plans/catalog.json",
   "presentation_prompt_path": "prompt.py",
   "presentation_prompt_constant": "EDUCATION_PRESENTATION_INSTRUCTION",
   "plan_prompt_path": "plan_prompt.py",
-  "plan_prompt_constant": "EDUCATION_PLAN_INSTRUCTION",
-  "tool_capabilities": []
+  "plan_prompt_constant": "EDUCATION_PLAN_INSTRUCTION"
 }

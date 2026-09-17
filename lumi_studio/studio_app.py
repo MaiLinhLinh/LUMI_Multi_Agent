@@ -652,15 +652,6 @@ async def api_save_prompt(request: Request) -> JSONResponse:
     return JSONResponse(_prompt_payload(spec, include_content=True))
 
 
-def _starter_svg(domain_id: str) -> str:
-    return f'''<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360">
-  <rect width="640" height="360" rx="32" fill="#eaf4ff"/>
-  <circle cx="320" cy="145" r="72" fill="#6aa9e9"/>
-  <path d="M285 145h70M320 110v70" stroke="#fff" stroke-width="20" stroke-linecap="round"/>
-  <text x="320" y="275" text-anchor="middle" font-family="Arial" font-size="26" fill="#173a5e">{domain_id} starter asset</text>
-</svg>'''
-
-
 async def api_domains(_: Request) -> JSONResponse:
     source_ids = []
     domains_root = PROJECT_ROOT / "domains"
@@ -681,15 +672,13 @@ async def api_create_domain(request: Request) -> JSONResponse:
     if not presentation_prompt or not plan_prompt:
         raise StudioError("Cần nhập cả prompt trình bày Gemini Live và prompt Plan Agent.")
     root = DRAFT_DOMAINS_ROOT / domain_id
-    (root / "assets").mkdir(parents=True)
+    root.mkdir(parents=True)
     manifest = {
         "domain_id": domain_id,
-        "asset_catalog_path": "assets/catalog.json",
         "presentation_prompt_path": "prompt.py",
         "presentation_prompt_constant": f"{domain_id.upper()}_PRESENTATION_INSTRUCTION",
         "plan_prompt_path": "plan_prompt.py",
         "plan_prompt_constant": f"{domain_id.upper()}_PLAN_INSTRUCTION",
-        "tool_capabilities": [],
     }
     (root / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     (root / "prompt.py").write_text(
@@ -702,19 +691,6 @@ async def api_create_domain(request: Request) -> JSONResponse:
         f'{manifest["plan_prompt_constant"]} = """\n{plan_prompt}\n""".strip()\n',
         encoding="utf-8",
     )
-    (root / "assets" / "starter.svg").write_text(_starter_svg(domain_id), encoding="utf-8")
-    assets = {
-        "domain_id": domain_id,
-        "assets": [{
-            "id": "starter",
-            "kind": "image",
-            "path": "assets/starter.svg",
-            "mime_type": "image/svg+xml",
-            "caption": f"Ảnh khởi đầu của domain {domain_id}.",
-            "tags": [domain_id, "starter"],
-        }],
-    }
-    (root / "assets" / "catalog.json").write_text(json.dumps(assets, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return JSONResponse({"domain_id": domain_id, "draft_path": str(root), "validation": _validate_current_draft()}, status_code=201)
 
 

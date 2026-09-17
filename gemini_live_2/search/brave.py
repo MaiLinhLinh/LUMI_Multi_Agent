@@ -66,28 +66,6 @@ class BraveImageResult:
     caption: str
 
 
-class BraveSearchQuota:
-    """In-memory per-Live-session guard; attachment to tool execution is AF3."""
-
-    def __init__(self, *, max_requests_per_session: int) -> None:
-        if isinstance(max_requests_per_session, bool) or not isinstance(max_requests_per_session, int):
-            raise ValueError("max_requests_per_session must be an integer.")
-        if max_requests_per_session < 1:
-            raise ValueError("max_requests_per_session must be at least 1.")
-        self._max_requests = max_requests_per_session
-        self._used_by_session: dict[str, int] = {}
-
-    def consume(self, session_id: str) -> None:
-        safe_session_id = _text(session_id, field="session_id")
-        used = self._used_by_session.get(safe_session_id, 0)
-        if used >= self._max_requests:
-            raise BraveSearchError("Search quota reached for this Live session.")
-        self._used_by_session[safe_session_id] = used + 1
-
-    def reset(self, session_id: str) -> None:
-        self._used_by_session.pop(_text(session_id, field="session_id"), None)
-
-
 class BraveSearchClient:
     """Synchronous, dependency-free Brave API client with a fixed safe policy."""
 

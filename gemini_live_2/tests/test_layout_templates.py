@@ -79,6 +79,7 @@ class LayoutTemplateTests(unittest.TestCase):
 
         plan = self.materializer.materialize(
             template=template,
+            domain_id="education",
             bindings={
                 "$block_1_content": "Cùng quan sát hai bạn mèo nhé!",
                 "$block_2_asset_id": "cat",
@@ -108,10 +109,11 @@ class LayoutTemplateTests(unittest.TestCase):
         )
 
         with self.assertRaisesRegex(LayoutTemplateError, "missing bindings"):
-            self.materializer.materialize(template=template, bindings={})
+            self.materializer.materialize(template=template, domain_id="education", bindings={})
         with self.assertRaisesRegex(LayoutTemplateError, "unexpected bindings"):
             self.materializer.materialize(
                 template=template,
+                domain_id="education",
                 bindings={"$block_1_asset_id": "dog", "$extra": "cat"},
             )
 
@@ -138,6 +140,7 @@ class LayoutTemplateTests(unittest.TestCase):
         self.assertEqual(template.blocks[0].children[1].props["content"], "$block_1_child_2_content")
         restored = self.materializer.materialize(
             template=template,
+            domain_id="education",
             bindings={
                 "$block_1_child_1_asset_id": "dog",
                 "$block_1_child_2_content": "Chó",

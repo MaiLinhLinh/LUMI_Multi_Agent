@@ -9,6 +9,7 @@ import logging
 import re
 import time
 import uuid
+from collections import deque
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Any
@@ -21,6 +22,7 @@ from gemini_live_2.settings import Settings
 from gemini_live_2.trace import begin_turn, trace, warning
 
 from .orchestrator import LiveSessionOrchestrator
+from .progress_reporter import PlanProgress, ProgressReporter, ToolResultAvailable
 from .guide_prompt import (
     panel_interaction_message,
     PRESENTATION_CONTEXT_GUIDANCE,
@@ -223,6 +225,10 @@ class PersistentGeminiLiveConversation:
         self._output_turn_id: str | None = None
         self._pending_route_task: asyncio.Task[None] | None = None
         self._pending_surface_ready: dict[str, Any] | None = None
+        self._current_plan_run_id: str | None = None
+        self._pending_plan_progress: deque[PlanProgress] = deque()
+        self._plan_progress_delivery_task: asyncio.Task[None] | None = None
+        self._progress_reporter = ProgressReporter()
         self._route_bridge_turn_pending = False
         self._loaded_domain_presentation_ids: set[str] = set()
 
@@ -363,6 +369,7 @@ class PersistentGeminiLiveConversation:
                     })
                     self._reset_voice_turn_tracking()
                     await self._complete_route_bridge_if_needed()
+                    await self._release_pending_route_context()
         raise GeminiLiveSessionError("Gemini Live connection closed while microphone streaming.")
 
     async def close(self) -> None:
@@ -548,7 +555,10 @@ class PersistentGeminiLiveConversation:
         elif event == "plan_run_completed":
             content = f"run={run_id} · total={payload.get('total_elapsed_ms')}ms · revision={payload.get('revision')}"
         elif event == "plan_run_failed":
-            content = f"run={run_id} · total={payload.get('total_elapsed_ms')}ms · error={payload.get('error_type')}"
+            content = (
+                f"run={run_id} · total={payload.get('total_elapsed_ms')}ms · "
+                f"error={payload.get('error_type')} · detail={payload.get('error_detail', 'unknown')}"
+            )
         else:
             content = f"run={run_id}"
         await self._on_event({
@@ -606,6 +616,7 @@ class PersistentGeminiLiveConversation:
                 if await self._handle_turn_complete():
                     bridge_turn_completed = self._route_bridge_turn_pending
                     await self._complete_route_bridge_if_needed()
+                    await self._release_pending_route_context()
                     if bridge_turn_completed:
                         continue
                     return self._finish_turn()
@@ -721,6 +732,7 @@ class PersistentGeminiLiveConversation:
         await self._cancel_pending_route_task(wait=False)
         self._route_bridge_turn_pending = True
         plan_run_id = uuid.uuid4().hex[:8]
+        self._current_plan_run_id = plan_run_id
         domain_id = arguments.get("domain_id")
         intent = arguments.get("intent")
         await self._emit_plan_telemetry({
@@ -756,8 +768,16 @@ class PersistentGeminiLiveConversation:
         """Cancel the one in-flight route task and discard its pending context."""
 
         task, self._pending_route_task = self._pending_route_task, None
+        progress_delivery, self._plan_progress_delivery_task = self._plan_progress_delivery_task, None
         self._pending_surface_ready = None
+        self._pending_plan_progress.clear()
+        self._current_plan_run_id = None
         self._route_bridge_turn_pending = False
+        if progress_delivery is not None and not progress_delivery.done():
+            progress_delivery.cancel()
+            if wait:
+                with contextlib.suppress(asyncio.CancelledError):
+                    await progress_delivery
         if task is None or task.done():
             return
         task.cancel()
@@ -778,6 +798,9 @@ class PersistentGeminiLiveConversation:
         run_started = time.perf_counter()
 
         async def telemetry(payload: dict[str, Any]) -> None:
+            if payload.get("event") == "tool_result_available":
+                await self._queue_plan_progress(plan_run_id, payload)
+                return
             await self._emit_plan_telemetry({"plan_run_id": plan_run_id, **payload})
 
         await telemetry({
@@ -801,6 +824,7 @@ class PersistentGeminiLiveConversation:
                 "event": "plan_run_failed",
                 "total_elapsed_ms": round((time.perf_counter() - run_started) * 1000),
                 "error_type": type(exc).__name__,
+                "error_detail": " ".join(str(exc).split())[:500],
             })
             await self._queue_surface_result(this_task, None)
             return
@@ -849,18 +873,92 @@ class PersistentGeminiLiveConversation:
             else {"kind": "failed"}
         )
         if not self._route_bridge_turn_pending:
-            await self._deliver_pending_surface_result()
+            await self._release_pending_route_context()
 
     async def _complete_route_bridge_if_needed(self) -> None:
         """Release a planned surface once Gemini has finished its bridge turn."""
 
         if self._route_bridge_turn_pending:
             self._route_bridge_turn_pending = False
+            await self._release_pending_route_context()
+
+    async def _queue_plan_progress(self, plan_run_id: str, payload: dict[str, Any]) -> None:
+        """Keep a verified result fact for the current route without exposing raw tool data."""
+
+        if plan_run_id != self._current_plan_run_id:
+            return
+        tool_name = payload.get("tool_name")
+        arguments = payload.get("arguments")
+        response = payload.get("response")
+        if not isinstance(tool_name, str) or not isinstance(arguments, dict) or not isinstance(response, dict):
+            return
+        progress = self._progress_reporter.build(ToolResultAvailable(
+            plan_run_id=plan_run_id,
+            tool_name=tool_name,
+            arguments=arguments,
+            response=response,
+        ))
+        if progress is None:
+            return
+        self._pending_plan_progress.append(progress)
+        if not self._route_bridge_turn_pending and self.state is LiveSessionState.LISTENING:
+            self._schedule_plan_progress_delivery()
+
+    def _schedule_plan_progress_delivery(self) -> None:
+        """Use one session-owned task to preserve FIFO without blocking the Plan Agent."""
+
+        if (
+            not self._pending_plan_progress
+            or self._route_bridge_turn_pending
+            or self.state is not LiveSessionState.LISTENING
+            or (self._plan_progress_delivery_task is not None and not self._plan_progress_delivery_task.done())
+        ):
+            return
+        self._plan_progress_delivery_task = asyncio.create_task(
+            self._deliver_pending_plan_progress(),
+            name=f"lumi-plan-progress:{self._session_id}",
+        )
+
+    async def _release_pending_route_context(self) -> None:
+        """Deliver result facts first, then the completed surface context for the same route."""
+
+        if self._route_bridge_turn_pending or self.state is LiveSessionState.SPEAKING:
+            return
+        if self._pending_plan_progress:
+            self._schedule_plan_progress_delivery()
+            return
+        if self._plan_progress_delivery_task is None or self._plan_progress_delivery_task.done():
             await self._deliver_pending_surface_result()
+
+    async def _deliver_pending_plan_progress(self) -> None:
+        """Send each queued fact as its own trusted input, in FIFO order."""
+
+        this_task = asyncio.current_task()
+        try:
+            while (
+                self._pending_plan_progress
+                and not self._route_bridge_turn_pending
+                and self.state is LiveSessionState.LISTENING
+            ):
+                progress = self._pending_plan_progress.popleft()
+                if progress.plan_run_id != self._current_plan_run_id:
+                    continue
+                await self._transport.send_text(
+                    "PLAN_PROGRESS\nPlan Agent báo: " + progress.message,
+                )
+        finally:
+            if self._plan_progress_delivery_task is this_task:
+                self._plan_progress_delivery_task = None
+        await self._release_pending_route_context()
 
     async def _deliver_pending_surface_result(self) -> None:
         """Inject the completed planning result as a new trusted Gemini input."""
 
+        if self.state is LiveSessionState.SPEAKING:
+            return
+        if self._pending_plan_progress:
+            self._schedule_plan_progress_delivery()
+            return
         pending = self._pending_surface_ready
         if pending is None:
             return
@@ -874,6 +972,7 @@ class PersistentGeminiLiveConversation:
         if self._pending_surface_ready is pending:
             self._pending_surface_ready = None
             self._pending_route_task = None
+            self._current_plan_run_id = None
 
 
     async def _handle_present_visual(self, args: dict[str, Any]) -> dict[str, Any]:

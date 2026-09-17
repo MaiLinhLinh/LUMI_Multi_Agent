@@ -201,10 +201,9 @@ class TemplateBinding:
 
 @dataclass(frozen=True, slots=True)
 class LayoutTemplate:
-    """A domain-owned reusable frame with binding placeholders in its props."""
+    """A shared reusable frame with binding placeholders in its props."""
 
     template_id: str
-    domain_id: str
     description: str
     blocks: tuple[PlanBlock, ...]
     bindings: tuple[TemplateBinding, ...]
@@ -212,7 +211,6 @@ class LayoutTemplate:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "template_id", _text(self.template_id, "layout_template.id"))
-        object.__setattr__(self, "domain_id", _text(self.domain_id, "layout_template.domain_id"))
         object.__setattr__(self, "description", _text(self.description, "layout_template.description"))
         if not isinstance(self.blocks, tuple) or not self.blocks or not all(isinstance(block, PlanBlock) for block in self.blocks):
             raise LayoutTemplateError("layout_template.blocks must contain PlanBlock values.")
@@ -262,7 +260,6 @@ class LayoutTemplate:
     def to_dict(self) -> dict[str, Any]:
         return {
             "template_id": self.template_id,
-            "domain_id": self.domain_id,
             "description": self.description,
             "blocks": [block.to_dict() for block in self.blocks],
             "bindings": [binding.to_dict() for binding in self.bindings],
@@ -285,7 +282,6 @@ class LayoutTemplate:
             raise LayoutTemplateError(str(exc)) from exc
         return cls(
             template_id=value.get("template_id"),
-            domain_id=value.get("domain_id"),
             description=value.get("description"),
             blocks=blocks,
             bindings=tuple(TemplateBinding.from_dict(item) for item in raw_bindings),
@@ -310,6 +306,7 @@ class LayoutTemplateMaterializer:
         *,
         template: LayoutTemplate,
         bindings: Mapping[str, Any],
+        domain_id: str,
     ) -> PresentationPlan:
         if not isinstance(bindings, Mapping):
             raise LayoutTemplateError("template bindings must be an object.")
@@ -358,7 +355,7 @@ class LayoutTemplateMaterializer:
             ))
 
         return PresentationPlan(
-            domain_id=template.domain_id,
+            domain_id=_text(domain_id, "materialized plan.domain_id"),
             template_id=template.template_id,
             blocks=tuple(blocks),
         )
@@ -464,7 +461,6 @@ class TemplateExtractor:
 
         return LayoutTemplate(
             template_id=template_id,
-            domain_id=plan.domain_id,
             description=description,
             blocks=tuple(blocks),
             bindings=tuple(bindings),

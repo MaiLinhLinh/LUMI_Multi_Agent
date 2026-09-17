@@ -287,15 +287,15 @@ Không thêm prompt vào tool response `{"status":"planning"}`. Nếu được d
 
 ## 10. Checklist thực hiện
 
-- [ ] Xác nhận vị trí phát event trong hai tool loops.
-- [ ] Thêm metadata `describe_widgets`, tách provider schema.
-- [ ] Tạo `live/progress_reporter.py` và test formatter.
-- [ ] Phát event chỉ cho successful result.
-- [ ] Nhận event/dựng `PlanProgress` trong session.
-- [ ] FIFO, delivery khi rảnh và sau turn complete.
-- [ ] Progress trước `SURFACE_READY` cùng run.
-- [ ] Dọn stale progress khi cancel route.
-- [ ] Viết và chạy test Plan/Live routing.
+- [x] Xác nhận vị trí phát event trong hai tool loops.
+- [x] Thêm metadata `describe_widgets`, tách provider schema.
+- [x] Tạo `live/progress_reporter.py` và test formatter.
+- [x] Phát event chỉ cho successful result.
+- [x] Nhận event/dựng `PlanProgress` trong session.
+- [x] FIFO, delivery khi rảnh và sau turn complete.
+- [x] Progress trước `SURFACE_READY` cùng run.
+- [x] Dọn stale progress khi cancel route.
+- [x] Viết và chạy test Plan/Live routing trong phạm vi thay đổi (29 tests pass).
 - [ ] **Dừng, hỏi người dùng trước khi sửa `live/registry.py`.**
 
 ## 11. Tiêu chí nghiệm thu
@@ -308,4 +308,3 @@ Không thêm prompt vào tool response `{"status":"planning"}`. Nếu được d
 - [ ] Gemini đang nói không bị chen lời; Gemini rảnh nhận report ngay.
 - [ ] Route mới không nhận report hay `SURFACE_READY` từ route cũ.
 - [ ] Không có progress chờ thì `SURFACE_READY` giữ nguyên hành vi.
-

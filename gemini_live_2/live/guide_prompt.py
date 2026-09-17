@@ -92,6 +92,12 @@ QUY TẮC HIỆN NỘI DUNG ĐANG ẨN
 update_surface_state với hai updates cho anchor_id="d" và anchor_id="e",
 đều có changes={"visibility":"visible"}.
 - Không cập nhật lại vùng mà map mới đã ghi là đang hiển thị.
+
+QUY TẮC TRÌNH BÀY:
+Bất cứ lúc nào tương tác với người dùng:
+- Hãy trình bày một cách đầy đủ từ đầu đến cuối, có tính tương tác, không chỉ nói một câu rồi dừng. Bắt buộc phải gọi present_visual cho từng vùng trước khi nói về vùng đó.
+- Không được nói khi chưa gọi present_visual.
+
 """.strip()
 
 

@@ -1,4 +1,4 @@
-"""Validated, domain-scoped asset catalogs.
+"""Validated shared asset catalogs.
 
 The catalog is the only asset inventory later given to the Plan Agent.  Paths
 remain server-side here; the browser URL is deliberately a renderer concern.
@@ -64,13 +64,15 @@ class AssetDescriptor:
 
 @dataclass(frozen=True, slots=True)
 class AssetCatalog:
-    domain_id: str
+    resource_root: Path
     assets: tuple[AssetDescriptor, ...]
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "domain_id", _text(self.domain_id, "catalog.domain_id"))
-        if not isinstance(self.assets, tuple) or not self.assets:
-            raise AssetCatalogError("catalog.assets must contain at least one asset.")
+        if not isinstance(self.resource_root, Path):
+            raise AssetCatalogError("catalog.resource_root must be a Path.")
+        object.__setattr__(self, "resource_root", self.resource_root.resolve())
+        if not isinstance(self.assets, tuple):
+            raise AssetCatalogError("catalog.assets must be a tuple.")
         if not all(isinstance(asset, AssetDescriptor) for asset in self.assets):
             raise AssetCatalogError("catalog.assets contains an invalid descriptor.")
         ids = [asset.id for asset in self.assets]
@@ -87,34 +89,31 @@ class AssetCatalog:
         return [asset.for_plan_agent() for asset in self.assets]
 
 
-def load_asset_catalog(*, catalog_path: Path, domain_root: Path, expected_domain_id: str) -> AssetCatalog:
-    """Load a JSON catalog whose paths are strictly contained by its domain root."""
+def load_asset_catalog(*, catalog_path: Path, resource_root: Path) -> AssetCatalog:
+    """Load a JSON catalog whose paths are strictly contained by the shared root."""
     try:
         payload = json.loads(catalog_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise AssetCatalogError(f"cannot load asset catalog {catalog_path}: {exc}") from exc
     if not isinstance(payload, Mapping):
         raise AssetCatalogError("asset catalog root must be an object.")
-    domain_id = _text(payload.get("domain_id"), "catalog.domain_id")
-    if domain_id != expected_domain_id:
-        raise AssetCatalogError("asset catalog domain_id does not match the manifest.")
     raw_assets = payload.get("assets")
     if not isinstance(raw_assets, list):
         raise AssetCatalogError("catalog.assets must be an array.")
 
-    resolved_root = domain_root.resolve()
+    resolved_root = resource_root.resolve()
     descriptors: list[AssetDescriptor] = []
     for index, item in enumerate(raw_assets):
         if not isinstance(item, Mapping):
             raise AssetCatalogError(f"catalog.assets[{index}] must be an object.")
         relative_path = Path(_text(item.get("path"), f"catalog.assets[{index}].path"))
         if relative_path.is_absolute():
-            raise AssetCatalogError("asset.path must be relative to the domain root.")
+            raise AssetCatalogError("asset.path must be relative to the shared resource root.")
         asset_path = (resolved_root / relative_path).resolve()
         try:
             asset_path.relative_to(resolved_root)
         except ValueError as exc:
-            raise AssetCatalogError("asset.path escapes the domain root.") from exc
+            raise AssetCatalogError("asset.path escapes the shared resource root.") from exc
         raw_tags = item.get("tags", [])
         if not isinstance(raw_tags, list):
             raise AssetCatalogError("asset.tags must be an array.")
@@ -128,4 +127,4 @@ def load_asset_catalog(*, catalog_path: Path, domain_root: Path, expected_domain
                 tags=tuple(raw_tags),
             )
         )
-    return AssetCatalog(domain_id=domain_id, assets=tuple(descriptors))
+    return AssetCatalog(resource_root=resolved_root, assets=tuple(descriptors))

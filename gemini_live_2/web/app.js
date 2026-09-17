@@ -245,6 +245,67 @@ function appendSurfaceDocumentCoreStyles(root) {
   return style;
 }
 
+function showPlanningSurface() {
+  contentPanel.hidden = false;
+  weatherView.hidden = false;
+  welcome.hidden = true;
+  workspace.classList.remove("no-dashboard");
+  workspace.classList.add("has-dashboard");
+  contentTitle.textContent = "Nội dung trực quan";
+
+  const root = templateHost.shadowRoot || templateHost.attachShadow({ mode: "open" });
+  if (panelInteractionRoot !== root) {
+    panelInteractionRoot?.removeEventListener("panel:interaction", sendPanelInteraction);
+    root.addEventListener("panel:interaction", sendPanelInteraction);
+    panelInteractionRoot = root;
+  }
+
+  const style = document.createElement("style");
+  style.textContent = `
+    .lumi-planning-surface {
+      display: grid;
+      width: 100%;
+      height: 100%;
+      min-height: 100%;
+      place-items: center;
+      background: #fff;
+    }
+    .lumi-planning-spinner {
+      width: 42px;
+      height: 42px;
+      border: 4px solid rgba(14, 165, 233, .18);
+      border-top-color: #0ea5e9;
+      border-radius: 50%;
+      animation: lumi-planning-spin .8s linear infinite;
+    }
+    .lumi-planning-label {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+    @keyframes lumi-planning-spin { to { transform: rotate(360deg); } }
+  `;
+  const loading = document.createElement("div");
+  loading.className = "lumi-planning-surface";
+  loading.setAttribute("role", "status");
+  loading.setAttribute("aria-live", "polite");
+  const spinner = document.createElement("div");
+  spinner.className = "lumi-planning-spinner";
+  spinner.setAttribute("aria-hidden", "true");
+  const label = document.createElement("span");
+  label.className = "lumi-planning-label";
+  label.textContent = "Đang chuẩn bị nội dung trực quan";
+  loading.append(spinner, label);
+  root.replaceChildren(style, loading);
+  animationController.clear();
+}
+
 async function renderPanel(panel, { isUpdate = false } = {}) {
   try {
     await whenExtensionCatalogReady();
@@ -533,6 +594,10 @@ function handleMessage(event) {
     });
     appendEffectExtensionStyles();
   }
+  if (
+    payload.type === "tool_result" && payload.name === "route_request" &&
+    payload.response?.status === "planning"
+  ) showPlanningSurface();
   if (payload.type === "panel") void renderPanel(payload.panel);
   if (payload.type === "panel_update") {
     const revision = Number(payload.panel?.surface?.revision);

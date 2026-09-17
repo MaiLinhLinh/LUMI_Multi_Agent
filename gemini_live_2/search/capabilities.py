@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from typing import Any, Protocol
+from typing import Protocol
 
 from gemini_live_2.panel import DataBundle
 
@@ -27,11 +27,9 @@ class PlanAgentSearchService:
         self,
         *,
         client_factory: Callable[[], SearchClient],
-        quota: Any,
         result_store: SearchResultStore,
     ) -> None:
         self._client_factory = client_factory
-        self._quota = quota
         self._result_store = result_store
 
     def search_web(
@@ -40,7 +38,6 @@ class PlanAgentSearchService:
         safe_query = _query(query)
         safe_session_id = _session_id(session_id)
         try:
-            self._quota.consume(safe_session_id)
             result = self._client_factory().search_web(safe_query)
             result_id = self._result_store.put_web(
                 session_id=safe_session_id,
@@ -66,7 +63,6 @@ class PlanAgentSearchService:
         safe_query = _query(query)
         safe_session_id = _session_id(session_id)
         try:
-            self._quota.consume(safe_session_id)
             result = self._client_factory().search_image(safe_query)
             result_id = self._result_store.put_image(
                 session_id=safe_session_id,

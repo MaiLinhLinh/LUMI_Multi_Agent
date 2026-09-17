@@ -7,6 +7,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from gemini_live_2.catalogs.domains import DomainRegistry
+from gemini_live_2.catalogs.resources import SharedResourceRegistry
 from gemini_live_2.catalogs.templates import load_template_catalog
 from gemini_live_2.catalogs.templates import TemplateCatalogError
 from gemini_live_2.catalogs import LayoutTemplate, LayoutTemplateMaterializer, TemplateExtractor
@@ -20,9 +21,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 class TemplateCatalogTests(unittest.TestCase):
     def setUp(self) -> None:
         self.resources = DomainRegistry(PROJECT_ROOT / "domains").load("education")
+        self.shared = SharedResourceRegistry(PROJECT_ROOT / "resources").load()
 
     def test_catalog_exposes_semantic_entries_without_plan_paths(self) -> None:
-        entries = self.resources.templates.for_plan_agent()
+        entries = self.shared.templates.for_plan_agent()
         comparison = next(entry for entry in entries if entry["id"] == "two_subject_comparison")
         self.assertEqual(
             comparison["description"],
@@ -37,9 +39,10 @@ class TemplateCatalogTests(unittest.TestCase):
         self.assertTrue(all("layout_path" not in entry and "plan_path" not in entry for entry in entries))
 
     def test_catalogued_layout_materializes_before_using_the_same_compiler(self) -> None:
-        layout = self.resources.templates.load_layout_template("two_subject_comparison")
+        layout = self.shared.templates.load_layout_template("two_subject_comparison")
         plan = LayoutTemplateMaterializer().materialize(
             template=layout,
+            domain_id="education",
             bindings={
                 "$block_1_content": "Cùng quan sát hai bạn mèo nhé!",
                 "$block_2_asset_id": "cat",
@@ -48,7 +51,7 @@ class TemplateCatalogTests(unittest.TestCase):
                 "$block_3_label": "Mèo 2",
             },
         )
-        document = PanelCompiler(runtime_widget_registry()).compile_surface_document(
+        document = PanelCompiler(runtime_widget_registry(), asset_catalog=self.shared.assets).compile_surface_document(
             surface_id="catalogued-surface",
             plan=plan,
             data_bundle=DataBundle(domain_id="education", data={}),
@@ -62,7 +65,7 @@ class TemplateCatalogTests(unittest.TestCase):
 
     def test_unknown_template_id_is_rejected_at_the_trusted_loader_boundary(self) -> None:
         with self.assertRaisesRegex(TemplateCatalogError, "unknown template_id"):
-            self.resources.templates.load_layout_template("does_not_exist")
+            self.shared.templates.load_layout_template("does_not_exist")
 
     def test_catalog_persists_and_loads_a_layout_template(self) -> None:
         layout = TemplateExtractor(runtime_widget_registry()).extract(
@@ -76,23 +79,22 @@ class TemplateCatalogTests(unittest.TestCase):
         with TemporaryDirectory() as directory:
             root = Path(directory)
             catalog_path = root / "catalog.json"
-            catalog_path.write_text('{"domain_id":"education","templates":[]}', encoding="utf-8")
+            catalog_path.write_text('{"templates":[]}', encoding="utf-8")
             catalog = load_template_catalog(
                 catalog_path=catalog_path,
-                domain_root=root,
-                expected_domain_id="education",
+                resource_root=root,
             )
 
             saved_catalog = catalog.save_layout_template(layout)
 
             self.assertEqual(saved_catalog.load_layout_template("tm1"), layout)
             self.assertEqual(saved_catalog.next_generated_template_id(), "tm2")
-            self.assertTrue((root / "layouts" / "tm1.layout.json").is_file())
+            self.assertTrue((root / "templates" / "layouts" / "tm1.layout.json").is_file())
 
             deleted_catalog = saved_catalog.delete_layout_template("tm1")
 
             self.assertFalse(deleted_catalog.contains("tm1"))
-            self.assertFalse((root / "layouts" / "tm1.layout.json").exists())
+            self.assertFalse((root / "templates" / "layouts" / "tm1.layout.json").exists())
             self.assertEqual(deleted_catalog.next_generated_template_id(), "tm1")
 
 

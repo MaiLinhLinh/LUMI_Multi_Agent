@@ -1,6 +1,5 @@
 {
   "template_id": "two_subject_comparison",
-  "domain_id": "education",
   "description": "So sánh trực quan hai đối tượng ngang hàng: mỗi bên có ảnh lớn và nhãn ngắn, phù hợp khi trẻ quan sát hai chủ thể.",
   "blocks": [
     {

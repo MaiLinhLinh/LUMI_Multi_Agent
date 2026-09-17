@@ -1,8 +1,8 @@
 .presentation-overlay .lumi-overlay-highlight {
-  fill: rgb(14 165 233 / .08);
-  stroke: #0ea5e9;
-  stroke-width: 3;
-  filter: drop-shadow(0 0 5px rgb(14 165 233 / .38));
+  fill: rgb(14 165 233 / .16);
+  stroke: #0284c7;
+  stroke-width: 4;
+  filter: drop-shadow(0 0 7px rgb(2 132 199 / .52));
   animation: lumi-highlight-frame-in 180ms ease-out both;
 }
 

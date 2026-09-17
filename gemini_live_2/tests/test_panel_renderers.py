@@ -3,6 +3,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from gemini_live_2.catalogs.domains import DomainRegistry
+from gemini_live_2.catalogs.resources import SharedResourceRegistry
 from gemini_live_2.panel import (
     ChoiceChild,
     DataBundle,
@@ -23,7 +24,8 @@ class PanelRendererTests(unittest.TestCase):
     def setUp(self) -> None:
         self.registry = runtime_widget_registry()
         self.resources = DomainRegistry(PROJECT_ROOT / "domains").load("education")
-        self.document = PanelCompiler(self.registry).compile_surface_document(
+        self.assets = SharedResourceRegistry(PROJECT_ROOT / "resources").load().assets
+        self.document = PanelCompiler(self.registry, asset_catalog=self.assets).compile_surface_document(
             domain_resources=self.resources,
             data_bundle=DataBundle(domain_id="education", data={}),
             plan=PresentationPlan(
@@ -83,7 +85,7 @@ class PanelRendererTests(unittest.TestCase):
     def test_client_payload_has_only_used_browser_asset_urls(self) -> None:
         payload = surface_document_client_payload(
             self.document,
-            asset_urls={"dog": "/assets/domains/education/dog", "cat": "/assets/domains/education/cat", "unused": "/no"},
+            asset_urls={"dog": "/assets/resources/dog", "cat": "/assets/resources/cat", "unused": "/no"},
         )
         self.assertEqual(payload["ui_type"], "surface_document")
         self.assertTrue(payload["surface"]["surface_id"].startswith("panel-"))
@@ -95,12 +97,12 @@ class PanelRendererTests(unittest.TestCase):
             "anchor_key": "image",
         })
         self.assertEqual(payload["assets"], [
-            {"id": "cat", "url": "/assets/domains/education/cat"},
-            {"id": "dog", "url": "/assets/domains/education/dog"},
+            {"id": "cat", "url": "/assets/resources/cat"},
+            {"id": "dog", "url": "/assets/resources/dog"},
         ])
 
     def test_client_payload_preserves_block_visibility(self) -> None:
-        hidden_document = PanelCompiler(self.registry).compile_surface_document(
+        hidden_document = PanelCompiler(self.registry, asset_catalog=self.assets).compile_surface_document(
             domain_resources=DomainRegistry(PROJECT_ROOT / "domains").load("education"),
             data_bundle=DataBundle(domain_id="education", data={}),
             plan=PresentationPlan(
@@ -117,14 +119,14 @@ class PanelRendererTests(unittest.TestCase):
         )
         payload = surface_document_client_payload(
             hidden_document,
-            asset_urls={"dog": "/assets/domains/education/dog"},
+            asset_urls={"dog": "/assets/resources/dog"},
         )
         self.assertEqual(payload["surface"]["components"][0]["state"], {"visibility": "hidden"})
         self.assertEqual(payload["surface"]["components"][0]["props"], {})
         self.assertEqual(payload["assets"], [])
 
     def test_client_payload_includes_visible_choice_children_and_their_assets(self) -> None:
-        choice_document = PanelCompiler(self.registry).compile_surface_document(
+        choice_document = PanelCompiler(self.registry, asset_catalog=self.assets).compile_surface_document(
             domain_resources=DomainRegistry(PROJECT_ROOT / "domains").load("education"),
             data_bundle=DataBundle(domain_id="education", data={}),
             plan=PresentationPlan(
@@ -144,19 +146,19 @@ class PanelRendererTests(unittest.TestCase):
         )
         payload = surface_document_client_payload(
             choice_document,
-            asset_urls={"cat": "/assets/domains/education/cat"},
+            asset_urls={"cat": "/assets/resources/cat"},
         )
         component = payload["surface"]["components"][0]
         self.assertEqual(component["children"][0], {"type": "image", "props": {"asset_id": "cat"}})
         self.assertEqual(component["children"][1]["props"]["content"], "Mèo")
-        self.assertEqual(payload["assets"], [{"id": "cat", "url": "/assets/domains/education/cat"}])
+        self.assertEqual(payload["assets"], [{"id": "cat", "url": "/assets/resources/cat"}])
         stage_map = self._stage_map(choice_document)
         self.assertIn("ẢNH: Minh họa một chú mèo", stage_map)
         self.assertIn("Mèo", stage_map)
         self.assertIn("[anchor: a]", stage_map)
 
     def test_stage_map_redacts_hidden_content_then_exposes_it_after_reveal(self) -> None:
-        hidden_document = PanelCompiler(self.registry).compile_surface_document(
+        hidden_document = PanelCompiler(self.registry, asset_catalog=self.assets).compile_surface_document(
             domain_resources=DomainRegistry(PROJECT_ROOT / "domains").load("education"),
             data_bundle=DataBundle(domain_id="education", data={}),
             plan=PresentationPlan(
@@ -196,7 +198,7 @@ class PanelRendererTests(unittest.TestCase):
         self.assertNotIn("Secret dog", revealed_map)
 
     def test_object_group_uses_asset_caption_and_keeps_item_anchors_below_items(self) -> None:
-        document = PanelCompiler(self.registry).compile_surface_document(
+        document = PanelCompiler(self.registry, asset_catalog=self.assets).compile_surface_document(
             domain_resources=self.resources,
             data_bundle=DataBundle(domain_id="education", data={}),
             plan=PresentationPlan(
@@ -215,7 +217,7 @@ class PanelRendererTests(unittest.TestCase):
         self.assertIn("[anchor: a]", stage_map)
 
     def test_flashcard_stage_map_switches_only_the_rendered_face(self) -> None:
-        document = PanelCompiler(self.registry).compile_surface_document(
+        document = PanelCompiler(self.registry, asset_catalog=self.assets).compile_surface_document(
             domain_resources=self.resources,
             data_bundle=DataBundle(domain_id="education", data={}),
             plan=PresentationPlan(
@@ -248,7 +250,7 @@ class PanelRendererTests(unittest.TestCase):
         self.assertIn("[anchor: a]", flipped_map)
 
     def test_flashcard_stage_map_uses_materialized_remote_front_caption(self) -> None:
-        document = PanelCompiler(self.registry).compile_surface_document(
+        document = PanelCompiler(self.registry, asset_catalog=self.assets).compile_surface_document(
             domain_resources=self.resources,
             data_bundle=DataBundle(domain_id="education", data={}),
             plan=PresentationPlan(
@@ -291,7 +293,7 @@ class PanelRendererTests(unittest.TestCase):
         return render_visual_stage_map(
             document,
             widget_registry=self.registry,
-            asset_catalog=self.resources.assets,
+            asset_catalog=self.assets,
         )
 
 

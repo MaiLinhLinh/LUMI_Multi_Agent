@@ -26,11 +26,12 @@ from gemini_live_2.live.orchestrator import LiveSessionOrchestrator
 from gemini_live_2.live.persistent_transport import PersistentLiveTransportStore
 from gemini_live_2.live.registry import LiveToolRegistry
 from gemini_live_2.catalogs.domains import DomainRegistry, ManifestError
+from gemini_live_2.catalogs.resources import SharedResourceRegistry, SharedResourceError
 from gemini_live_2.extension_loader import ExtensionLoader
 from gemini_live_2.gateway import DomainGateway
 from gemini_live_2.panel import PanelCompiler
 from gemini_live_2.plan_agent import PlanAgent
-from gemini_live_2.search import BraveSearchClient, BraveSearchQuota, SearchResultStore
+from gemini_live_2.search import BraveSearchClient, SearchResultStore
 from gemini_live_2.search.capabilities import PlanAgentSearchService
 from gemini_live_2.settings import load_settings
 from gemini_live_2.trace import TRACE_LEVEL, trace
@@ -63,13 +64,13 @@ def configure_logging() -> None:
 configure_logging()
 settings = load_settings()
 domain_registry = DomainRegistry(ROOT / "domains")
+shared_resource_registry = SharedResourceRegistry(ROOT / "resources")
 domain_gateway = DomainGateway(domain_registry)
 loaded_extensions = ExtensionLoader(ROOT / "extensions").load()
 widget_registry = loaded_extensions.widget_registry
 effect_registry = loaded_extensions.effect_registry
 browser_extension_catalog = loaded_extensions.browser_catalog(url_prefix="/extensions")
 search_result_store = SearchResultStore(ttl_seconds=30 * 60)
-search_quota = BraveSearchQuota(max_requests_per_session=settings.brave_search_max_requests_per_session)
 
 
 def _brave_search_client() -> BraveSearchClient:
@@ -83,20 +84,25 @@ def _brave_search_client() -> BraveSearchClient:
 
 plan_agent_search_service = PlanAgentSearchService(
     client_factory=_brave_search_client,
-    quota=search_quota,
     result_store=search_result_store,
 )
-panel_compiler = PanelCompiler(widget_registry, search_result_store=search_result_store)
+panel_compiler = PanelCompiler(
+    widget_registry,
+    asset_catalog=shared_resource_registry.load().assets,
+    search_result_store=search_result_store,
+)
 plan_agent = PlanAgent(
     settings,
     domain_registry=domain_registry,
     domain_gateway=domain_gateway,
     widget_registry=widget_registry,
+    shared_resource_registry=shared_resource_registry,
     search_service=plan_agent_search_service,
 )
 registry = LiveToolRegistry(domain_registry.available_domain_ids())
 orchestrator = LiveSessionOrchestrator(
     domain_registry=domain_registry,
+    shared_resource_registry=shared_resource_registry,
     plan_agent=plan_agent,
     panel_compiler=panel_compiler,
     effect_registry=effect_registry,
@@ -151,13 +157,12 @@ async def health(_: Any) -> JSONResponse:
     })
 
 
-async def domain_asset(request: Any) -> FileResponse | PlainTextResponse:
-    """Serve only assets declared by the selected domain's trusted catalog."""
+async def shared_asset(request: Any) -> FileResponse | PlainTextResponse:
+    """Serve only assets declared by the trusted shared catalog."""
 
     try:
-        resources = domain_registry.load(str(request.path_params["domain_id"]))
-        asset = resources.assets.get(str(request.path_params["asset_id"]))
-    except (ManifestError, ValueError):
+        asset = shared_resource_registry.load().assets.get(str(request.path_params["asset_id"]))
+    except (SharedResourceError, ValueError):
         return PlainTextResponse("Asset not found.", status_code=404)
     return FileResponse(asset.path, media_type=asset.mime_type, headers={"Cache-Control": "public, max-age=3600"})
 
@@ -378,7 +383,7 @@ async def live_socket(websocket: WebSocket) -> None:
 app = Starlette(routes=[
     Route("/", home),
     Route("/assets/app.js", app_js),
-    Route("/assets/domains/{domain_id}/{asset_id}", domain_asset),
+    Route("/assets/resources/{asset_id}", shared_asset),
     Route("/extensions/{asset_path:path}", extension_asset),
     Route("/api/health", health),
     Route("/api/client-debug", client_debug, methods=["POST"]),

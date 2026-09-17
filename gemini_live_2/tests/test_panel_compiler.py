@@ -2,6 +2,7 @@ import unittest
 from pathlib import Path
 
 from gemini_live_2.catalogs.domains import DomainRegistry
+from gemini_live_2.catalogs.resources import SharedResourceRegistry
 from gemini_live_2.panel import (
     ChoiceChild,
     DataAlias,
@@ -22,7 +23,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 class PanelCompilerTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.compiler = PanelCompiler(runtime_widget_registry())
+        self.compiler = PanelCompiler(
+            runtime_widget_registry(),
+            asset_catalog=SharedResourceRegistry(PROJECT_ROOT / "resources").load().assets,
+        )
         self.resources = DomainRegistry(PROJECT_ROOT / "domains").load("education")
         self.bundle = DataBundle(
             domain_id="education",
@@ -94,7 +98,11 @@ class PanelCompilerTests(unittest.TestCase):
             source_url="https://example/pig",
             caption="Một chú heo dễ thương",
         )
-        compiler = PanelCompiler(runtime_widget_registry(), search_result_store=store)
+        compiler = PanelCompiler(
+            runtime_widget_registry(),
+            asset_catalog=SharedResourceRegistry(PROJECT_ROOT / "resources").load().assets,
+            search_result_store=store,
+        )
         document = compiler.compile_surface_document(
             surface_id="surface-test",
             data_bundle=self.bundle,
@@ -124,7 +132,11 @@ class PanelCompilerTests(unittest.TestCase):
             source_url="https://example/coffee",
             caption="Một tách cà phê nóng",
         )
-        compiler = PanelCompiler(runtime_widget_registry(), search_result_store=store)
+        compiler = PanelCompiler(
+            runtime_widget_registry(),
+            asset_catalog=SharedResourceRegistry(PROJECT_ROOT / "resources").load().assets,
+            search_result_store=store,
+        )
         document = compiler.compile_surface_document(
             surface_id="surface-test",
             data_bundle=self.bundle,

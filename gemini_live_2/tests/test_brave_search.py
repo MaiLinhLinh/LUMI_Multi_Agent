@@ -9,7 +9,6 @@ from gemini_live_2.search import (
     BraveSearchClient,
     BraveSearchConfigurationError,
     BraveSearchError,
-    BraveSearchQuota,
 )
 
 
@@ -83,12 +82,3 @@ class BraveSearchTests(unittest.TestCase):
             client.search_web("con mèo")
         with self.assertRaises(BraveSearchConfigurationError):
             BraveSearchClient(api_key="", timeout_seconds=8)
-
-    def test_session_quota_rejects_request_21_and_resets(self) -> None:
-        quota = BraveSearchQuota(max_requests_per_session=20)
-        for _ in range(20):
-            quota.consume("session-1")
-        with self.assertRaisesRegex(BraveSearchError, "quota"):
-            quota.consume("session-1")
-        quota.reset("session-1")
-        quota.consume("session-1")

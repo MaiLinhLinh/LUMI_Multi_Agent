@@ -5,22 +5,24 @@ from pathlib import Path
 
 from gemini_live_2.catalogs.assets import AssetCatalogError, load_asset_catalog
 from gemini_live_2.catalogs.domains import DomainRegistry
+from gemini_live_2.catalogs.resources import SharedResourceRegistry
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 class CatalogTests(unittest.TestCase):
-    def test_education_manifest_loads_assets_without_domain_branching(self) -> None:
+    def test_education_manifest_loads_with_shared_assets_without_domain_branching(self) -> None:
         resources = DomainRegistry(PROJECT_ROOT / "domains").load("education")
+        shared = SharedResourceRegistry(PROJECT_ROOT / "resources").load()
         self.assertEqual(resources.manifest.domain_id, "education")
         self.assertEqual(resources.manifest.for_plan_agent()["domain_id"], "education")
         self.assertIn("cô giáo thân thiện", resources.presentation_instruction)
         self.assertIn("domain giáo dục", resources.plan_instruction)
-        asset_ids = [asset["id"] for asset in resources.assets.plan_agent_catalog()]
+        asset_ids = [asset["id"] for asset in shared.assets.plan_agent_catalog()]
         self.assertIn("dog", asset_ids)
         self.assertIn("cat", asset_ids)
-        self.assertNotIn("path", resources.assets.plan_agent_catalog()[0])
+        self.assertNotIn("path", shared.assets.plan_agent_catalog()[0])
 
     def test_asset_catalog_rejects_mime_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -30,7 +32,6 @@ class CatalogTests(unittest.TestCase):
             catalog.write_text(
                 json.dumps(
                     {
-                        "domain_id": "education",
                         "assets": [
                             {
                                 "id": "dog",
@@ -46,11 +47,11 @@ class CatalogTests(unittest.TestCase):
                 encoding="utf-8",
             )
             with self.assertRaises(AssetCatalogError):
-                load_asset_catalog(catalog_path=catalog, domain_root=root, expected_domain_id="education")
+                load_asset_catalog(catalog_path=catalog, resource_root=root)
 
     def test_domain_registry_lists_declared_domains_only(self) -> None:
         registry = DomainRegistry(PROJECT_ROOT / "domains")
-        self.assertEqual(registry.available_domain_ids(), ("education",))
+        self.assertEqual(registry.available_domain_ids(), ("education", "history"))
 
 
 if __name__ == "__main__":

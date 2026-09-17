@@ -13,6 +13,7 @@ from pathlib import Path
 from google.genai import types
 
 from gemini_live_2.catalogs.domains import DomainRegistry
+from gemini_live_2.catalogs.resources import SharedResourceRegistry
 from gemini_live_2.gateway import CapabilityDescriptor, DomainCapability, DomainGateway
 from gemini_live_2.panel.contracts import (
     ActiveSurfaceSummary,
@@ -123,6 +124,58 @@ class PlanAgentTests(unittest.TestCase):
                 {item["id"] for item in payload["widget_index"]},
                 set(runtime_widget_registry().widget_ids()),
             )
+
+    def test_successful_tool_result_emits_structured_availability_before_next_model_step(self) -> None:
+        with _domain_root([]) as root:
+            client = _Client([
+                _Response(calls=[types.FunctionCall(
+                    id="native-widget-1", name="describe_widgets", args={"widget_ids": ["text"]},
+                )]),
+                _Response(_create_plan_json()),
+            ])
+            events: list[dict[str, object]] = []
+
+            async def telemetry(payload: dict[str, object]) -> None:
+                events.append(payload)
+
+            agent = _agent(root, DomainGateway(DomainRegistry(root)), client)
+            asyncio.run(agent.plan(PlanAgentRequest(
+                domain_id="education", intent="Hiển thị tiêu đề.", plan_run_id="run-1", telemetry_callback=telemetry,
+            )))
+
+            available = next(event for event in events if event["event"] == "tool_result_available")
+            appended = next(index for index, event in enumerate(events) if event["event"] == "plan_tool_results_appended")
+            self.assertLess(events.index(available), appended)
+            self.assertEqual(available["plan_run_id"], "run-1")
+            self.assertEqual(available["tool_name"], "describe_widgets")
+            self.assertEqual(available["arguments"], {"widget_ids": ["text"]})
+            self.assertIn("widgets", available["response"])
+
+    def test_failed_tool_result_does_not_emit_availability(self) -> None:
+        with _domain_root([]) as root:
+            client = _Client([
+                _Response(calls=[types.FunctionCall(
+                    id="native-widget-1", name="describe_widgets", args={"widget_ids": ["image"]},
+                )]),
+                _Response(calls=[types.FunctionCall(
+                    id="native-search-1", name="search_web", args={"query": "Bác Hồ", "extra": "x"},
+                )]),
+                _Response(_create_plan_json()),
+            ])
+            events: list[dict[str, object]] = []
+
+            async def telemetry(payload: dict[str, object]) -> None:
+                events.append(payload)
+
+            agent = _agent(root, DomainGateway(DomainRegistry(root)), client)
+            asyncio.run(agent.plan(PlanAgentRequest(
+                domain_id="education", intent="Hiển thị ảnh.", telemetry_callback=telemetry,
+            )))
+
+            self.assertFalse(any(
+                event["event"] == "tool_result_available" and event["tool_name"] == "search_web"
+                for event in events
+            ))
 
     def test_runtime_feedback_is_sent_as_structured_plan_agent_context(self) -> None:
         with _domain_root([]) as root:
@@ -682,10 +735,18 @@ class _CerebrasProviderTests(unittest.TestCase):
                 domain_registry=DomainRegistry(root),
                 domain_gateway=DomainGateway(DomainRegistry(root)),
                 widget_registry=runtime_widget_registry(),
+                shared_resource_registry=SharedResourceRegistry(root / "resources"),
                 cerebras_client_factory=lambda **kwargs: (factory_calls.append(kwargs) or client),
             )
 
-            result = asyncio.run(agent.plan(PlanAgentRequest(domain_id="education", intent="Use plan.")))
+            events: list[dict[str, object]] = []
+
+            async def telemetry(payload: dict[str, object]) -> None:
+                events.append(payload)
+
+            result = asyncio.run(agent.plan(PlanAgentRequest(
+                domain_id="education", intent="Use plan.", plan_run_id="run-cerebras", telemetry_callback=telemetry,
+            )))
 
             self.assertIsInstance(result.command, CreateSurfacePlan)
             self.assertEqual(factory_calls, [{
@@ -695,6 +756,44 @@ class _CerebrasProviderTests(unittest.TestCase):
             self.assertEqual(client.completions.calls[0]["model"], "gpt-oss-120b")
             self.assertEqual(client.completions.calls[0]["tools"][0]["function"]["name"], "describe_widgets")
             self.assertIn("Test plan prompt", client.completions.calls[0]["messages"][0]["content"])
+            available = next(event for event in events if event["event"] == "tool_result_available")
+            self.assertEqual(available["plan_run_id"], "run-cerebras")
+            self.assertEqual(available["tool_name"], "describe_widgets")
+
+    def test_retries_one_invalid_final_json_without_repeating_tools(self) -> None:
+        with _domain_root([], layout_template=True) as root:
+            client = _CerebrasClient([
+                _CerebrasMessage(tool_calls=[_CerebrasToolCall(
+                    call_id="widget-1", name="describe_widgets", arguments={"widget_ids": ["text"]},
+                )]),
+                _CerebrasMessage('{"action":"create_surface_plan",'),
+                _CerebrasMessage(json.dumps({
+                    "action": "create_surface_plan",
+                    "template_description": "Một tiêu đề bài học.",
+                    "surface": {"blocks": [{
+                        "widget_id": "text",
+                        "grid": {"col": 1, "row": 1, "col_span": 12, "row_span": 1},
+                        "props": {"content": "A title", "role": "title"},
+                    }]},
+                })),
+            ])
+            agent = PlanAgent(
+                replace(_settings(), planner_provider="cerebras", cerebras_api_key="cerebras-test-key"),
+                domain_registry=DomainRegistry(root),
+                domain_gateway=DomainGateway(DomainRegistry(root)),
+                widget_registry=runtime_widget_registry(),
+                shared_resource_registry=SharedResourceRegistry(root / "resources"),
+                cerebras_client_factory=lambda **_kwargs: client,
+            )
+
+            result = asyncio.run(agent.plan(PlanAgentRequest(domain_id="education", intent="Use plan.")))
+
+            self.assertIsInstance(result.command, CreateSurfacePlan)
+            self.assertEqual(len(client.completions.calls), 3)
+            feedback = client.completions.calls[2]["messages"][-1]
+            self.assertEqual(feedback["role"], "user")
+            self.assertIn("FINAL JSON PARSE ERROR", feedback["content"])
+            self.assertIn("Do not call any tool", feedback["content"])
 
 
 def _create_plan_json() -> str:
@@ -721,6 +820,7 @@ def _agent(
     return PlanAgent(
         _settings(), domain_registry=DomainRegistry(root), domain_gateway=gateway,
         widget_registry=runtime_widget_registry(),
+        shared_resource_registry=SharedResourceRegistry(root / "resources"),
         client_factory=lambda **_kwargs: client,
         max_tool_steps=max_tool_steps,
     )
@@ -735,27 +835,27 @@ def _domain_root(
     with tempfile.TemporaryDirectory() as temporary_directory:
         root = Path(temporary_directory)
         domain_root = root / "education"
-        assets = domain_root / "assets"
+        domain_root.mkdir()
+        assets = root / "resources" / "assets"
         assets.mkdir(parents=True)
         (assets / "dog.png").write_bytes(b"placeholder")
         manifest: dict[str, object] = {
             "domain_id": "education",
-            "asset_catalog_path": "assets/catalog.json",
             "presentation_prompt_path": "prompt.py",
             "presentation_prompt_constant": "PRESENTATION_INSTRUCTION",
             "plan_prompt_path": "plan_prompt.py",
             "plan_prompt_constant": "PLAN_INSTRUCTION",
             "tool_capabilities": capabilities,
         }
+        templates = root / "resources" / "templates"
+        templates.mkdir(parents=True)
+        (templates / "catalog.json").write_text('{"templates":[]}', encoding="utf-8")
         if layout_template:
-            plans = domain_root / "plans"
-            plans.mkdir()
-            manifest["template_catalog_path"] = "plans/catalog.json"
+            plans = templates
             entry: dict[str, str] = {"id": "present", "description": "Plan"}
-            entry["layout_path"] = "plans/present.layout.json"
+            entry["layout_path"] = "templates/present.layout.json"
             (plans / "present.layout.json").write_text(json.dumps({
                 "template_id": "present",
-                "domain_id": "education",
                 "description": "Plan",
                 "blocks": [{
                     "widget_id": "text",
@@ -768,13 +868,12 @@ def _domain_root(
                 }],
             }), encoding="utf-8")
             (plans / "catalog.json").write_text(json.dumps({
-                "domain_id": "education", "templates": [entry],
+                "templates": [entry],
             }), encoding="utf-8")
         (domain_root / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
         (domain_root / "prompt.py").write_text('PRESENTATION_INSTRUCTION = "Test prompt"\n', encoding="utf-8")
         (domain_root / "plan_prompt.py").write_text('PLAN_INSTRUCTION = "Test plan prompt"\n', encoding="utf-8")
         (assets / "catalog.json").write_text(json.dumps({
-            "domain_id": "education",
             "assets": [{
                 "id": "dog", "kind": "image", "path": "assets/dog.png", "mime_type": "image/png",
                 "caption": "Chú chó", "tags": ["chó"],

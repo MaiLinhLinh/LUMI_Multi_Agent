@@ -20,6 +20,17 @@ DESCRIBE_TEMPLATE = "describe_template"
 SEARCH_WEB = "search_web"
 SEARCH_IMAGE = "search_image"
 
+# Internal progress metadata.  This deliberately stays separate from the
+# provider-facing tool schemas below: providers must receive only the native
+# function contract, never delivery/UI metadata.
+TOOL_RESULT_PROGRESS_METADATA: dict[str, dict[str, str]] = {
+    DESCRIBE_WIDGETS: {
+        "on_results_message": (
+            "Đã xem các thành phần giao diện cần thiết để chuẩn bị hoạt động."
+        ),
+    },
+}
+
 
 DESCRIBE_WIDGETS_TOOL: dict[str, Any] = {
     "name": DESCRIBE_WIDGETS,

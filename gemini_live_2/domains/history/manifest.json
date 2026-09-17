@@ -1,0 +1,7 @@
+{
+  "domain_id": "history",
+  "presentation_prompt_path": "prompt.py",
+  "presentation_prompt_constant": "HISTORY_PRESENTATION_INSTRUCTION",
+  "plan_prompt_path": "plan_prompt.py",
+  "plan_prompt_constant": "HISTORY_PLAN_INSTRUCTION"
+}

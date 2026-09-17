@@ -5,7 +5,6 @@ from .brave import (
     BraveSearchClient,
     BraveSearchConfigurationError,
     BraveSearchError,
-    BraveSearchQuota,
     BraveWebResult,
 )
 from .result_store import SearchResultStore, SearchResultStoreError, StoredImageResult, StoredWebResult
@@ -15,7 +14,6 @@ __all__ = [
     "BraveSearchClient",
     "BraveSearchConfigurationError",
     "BraveSearchError",
-    "BraveSearchQuota",
     "BraveWebResult",
     "SearchResultStore",
     "SearchResultStoreError",

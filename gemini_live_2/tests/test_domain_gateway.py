@@ -118,7 +118,6 @@ class DomainGatewayTests(unittest.TestCase):
             json.dumps(
                 {
                     "domain_id": domain_id,
-                    "asset_catalog_path": "assets/catalog.json",
                     "presentation_prompt_path": "prompt.py",
                     "presentation_prompt_constant": "PRESENTATION_INSTRUCTION",
                     "plan_prompt_path": "plan_prompt.py",

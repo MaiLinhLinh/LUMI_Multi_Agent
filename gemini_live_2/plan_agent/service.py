@@ -14,6 +14,7 @@ from google.genai import types
 from openai import AsyncOpenAI
 
 from gemini_live_2.catalogs.domains import DomainRegistry, ManifestError
+from gemini_live_2.catalogs.resources import SharedResourceError, SharedResourceRegistry, SharedResources
 from gemini_live_2.catalogs.templates import TemplateCatalogError
 from gemini_live_2.panel import ActiveSurfaceSummary
 from gemini_live_2.gateway import (
@@ -50,12 +51,28 @@ from .tools import (
 
 logger = logging.getLogger("lumi.plan_agent")
 _MAX_TOOL_STEPS = 6
+_MAX_INVALID_FINAL_JSON_RETRIES = 1
 PlanTelemetryCallback = Callable[[dict[str, Any]], Awaitable[None]]
 
 
 
 class PlanAgentError(RuntimeError):
     """Raised for configuration, model, tool-loop, or decision failures."""
+
+
+class InvalidFinalJsonError(PlanAgentError):
+    """The model returned a final decision that is not syntactically valid JSON."""
+
+
+def _invalid_final_json_feedback(error: InvalidFinalJsonError) -> str:
+    return (
+        "FINAL JSON PARSE ERROR\n"
+        "Your immediately preceding final response was not valid JSON. It was not accepted, "
+        "and no Surface has been created.\n"
+        f"Parser error: {error}\n"
+        "Do not call any tool. Keep all verified data and prior tool results unchanged. "
+        "Return the corrected final decision now as exactly one valid JSON object, with no markdown or other text."
+    )
 
 
 def _text(value: object, field_name: str) -> str:
@@ -381,6 +398,7 @@ class PlanAgent:
         domain_registry: DomainRegistry,
         domain_gateway: DomainGateway,
         widget_registry: WidgetRegistry,
+        shared_resource_registry: SharedResourceRegistry,
         search_service: PlanAgentSearchService | None = None,
         client_factory: ClientFactory = genai.Client,
         cerebras_client_factory: CerebrasClientFactory = AsyncOpenAI,
@@ -392,6 +410,7 @@ class PlanAgent:
         self._domain_registry = domain_registry
         self._domain_gateway = domain_gateway
         self._widget_registry = widget_registry
+        self._shared_resource_registry = shared_resource_registry
         self._search_service = search_service
         self._client_factory = client_factory
         self._cerebras_client_factory = cerebras_client_factory
@@ -424,15 +443,16 @@ class PlanAgent:
         context_started = time.perf_counter()
         try:
             resources = self._domain_registry.load(request.domain_id)
+            shared_resources = self._shared_resource_registry.load()
             capabilities = self._domain_gateway.capability_catalog(request.domain_id)
-        except (ManifestError, GatewayConfigurationError, GatewayPermissionError) as exc:
+        except (ManifestError, SharedResourceError, GatewayConfigurationError, GatewayPermissionError) as exc:
             raise PlanAgentError(str(exc)) from exc
 
         bundle = request.initial_bundle or self._domain_gateway.empty_bundle(request.domain_id)
         logger.info(
             "[PLAN_AGENT_CONTEXT] provider=gemini assets=%d templates=%d widgets=%d capabilities=%s verified=%s",
-            len(resources.assets.assets),
-            len(resources.templates.for_plan_agent()),
+            len(shared_resources.assets.assets),
+            len(shared_resources.templates.for_plan_agent()),
             len(self._widget_registry.widget_ids()),
             [capability.id for capability in capabilities],
             _log_payload(_bundle_summary(bundle)),
@@ -442,8 +462,8 @@ class PlanAgent:
             "intent": request.intent,
             "recent_history": list(request.recent_history),
             "canvas": {"columns": 16, "rows": 10},
-            "assets": resources.assets.plan_agent_catalog(),
-            "template_catalog": resources.templates.for_plan_agent(),
+            "assets": shared_resources.assets.plan_agent_catalog(),
+            "template_catalog": shared_resources.templates.for_plan_agent(),
             "widget_index": self._widget_registry.widget_index(),
             "capabilities": [capability.for_plan_agent() for capability in capabilities],
             "tool_budget": {"max_native_calls": self._max_tool_steps},
@@ -477,6 +497,7 @@ class PlanAgent:
         )
         tool_call_count = 0
         tool_limit_feedback_sent = False
+        invalid_final_json_retries = 0
         described_widget_ids: set[str] = set()
         described_template_ids: set[str] = set()
 
@@ -511,14 +532,30 @@ class PlanAgent:
             )
             if not calls:
                 final_parse_started = time.perf_counter()
-                result = self._final_result(
-                    response,
-                    request.domain_id,
-                    resources,
-                    bundle,
-                    described_widget_ids=described_widget_ids,
-                    described_template_ids=described_template_ids,
-                )
+                try:
+                    result = self._final_result(
+                        response,
+                        request.domain_id,
+                        resources,
+                        bundle,
+                        described_widget_ids=described_widget_ids,
+                        described_template_ids=described_template_ids,
+                    )
+                except InvalidFinalJsonError as exc:
+                    if invalid_final_json_retries >= _MAX_INVALID_FINAL_JSON_RETRIES:
+                        raise
+                    invalid_final_json_retries += 1
+                    logger.warning(
+                        "[PLAN_AGENT_FINAL_JSON_RETRY] provider=gemini retry=%d detail=%s",
+                        invalid_final_json_retries,
+                        str(exc)[:500],
+                    )
+                    messages.append(_model_content(response, calls))
+                    messages.append(types.Content(
+                        role="user",
+                        parts=[types.Part(text=_invalid_final_json_feedback(exc))],
+                    ))
+                    continue
                 await _emit_plan_event(
                     request,
                     "plan_final_json_parsed",
@@ -576,7 +613,7 @@ class PlanAgent:
                     name=name,
                     arguments=arguments,
                     domain_id=request.domain_id,
-                    resources=resources,
+                    shared_resources=shared_resources,
                     data_bundle=bundle,
                     session_id=request.session_id,
                 )
@@ -595,6 +632,14 @@ class PlanAgent:
                     result_bytes=_payload_bytes(response_data),
                     bundle=_bundle_summary(bundle),
                 )
+                if isinstance(response_data, Mapping) and "error" not in response_data:
+                    await _emit_plan_event(
+                        request,
+                        "tool_result_available",
+                        tool_name=str(name),
+                        arguments=dict(arguments),
+                        response=dict(response_data),
+                    )
                 logger.info(
                     "[PLAN_AGENT_TOOL_RESPONSE] provider=gemini step=%d name=%s response=%s bundle=%s",
                     tool_call_count + call_index,
@@ -628,15 +673,16 @@ class PlanAgent:
         context_started = time.perf_counter()
         try:
             resources = self._domain_registry.load(request.domain_id)
+            shared_resources = self._shared_resource_registry.load()
             capabilities = self._domain_gateway.capability_catalog(request.domain_id)
-        except (ManifestError, GatewayConfigurationError, GatewayPermissionError) as exc:
+        except (ManifestError, SharedResourceError, GatewayConfigurationError, GatewayPermissionError) as exc:
             raise PlanAgentError(str(exc)) from exc
 
         bundle = request.initial_bundle or self._domain_gateway.empty_bundle(request.domain_id)
         logger.info(
             "[PLAN_AGENT_CONTEXT] provider=cerebras assets=%d templates=%d widgets=%d capabilities=%s verified=%s",
-            len(resources.assets.assets),
-            len(resources.templates.for_plan_agent()),
+            len(shared_resources.assets.assets),
+            len(shared_resources.templates.for_plan_agent()),
             len(self._widget_registry.widget_ids()),
             [capability.id for capability in capabilities],
             _log_payload(_bundle_summary(bundle)),
@@ -646,8 +692,8 @@ class PlanAgent:
             "intent": request.intent,
             "recent_history": list(request.recent_history),
             "canvas": {"columns": 16, "rows": 10},
-            "assets": resources.assets.plan_agent_catalog(),
-            "template_catalog": resources.templates.for_plan_agent(),
+            "assets": shared_resources.assets.plan_agent_catalog(),
+            "template_catalog": shared_resources.templates.for_plan_agent(),
             "widget_index": self._widget_registry.widget_index(),
             "capabilities": [capability.for_plan_agent() for capability in capabilities],
             "tool_budget": {"max_native_calls": self._max_tool_steps},
@@ -683,6 +729,7 @@ class PlanAgent:
         )
         tool_call_count = 0
         tool_limit_feedback_sent = False
+        invalid_final_json_retries = 0
         described_widget_ids: set[str] = set()
         described_template_ids: set[str] = set()
 
@@ -739,14 +786,27 @@ class PlanAgent:
             )
             if not calls:
                 final_parse_started = time.perf_counter()
-                result = self._final_result_from_text(
-                    getattr(message, "content", None),
-                    request.domain_id,
-                    resources,
-                    bundle,
-                    described_widget_ids=described_widget_ids,
-                    described_template_ids=described_template_ids,
-                )
+                try:
+                    result = self._final_result_from_text(
+                        getattr(message, "content", None),
+                        request.domain_id,
+                        resources,
+                        bundle,
+                        described_widget_ids=described_widget_ids,
+                        described_template_ids=described_template_ids,
+                    )
+                except InvalidFinalJsonError as exc:
+                    if invalid_final_json_retries >= _MAX_INVALID_FINAL_JSON_RETRIES:
+                        raise
+                    invalid_final_json_retries += 1
+                    logger.warning(
+                        "[PLAN_AGENT_FINAL_JSON_RETRY] provider=cerebras retry=%d detail=%s",
+                        invalid_final_json_retries,
+                        str(exc)[:500],
+                    )
+                    messages.append(message.model_dump(exclude_none=True))
+                    messages.append({"role": "user", "content": _invalid_final_json_feedback(exc)})
+                    continue
                 await _emit_plan_event(
                     request,
                     "plan_final_json_parsed",
@@ -806,7 +866,7 @@ class PlanAgent:
                     name=name,
                     arguments=arguments,
                     domain_id=request.domain_id,
-                    resources=resources,
+                    shared_resources=shared_resources,
                     data_bundle=bundle,
                     session_id=request.session_id,
                 )
@@ -825,6 +885,14 @@ class PlanAgent:
                     result_bytes=_payload_bytes(response_data),
                     bundle=_bundle_summary(bundle),
                 )
+                if isinstance(response_data, Mapping) and "error" not in response_data:
+                    await _emit_plan_event(
+                        request,
+                        "tool_result_available",
+                        tool_name=str(name),
+                        arguments=dict(arguments),
+                        response=dict(response_data),
+                    )
                 logger.info(
                     "[PLAN_AGENT_TOOL_RESPONSE] provider=cerebras step=%d name=%s response=%s bundle=%s",
                     tool_call_count + call_index,
@@ -887,10 +955,10 @@ class PlanAgent:
         return {"widgets": widgets}
 
     @staticmethod
-    def _describe_template(*, template_id: object, resources: Any) -> dict[str, Any]:
+    def _describe_template(*, template_id: object, shared_resources: SharedResources) -> dict[str, Any]:
         requested_id = _text(template_id, "template_id")
         try:
-            template = resources.templates.load_layout_template(requested_id)
+            template = shared_resources.templates.load_layout_template(requested_id)
         except TemplateCatalogError as exc:
             raise PlanAgentError(str(exc)) from exc
         return {
@@ -907,7 +975,7 @@ class PlanAgent:
         name: object,
         arguments: Mapping[str, Any],
         domain_id: str,
-        resources: Any,
+        shared_resources: SharedResources,
         data_bundle: DataBundle,
         session_id: str | None,
     ) -> _ToolExecution:
@@ -924,7 +992,7 @@ class PlanAgent:
             )
         if name == DESCRIBE_TEMPLATE:
             response = self._describe_template(
-                template_id=arguments.get("template_id"), resources=resources
+                template_id=arguments.get("template_id"), shared_resources=shared_resources
             )
             return _ToolExecution(
                 response=response,
@@ -1070,7 +1138,10 @@ class PlanAgent:
         logger.info("[PLAN_AGENT_RAW_DECISION] chars=%d output=%s", len(response_text), response_text)
         try:
             command = _parse_command(json.loads(response_text))
-        except (json.JSONDecodeError, PlanAgentError) as exc:
+        except json.JSONDecodeError as exc:
+            logger.warning("[PLAN_AGENT_INVALID_DECISION] error_type=%s detail=%s", type(exc).__name__, str(exc)[:500])
+            raise InvalidFinalJsonError(str(exc)) from exc
+        except PlanAgentError as exc:
             logger.warning("[PLAN_AGENT_INVALID_DECISION] error_type=%s detail=%s", type(exc).__name__, str(exc)[:500])
             raise PlanAgentError("Plan Agent returned an invalid final decision.") from exc
         if isinstance(command, UseExistingSurfaceTemplate):

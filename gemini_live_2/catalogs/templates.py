@@ -77,17 +77,16 @@ class TemplateCatalogEntry:
 
 @dataclass(frozen=True, slots=True)
 class TemplateCatalog:
-    """Trusted plan loader for one domain; no code-side relevance ranking."""
+    """Trusted loader for layouts reusable by every domain."""
 
-    domain_id: str
-    domain_root: Path
+    resource_root: Path
     entries: tuple[TemplateCatalogEntry, ...] = ()
     catalog_path: Path | None = None
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "domain_id", _text(self.domain_id, "template_catalog.domain_id"))
-        if not isinstance(self.domain_root, Path):
-            raise TemplateCatalogError("template_catalog.domain_root must be a Path.")
+        if not isinstance(self.resource_root, Path):
+            raise TemplateCatalogError("template_catalog.resource_root must be a Path.")
+        object.__setattr__(self, "resource_root", self.resource_root.resolve())
         if not isinstance(self.entries, tuple) or not all(isinstance(item, TemplateCatalogEntry) for item in self.entries):
             raise TemplateCatalogError("template_catalog.entries must contain TemplateCatalogEntry values.")
         ids = [entry.id for entry in self.entries]
@@ -135,21 +134,17 @@ class TemplateCatalog:
             raise TemplateCatalogError(str(exc)) from exc
         if template.template_id != entry.id:
             raise TemplateCatalogError("stored layout template id must match the catalog id.")
-        if template.domain_id != self.domain_id:
-            raise TemplateCatalogError("stored layout template domain_id must match the catalog domain.")
         return template
 
     def save_layout_template(self, template: LayoutTemplate) -> "TemplateCatalog":
-        """Persist a new domain-owned layout template without overwriting an entry."""
+        """Persist a new shared layout template without overwriting an entry."""
 
-        if template.domain_id != self.domain_id:
-            raise TemplateCatalogError("layout template domain_id must match the catalog domain.")
         if self.contains(template.template_id):
             raise TemplateCatalogError(f"template_id '{template.template_id}' already exists.")
         if self.catalog_path is None:
             raise TemplateCatalogError("cannot persist a layout template without a catalog path.")
 
-        relative_layout_path = Path("layouts") / f"{template.template_id}.layout.json"
+        relative_layout_path = Path("templates") / "layouts" / f"{template.template_id}.layout.json"
         layout_path = self._resolve_entry_path(relative_layout_path)
         if layout_path.exists():
             raise TemplateCatalogError("layout template file already exists.")
@@ -166,7 +161,6 @@ class TemplateCatalog:
         )
         new_entries = (*self.entries, new_entry)
         catalog_data = {
-            "domain_id": self.domain_id,
             "templates": [entry.to_catalog_record() for entry in new_entries],
         }
         self.catalog_path.write_text(
@@ -174,8 +168,7 @@ class TemplateCatalog:
             encoding="utf-8",
         )
         return TemplateCatalog(
-            domain_id=self.domain_id,
-            domain_root=self.domain_root,
+            resource_root=self.resource_root,
             entries=new_entries,
             catalog_path=self.catalog_path,
         )
@@ -183,7 +176,7 @@ class TemplateCatalog:
     def delete_layout_template(self, template_id: str) -> "TemplateCatalog":
         """Delete one stored layout and its catalog record as one operation.
 
-        The associated file is always resolved inside this domain before it is
+        The associated file is always resolved inside the shared resource root before it is
         deleted.  This makes deletion common to every domain and prevents
         stale catalog entries from surviving after a layout is removed.
         """
@@ -200,7 +193,6 @@ class TemplateCatalog:
 
         new_entries = tuple(item for item in self.entries if item.id != entry.id)
         catalog_data = {
-            "domain_id": self.domain_id,
             "templates": [item.to_catalog_record() for item in new_entries],
         }
         self.catalog_path.write_text(
@@ -208,43 +200,34 @@ class TemplateCatalog:
             encoding="utf-8",
         )
         return TemplateCatalog(
-            domain_id=self.domain_id,
-            domain_root=self.domain_root,
+            resource_root=self.resource_root,
             entries=new_entries,
             catalog_path=self.catalog_path,
         )
 
     def _resolve_entry_path(self, relative_path: Path) -> Path:
-        path = (self.domain_root / relative_path).resolve()
+        path = (self.resource_root / relative_path).resolve()
         try:
-            path.relative_to(self.domain_root.resolve())
+            path.relative_to(self.resource_root)
         except ValueError as exc:
-            raise TemplateCatalogError("template path resolves outside its domain.") from exc
+            raise TemplateCatalogError("template path resolves outside the shared resource root.") from exc
         return path
-
-
-def empty_template_catalog(*, domain_id: str, domain_root: Path) -> TemplateCatalog:
-    return TemplateCatalog(domain_id=domain_id, domain_root=domain_root.resolve())
 
 
 def load_template_catalog(
     *,
     catalog_path: Path,
-    domain_root: Path,
-    expected_domain_id: str,
+    resource_root: Path,
 ) -> TemplateCatalog:
-    """Load a catalog whose paths are always constrained to its domain root."""
+    """Load a catalog whose paths are always constrained to the shared resource root."""
 
-    root = domain_root.resolve()
+    root = resource_root.resolve()
     resolved_catalog = catalog_path.resolve()
     try:
         resolved_catalog.relative_to(root)
     except ValueError as exc:
-        raise TemplateCatalogError("template catalog resolves outside its domain.") from exc
+        raise TemplateCatalogError("template catalog resolves outside the shared resource root.") from exc
     raw = _json_object(resolved_catalog, "template catalog")
-    domain_id = _text(raw.get("domain_id"), "template_catalog.domain_id")
-    if domain_id != expected_domain_id:
-        raise TemplateCatalogError("template_catalog.domain_id must match the manifest domain.")
     items = raw.get("templates", [])
     if not isinstance(items, list):
         raise TemplateCatalogError("template_catalog.templates must be an array.")
@@ -260,8 +243,7 @@ def load_template_catalog(
             ),
         ))
     return TemplateCatalog(
-        domain_id=domain_id,
-        domain_root=root,
+        resource_root=root,
         entries=tuple(entries),
         catalog_path=resolved_catalog,
     )

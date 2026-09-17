@@ -7,6 +7,7 @@ import time
 from typing import Any, Mapping
 
 from gemini_live_2.catalogs.domains import DomainRegistry, ManifestError
+from gemini_live_2.catalogs.resources import SharedResourceRegistry
 from gemini_live_2.catalogs.layout_templates import (
     LayoutTemplateError,
     LayoutTemplateMaterializer,
@@ -37,7 +38,7 @@ from gemini_live_2.panel import (
     surface_document_client_payload,
 )
 from gemini_live_2.plan_agent import PlanAgent, PlanAgentError, PlanAgentRequest
-from gemini_live_2.trace import trace
+from gemini_live_2.trace import trace, warning
 from gemini_live_2.extension_loader import EffectRegistry
 
 from .memory import SessionMemoryStore
@@ -107,12 +108,14 @@ class LiveSessionOrchestrator:
         *,
         memory_store: SessionMemoryStore | None = None,
         domain_registry: DomainRegistry | None = None,
+        shared_resource_registry: SharedResourceRegistry | None = None,
         plan_agent: PlanAgent | None = None,
         panel_compiler: PanelCompiler | None = None,
         effect_registry: EffectRegistry | None = None,
     ) -> None:
         self._memory_store = memory_store or SessionMemoryStore()
         self._domain_registry = domain_registry
+        self._shared_resource_registry = shared_resource_registry
         self._plan_agent = plan_agent
         self._panel_compiler = panel_compiler
         self._effect_registry = effect_registry
@@ -154,9 +157,10 @@ class LiveSessionOrchestrator:
         """Return the trusted context needed to resume one rendered panel."""
 
         state = self._active_panels.get(session_id)
-        if state is None or self._domain_registry is None:
+        if state is None or self._domain_registry is None or self._shared_resource_registry is None:
             return None
         resources = self._domain_registry.load(state.document.domain_id)
+        shared_resources = self._shared_resource_registry.load()
         return {
             "surface_id": state.document.surface_id,
             "revision": state.revision,
@@ -164,7 +168,7 @@ class LiveSessionOrchestrator:
             "visual_stage_map": render_visual_stage_map(
                 state.document,
                 widget_registry=self._panel_compiler.widget_registry,
-                asset_catalog=resources.assets,
+                asset_catalog=shared_resources.assets,
             ),
             "visual_effects": _visual_effects(self._effect_registry),
         }
@@ -206,12 +210,14 @@ class LiveSessionOrchestrator:
     ) -> OrchestratedToolResult:
         if tool_name != "route_request":
             return OrchestratedToolResult({"status": "unsupported", "detail": "Unknown Live tool."})
-        if self._domain_registry is None or self._plan_agent is None or self._panel_compiler is None:
+        if (self._domain_registry is None or self._shared_resource_registry is None
+                or self._plan_agent is None or self._panel_compiler is None):
             return OrchestratedToolResult({"status": "error", "detail": "Panel routing is not configured."})
         run_started = time.perf_counter()
         try:
             route = RouteRequest.from_dict(arguments)
             resources = self._domain_registry.load(route.domain_id)
+            shared_resources = self._shared_resource_registry.load()
             history = tuple(
                 {"role": item["role"], "text": item["content"]}
                 for item in self.session_memory(session_id).history
@@ -223,6 +229,11 @@ class LiveSessionOrchestrator:
             # re-searching only wastes the next tool budget.
             repair_bundle = None
             active_surface_summary = self.active_surface_summary(session_id)
+            if (
+                active_surface_summary is not None
+                and active_surface_summary.domain_id != route.domain_id
+            ):
+                active_surface_summary = None
             for repair_attempt in range(self._MAX_PLAN_REPAIR_ATTEMPTS + 1):
                 planned = await self._plan_agent.plan(PlanAgentRequest(
                     domain_id=route.domain_id,
@@ -298,12 +309,20 @@ class LiveSessionOrchestrator:
             PlanAgentError,
             ValueError,
         ) as exc:
+            error_detail = " ".join(str(exc).split())[:500]
+            warning(
+                "ROUTE_REQUEST_PLANNING_FAILED run=%s error=%s detail=%s",
+                plan_run_id,
+                type(exc).__name__,
+                error_detail,
+            )
             await _emit_route_telemetry(
                 telemetry_callback,
                 "plan_run_failed",
                 plan_run_id=plan_run_id,
                 total_elapsed_ms=round((time.perf_counter() - run_started) * 1000),
                 error_type=type(exc).__name__,
+                error_detail=error_detail,
             )
             return OrchestratedToolResult({"status": "error", "detail": str(exc)})
 
@@ -312,8 +331,8 @@ class LiveSessionOrchestrator:
         payload = surface_document_client_payload(
             state.document,
             asset_urls={
-                asset.id: f"/assets/domains/{state.document.domain_id}/{asset.id}"
-                for asset in resources.assets.assets
+                asset.id: f"/assets/resources/{asset.id}"
+                for asset in shared_resources.assets.assets
             },
         )
         response = {
@@ -325,7 +344,7 @@ class LiveSessionOrchestrator:
             "visual_stage_map": render_visual_stage_map(
                 state.document,
                 widget_registry=self._panel_compiler.widget_registry,
-                asset_catalog=resources.assets,
+                asset_catalog=shared_resources.assets,
             ),
             "visual_effects": _visual_effects(self._effect_registry),
         }
@@ -359,7 +378,8 @@ class LiveSessionOrchestrator:
         except ValueError as exc:
             trace("RUNTIME_DIAGNOSTIC_IGNORED reason=%s", exc)
             return OrchestratedToolResult({"status": "ignored", "detail": str(exc)})
-        if self._domain_registry is None or self._plan_agent is None or self._panel_compiler is None:
+        if (self._domain_registry is None or self._shared_resource_registry is None
+                or self._plan_agent is None or self._panel_compiler is None):
             return OrchestratedToolResult({"status": "error", "detail": "Panel routing is not configured."})
 
         try:
@@ -368,6 +388,7 @@ class LiveSessionOrchestrator:
                 "intent": active.purpose,
             })
             resources = self._domain_registry.load(route.domain_id)
+            shared_resources = self._shared_resource_registry.load()
             history = tuple(
                 {"role": item["role"], "text": item["content"]}
                 for item in self.session_memory(session_id).history
@@ -378,6 +399,11 @@ class LiveSessionOrchestrator:
             # compiler retry; do not force the Agent to search again.
             repair_bundle = None
             active_surface_summary = self.active_surface_summary(session_id)
+            if (
+                active_surface_summary is not None
+                and active_surface_summary.domain_id != route.domain_id
+            ):
+                active_surface_summary = None
             for repair_attempt in range(self._MAX_PLAN_REPAIR_ATTEMPTS + 1):
                 planned = await self._plan_agent.plan(PlanAgentRequest(
                     domain_id=route.domain_id,
@@ -413,8 +439,8 @@ class LiveSessionOrchestrator:
         payload = surface_document_client_payload(
             state.document,
             asset_urls={
-                asset.id: f"/assets/domains/{state.document.domain_id}/{asset.id}"
-                for asset in resources.assets.assets
+                asset.id: f"/assets/resources/{asset.id}"
+                for asset in shared_resources.assets.assets
             },
         )
         response = {
@@ -426,7 +452,7 @@ class LiveSessionOrchestrator:
             "visual_stage_map": render_visual_stage_map(
                 state.document,
                 widget_registry=self._panel_compiler.widget_registry,
-                asset_catalog=resources.assets,
+                asset_catalog=shared_resources.assets,
             ),
             "visual_effects": _visual_effects(self._effect_registry),
         }
@@ -519,8 +545,12 @@ class LiveSessionOrchestrator:
             )
         if isinstance(command, UseExistingSurfaceTemplate):
             try:
-                template = domain_resources.templates.load_layout_template(command.template_id)
-                plan = LayoutTemplateMaterializer().materialize(template=template, bindings=command.bindings)
+                if self._shared_resource_registry is None:
+                    raise RuntimeError("shared resource registry is required for templates")
+                template = self._shared_resource_registry.load().templates.load_layout_template(command.template_id)
+                plan = LayoutTemplateMaterializer().materialize(
+                    template=template, bindings=command.bindings, domain_id=route.domain_id
+                )
             except (TemplateCatalogError, LayoutTemplateError) as exc:
                 raise PanelCompilationError(str(exc), code="invalid_template_bindings") from exc
             document = self._panel_compiler.compile_surface_document(
@@ -564,13 +594,12 @@ class LiveSessionOrchestrator:
             return {"status": "ignored", "detail": "template candidate revision is not active"}
 
         self._pending_template_candidates.pop(session_id, None)
-        if self._domain_registry is None:
-            return {"status": "error", "detail": "domain registry is not configured"}
+        if self._shared_resource_registry is None:
+            return {"status": "error", "detail": "shared resource registry is not configured"}
         try:
-            resources = self._domain_registry.load(candidate.domain_id)
             template_id = self._persist_reusable_template(
                 command=candidate.command,
-                domain_resources=resources,
+                domain_id=candidate.domain_id,
             )
         except (ManifestError, ValueError) as exc:
             trace("TEMPLATE_SAVE_SKIPPED reason=%s", str(exc)[:300])
@@ -599,15 +628,17 @@ class LiveSessionOrchestrator:
         )
         trace("TEMPLATE_CANDIDATE_PENDING surface=%s revision=%s", state.document.surface_id, state.revision)
 
-    def _persist_reusable_template(self, *, command: CreateSurfacePlan, domain_resources: Any) -> str | None:
+    def _persist_reusable_template(self, *, command: CreateSurfacePlan, domain_id: str) -> str | None:
         """Curate a browser-confirmed plan into a data-free reusable TemplateSpec."""
 
         assert self._panel_compiler is not None
         try:
-            catalog = domain_resources.templates
+            if self._shared_resource_registry is None:
+                raise RuntimeError("shared resource registry is required for templates")
+            catalog = self._shared_resource_registry.load().templates
             template = TemplateExtractor(self._panel_compiler.widget_registry).extract(
                 plan=PresentationPlan(
-                    domain_id=domain_resources.manifest.domain_id,
+                    domain_id=domain_id,
                     blocks=command.blocks,
                 ),
                 template_id=catalog.next_generated_template_id(),
@@ -925,15 +956,15 @@ class LiveSessionOrchestrator:
             except ValueError as exc:
                 raise ValueError(str(exc)) from exc
             updated_anchor_ids.append(anchor_id)
-        if self._domain_registry is None:
-            raise RuntimeError("domain registry is required for panel updates")
-        resources = self._domain_registry.load(document.domain_id)
+        if self._shared_resource_registry is None:
+            raise RuntimeError("shared resource registry is required for panel updates")
+        shared_resources = self._shared_resource_registry.load()
         trace(
             "UPDATE_SURFACE_STATE_MAP_BEFORE:\n%s",
             render_visual_stage_map(
                 state.document,
                 widget_registry=self._panel_compiler.widget_registry,
-                asset_catalog=resources.assets,
+                asset_catalog=shared_resources.assets,
             ),
         )
 
@@ -950,14 +981,14 @@ class LiveSessionOrchestrator:
         payload = surface_document_client_payload(
             updated_state.document,
             asset_urls={
-                asset.id: f"/assets/domains/{updated_document.domain_id}/{asset.id}"
-                for asset in resources.assets.assets
+                asset.id: f"/assets/resources/{asset.id}"
+                for asset in shared_resources.assets.assets
             },
         )
         visual_stage_map = render_visual_stage_map(
             updated_state.document,
             widget_registry=self._panel_compiler.widget_registry,
-            asset_catalog=resources.assets,
+            asset_catalog=shared_resources.assets,
         )
         trace(
             "UPDATE_SURFACE_STATE_MAP_AFTER:\n%s",

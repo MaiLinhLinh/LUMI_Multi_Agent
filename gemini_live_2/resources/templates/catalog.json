@@ -1,10 +1,9 @@
 {
-  "domain_id": "education",
   "templates": [
     {
       "id": "two_subject_comparison",
       "description": "So sánh trực quan hai đối tượng ngang hàng: mỗi bên có ảnh lớn và nhãn ngắn, phù hợp khi trẻ quan sát hai chủ thể.",
-      "layout_path": "plans/two_subject_comparison.layout.json"
+      "layout_path": "templates/layouts/two_subject_comparison.layout.json"
     }
   ]
 }

@@ -8,13 +8,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
-from .assets import AssetCatalog, AssetCatalogError, load_asset_catalog
-from .templates import (
-    TemplateCatalog,
-    TemplateCatalogError,
-    empty_template_catalog,
-    load_template_catalog,
-)
 
 
 class ManifestError(ValueError):
@@ -39,8 +32,6 @@ def _relative_path(value: object, field: str) -> Path | None:
 @dataclass(frozen=True, slots=True)
 class DomainManifest:
     domain_id: str
-    asset_catalog_path: Path
-    template_catalog_path: Path | None = None
     tool_capabilities: tuple[str, ...] = ()
     presentation_prompt_path: Path | None = None
     presentation_prompt_constant: str | None = None
@@ -49,8 +40,6 @@ class DomainManifest:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "domain_id", _text(self.domain_id, "manifest.domain_id"))
-        if not isinstance(self.asset_catalog_path, Path):
-            raise ManifestError("manifest.asset_catalog_path must be a Path.")
         for field_name in ("tool_capabilities",):
             values = getattr(self, field_name)
             if not isinstance(values, tuple) or not all(isinstance(value, str) and value.strip() for value in values):
@@ -106,8 +95,6 @@ class DomainResources:
 
     domain_root: Path
     manifest: DomainManifest
-    assets: AssetCatalog
-    templates: TemplateCatalog
     presentation_instruction: str
     plan_instruction: str
 
@@ -140,26 +127,6 @@ class DomainRegistry:
         manifest = self._parse_manifest(raw_manifest, domain_root)
         if manifest.domain_id != safe_id:
             raise ManifestError("manifest.domain_id must match its domain directory.")
-        try:
-            assets = load_asset_catalog(
-                catalog_path=domain_root / manifest.asset_catalog_path,
-                domain_root=domain_root,
-                expected_domain_id=manifest.domain_id,
-            )
-        except AssetCatalogError as exc:
-            raise ManifestError(str(exc)) from exc
-        try:
-            templates = (
-                load_template_catalog(
-                    catalog_path=domain_root / manifest.template_catalog_path,
-                    domain_root=domain_root,
-                    expected_domain_id=manifest.domain_id,
-                )
-                if manifest.template_catalog_path is not None
-                else empty_template_catalog(domain_id=manifest.domain_id, domain_root=domain_root)
-            )
-        except TemplateCatalogError as exc:
-            raise ManifestError(str(exc)) from exc
         presentation_instruction = self._load_instruction(
             prompt_path=manifest.presentation_prompt_path,
             prompt_constant=manifest.presentation_prompt_constant,
@@ -177,8 +144,6 @@ class DomainRegistry:
         return DomainResources(
             domain_root=domain_root,
             manifest=manifest,
-            assets=assets,
-            templates=templates,
             presentation_instruction=presentation_instruction,
             plan_instruction=plan_instruction,
         )
@@ -190,8 +155,6 @@ class DomainRegistry:
             raise ManifestError("manifest.tool_capabilities must be an array.")
         return DomainManifest(
             domain_id=data.get("domain_id"),
-            asset_catalog_path=_relative_path(data.get("asset_catalog_path"), "manifest.asset_catalog_path"),
-            template_catalog_path=_relative_path(data.get("template_catalog_path"), "manifest.template_catalog_path"),
             tool_capabilities=tuple(raw_capabilities),
             presentation_prompt_path=_relative_path(
                 data.get("presentation_prompt_path"), "manifest.presentation_prompt_path"

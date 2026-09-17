@@ -28,6 +28,7 @@ from .contracts import (
 )
 
 if TYPE_CHECKING:
+    from gemini_live_2.catalogs.assets import AssetCatalog
     from gemini_live_2.catalogs.domains import DomainResources
 
 
@@ -62,9 +63,10 @@ class PanelCompilationError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class PanelCompiler:
-    """Compile a plan using only registered widgets and a domain's resources."""
+    """Compile a plan using registered widgets and shared assets."""
 
     widget_registry: WidgetRegistry
+    asset_catalog: AssetCatalog | None = None
     canvas_columns: int = CANVAS_COLUMNS
     canvas_rows: int = CANVAS_ROWS
     search_result_store: SearchResultStore | None = None
@@ -125,7 +127,7 @@ class PanelCompiler:
             self._validate_asset_references(
                 widget=widget,
                 props=normalized_props,
-                domain_resources=domain_resources,
+                asset_catalog=self.asset_catalog,
             )
             anchor_props = normalized_props
             normalized_props = self._materialize_remote_image_reference(
@@ -136,7 +138,7 @@ class PanelCompiler:
             children = self._materialize_component_children(
                 block=block,
                 aliases=aliases,
-                domain_resources=domain_resources,
+                asset_catalog=self.asset_catalog,
                 search_session_id=search_session_id,
             )
             component = ComponentNode(
@@ -207,7 +209,7 @@ class PanelCompiler:
         *,
         block: PlanBlock,
         aliases: Mapping[str, Any],
-        domain_resources: DomainResources,
+        asset_catalog: AssetCatalog | None,
         search_session_id: str | None,
     ) -> tuple[ComponentChild, ...]:
         """Validate child widgets for a document component without grid cells.
@@ -241,7 +243,7 @@ class PanelCompiler:
             self._validate_asset_references(
                 widget=child_widget,
                 props=child_props,
-                domain_resources=domain_resources,
+                asset_catalog=asset_catalog,
             )
             child_props = self._materialize_remote_image_reference(
                 widget=child_widget,
@@ -306,7 +308,7 @@ class PanelCompiler:
         *,
         widget: Any,
         props: Mapping[str, Any],
-        domain_resources: DomainResources,
+        asset_catalog: AssetCatalog | None,
     ) -> None:
         """Validate only the asset paths explicitly declared by the widget.
 
@@ -323,9 +325,11 @@ class PanelCompiler:
                     f"asset reference '{reference.path}' for widget '{widget.widget_id}' must resolve to a string."
                 )
             try:
-                asset = domain_resources.assets.get(asset_id)
+                if asset_catalog is None:
+                    raise PanelCompilationError("shared asset catalog is not configured.")
+                asset = asset_catalog.get(asset_id)
             except Exception as error:  # Catalog errors become one compiler boundary error.
-                raise PanelCompilationError(f"unknown asset_id '{asset_id}' for this domain.") from error
+                raise PanelCompilationError(f"unknown asset_id '{asset_id}' in shared catalog.") from error
             if asset.kind not in set(reference.allowed_kinds):
                 allowed = " or ".join(sorted(reference.allowed_kinds))
                 raise PanelCompilationError(

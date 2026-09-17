@@ -1,6 +1,6 @@
 import unittest
 
-from gemini_live_2.search.brave import BraveImageResult, BraveSearchQuota, BraveWebResult
+from gemini_live_2.search.brave import BraveImageResult, BraveWebResult
 from gemini_live_2.search.capabilities import PlanAgentSearchService, SearchExecutionError
 from gemini_live_2.search.result_store import SearchResultStore
 
@@ -28,7 +28,6 @@ class PlanAgentSearchServiceTests(unittest.TestCase):
         self.store = SearchResultStore()
         self.service = PlanAgentSearchService(
             client_factory=lambda: self.client,
-            quota=BraveSearchQuota(max_requests_per_session=2),
             result_store=self.store,
         )
 
@@ -51,13 +50,14 @@ class PlanAgentSearchServiceTests(unittest.TestCase):
             "https://images.example/butterfly.png",
         )
 
-    def test_invalid_arguments_and_quota_are_safe_capability_errors(self) -> None:
+    def test_invalid_arguments_are_safe_capability_errors(self) -> None:
         with self.assertRaisesRegex(SearchExecutionError, "non-empty"):
             self.service.search_web(query="", domain_id="education", session_id="session-a")
         self.service.search_web(query="bướm", domain_id="education", session_id="session-a")
         self.service.search_web(query="mèo", domain_id="education", session_id="session-a")
-        with self.assertRaisesRegex(SearchExecutionError, "quota"):
+        self.assertIsNotNone(
             self.service.search_web(query="chó", domain_id="education", session_id="session-a")
+        )
 
 
 if __name__ == "__main__":

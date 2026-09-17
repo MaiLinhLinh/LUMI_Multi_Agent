@@ -9,11 +9,13 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from gemini_live_2.catalogs.domains import DomainRegistry
+from gemini_live_2.catalogs.resources import SharedResourceRegistry
 from gemini_live_2.extension_loader import ExtensionLoader
 from gemini_live_2.gateway import DomainGateway
 from gemini_live_2.live.orchestrator import LiveSessionOrchestrator
-from gemini_live_2.live.gemini_session import GeminiLiveSession
+from gemini_live_2.live.gemini_session import GeminiLiveSession, PersistentGeminiLiveConversation
 from gemini_live_2.live.registry import LiveToolRegistry
+from gemini_live_2.live.session_protocol import LiveSessionState
 from gemini_live_2.panel import (
     ActivePanelState,
     AnchorBinding,
@@ -40,6 +42,14 @@ from gemini_live_2.tests.runtime_registry import runtime_widget_registry
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+class _RecordingTransport:
+    def __init__(self) -> None:
+        self.sent_text: list[str] = []
+
+    async def send_text(self, text: str, *, turn_complete: bool = True) -> None:
+        self.sent_text.append(text)
 
 
 def _plan_block(
@@ -94,9 +104,9 @@ class _SequentialPlanAgentStub(_PlanAgentStub):
 class _RepairingCompiler:
     """Reject once, then delegate to the real compiler."""
 
-    def __init__(self) -> None:
+    def __init__(self, assets) -> None:
         self.widget_registry = runtime_widget_registry()
-        self._compiler = PanelCompiler(self.widget_registry)
+        self._compiler = PanelCompiler(self.widget_registry, asset_catalog=assets)
         self.calls = 0
 
     def compile_surface_document(self, **kwargs):
@@ -117,11 +127,14 @@ class _RepairingCompiler:
 class LiveRoutingTests(unittest.TestCase):
     def setUp(self) -> None:
         self.registry = DomainRegistry(PROJECT_ROOT / "domains")
+        self.shared_registry = SharedResourceRegistry(PROJECT_ROOT / "resources")
+        self.shared = self.shared_registry.load()
         self.agent = _PlanAgentStub()
         self.orchestrator = LiveSessionOrchestrator(
             domain_registry=self.registry,
             plan_agent=self.agent,  # type: ignore[arg-type]
-            panel_compiler=PanelCompiler(runtime_widget_registry()),
+            panel_compiler=PanelCompiler(runtime_widget_registry(), asset_catalog=self.shared.assets),
+            shared_resource_registry=self.shared_registry,
             effect_registry=ExtensionLoader(PROJECT_ROOT / "extensions").load().effect_registry,
         )
 
@@ -149,8 +162,11 @@ class LiveRoutingTests(unittest.TestCase):
     def test_new_template_is_curated_only_after_the_exact_browser_render_confirmation(self) -> None:
         with TemporaryDirectory() as directory:
             domains_root = Path(directory) / "domains"
+            resources_root = Path(directory) / "resources"
             shutil.copytree(PROJECT_ROOT / "domains", domains_root)
+            shutil.copytree(PROJECT_ROOT / "resources", resources_root)
             registry = DomainRegistry(domains_root)
+            shared_registry = SharedResourceRegistry(resources_root)
             agent = _PlanAgentStub()
             agent.command = CreateSurfacePlan(
                 blocks=(_plan_block("image", 3, 2, 10, 7, {"asset_id": "dog"}),),
@@ -159,7 +175,8 @@ class LiveRoutingTests(unittest.TestCase):
             orchestrator = LiveSessionOrchestrator(
                 domain_registry=registry,
                 plan_agent=agent,  # type: ignore[arg-type]
-                panel_compiler=PanelCompiler(runtime_widget_registry()),
+                panel_compiler=PanelCompiler(runtime_widget_registry(), asset_catalog=shared_registry.load().assets),
+                shared_resource_registry=shared_registry,
             )
 
             result = asyncio.run(orchestrator.execute_tool_call_result(
@@ -168,8 +185,7 @@ class LiveRoutingTests(unittest.TestCase):
                 arguments={"domain_id": "education", "intent": "Hiển thị một chú chó."},
             ))
             surface = result.presentation.panel["surface"]  # type: ignore[union-attr]
-            resources = registry.load("education")
-            self.assertFalse(resources.templates.contains("tm2"))
+            self.assertFalse(shared_registry.load().templates.contains("tm2"))
 
             ignored = orchestrator.confirm_template_candidate_rendered(
                 session_id="template-confirm",
@@ -177,7 +193,7 @@ class LiveRoutingTests(unittest.TestCase):
                 revision=surface["revision"] + 1,
             )
             self.assertEqual(ignored["status"], "ignored")
-            self.assertFalse(resources.templates.contains("tm2"))
+            self.assertFalse(shared_registry.load().templates.contains("tm2"))
 
             confirmed = orchestrator.confirm_template_candidate_rendered(
                 session_id="template-confirm",
@@ -185,7 +201,7 @@ class LiveRoutingTests(unittest.TestCase):
                 revision=surface["revision"],
             )
             self.assertEqual(confirmed, {"status": "completed", "template_id": "tm2"})
-            saved = registry.load("education").templates.load_layout_template("tm2")
+            saved = shared_registry.load().templates.load_layout_template("tm2")
             self.assertEqual(saved.semantic_spec.mechanics, ())
             self.assertEqual(saved.semantic_spec.component_contracts[0].widget_id, "image")
 
@@ -240,6 +256,21 @@ class LiveRoutingTests(unittest.TestCase):
         self.orchestrator._active_panels.pop("s1")  # type: ignore[attr-defined]
         self.assertIsNone(self.orchestrator.active_surface_summary("s1"))
 
+    def test_active_surface_summary_is_omitted_when_route_changes_domain(self) -> None:
+        asyncio.run(self.orchestrator.execute_tool_call_result(
+            session_id="s1",
+            tool_name="route_request",
+            arguments={"domain_id": "education", "intent": "Show a dog."},
+        ))
+
+        asyncio.run(self.orchestrator.execute_tool_call_result(
+            session_id="s1",
+            tool_name="route_request",
+            arguments={"domain_id": "history", "intent": "Show a historical event."},
+        ))
+
+        self.assertIsNone(self.agent.requests[1].active_surface_summary)
+
     def test_active_panel_context_restores_domain_prompt_and_stage_map(self) -> None:
         asyncio.run(self.orchestrator.execute_tool_call_result(
             session_id="s1",
@@ -280,6 +311,68 @@ class LiveRoutingTests(unittest.TestCase):
         self.assertNotIn("cô giáo thân thiện", instruction)
         self.assertNotIn("PANEL HIỆN TẠI", instruction)
         self.assertNotIn("surface_id:", instruction)
+
+    def test_progress_facts_are_fifo_before_surface_context_and_stale_run_is_discarded(self) -> None:
+        transport = _RecordingTransport()
+
+        async def ignore_event(_: dict[str, object]) -> None:
+            return None
+
+        async def ignore_audio(_: bytes, __: int, ___: dict[str, object] | None, ____: str) -> None:
+            return None
+
+        conversation = PersistentGeminiLiveConversation(
+            session_id="progress-session",
+            settings=Settings(
+                gemini_live_api_key="", gemini_live_model="test", gemini_live_voice="kore",
+                live_turn_timeout_seconds=45, live_idle_timeout_seconds=900,
+                live_reconnect_grace_seconds=30, presentation_animation_delay_ms=0,
+                plan_agent_api_key="", plan_agent_model="test",
+            ),
+            transport=transport,  # type: ignore[arg-type]
+            orchestrator=self.orchestrator,
+            on_event=ignore_event,
+            on_audio=ignore_audio,
+        )
+
+        async def exercise() -> None:
+            await conversation._set_state(LiveSessionState.LISTENING)
+            conversation._current_plan_run_id = "run-current"
+            conversation._route_bridge_turn_pending = True
+            await conversation._queue_plan_progress("run-current", {
+                "tool_name": "search_web",
+                "arguments": {"query": "Bác Hồ"},
+                "response": {"verified_data": {"data": {"search_results": [{"title": "Nguồn một"}]}}},
+            })
+            await conversation._queue_plan_progress("run-current", {
+                "tool_name": "describe_widgets",
+                "arguments": {"widget_ids": ["text"]},
+                "response": {"widgets": []},
+            })
+            await conversation._queue_plan_progress("run-old", {
+                "tool_name": "search_web",
+                "arguments": {},
+                "response": {"verified_data": {"data": {"search_results": [{"title": "Cũ"}]}}},
+            })
+            self.assertEqual(transport.sent_text, [])
+            conversation._pending_surface_ready = {"kind": "failed"}
+            conversation._route_bridge_turn_pending = False
+            await conversation._set_state(LiveSessionState.SPEAKING)
+            await conversation._release_pending_route_context()
+            self.assertEqual(transport.sent_text, [])
+            await conversation._set_state(LiveSessionState.LISTENING)
+            await conversation._release_pending_route_context()
+            task = conversation._plan_progress_delivery_task
+            self.assertIsNotNone(task)
+            assert task is not None
+            await task
+
+        asyncio.run(exercise())
+        self.assertEqual(transport.sent_text[:2], [
+            "PLAN_PROGRESS\nPlan Agent báo: Đã tìm được nguồn “Nguồn một”.",
+            "PLAN_PROGRESS\nPlan Agent báo: Đã xem các thành phần giao diện cần thiết để chuẩn bị hoạt động.",
+        ])
+        self.assertTrue(transport.sent_text[2].startswith("SURFACE_FAILED"))
 
     def test_delete_surface_requires_current_revision_then_removes_panel(self) -> None:
         asyncio.run(self.orchestrator.execute_tool_call_result(
@@ -682,11 +775,10 @@ class LiveRoutingTests(unittest.TestCase):
         self.assertEqual(choice.children[0].props["asset_id"], "cat")
 
     def _stage_map(self, document):
-        resources = self.registry.load(document.domain_id)
         return render_visual_stage_map(
             document,
             widget_registry=self.orchestrator._panel_compiler.widget_registry,  # type: ignore[attr-defined]
-            asset_catalog=resources.assets,
+            asset_catalog=self.shared.assets,
         )
 
     def test_invalid_patch_does_not_replace_the_active_surface(self) -> None:
@@ -738,11 +830,12 @@ class LiveRoutingTests(unittest.TestCase):
         self.assertEqual(document.components[2].props["asset_id"], "cat")
 
     def test_route_returns_compiler_feedback_to_plan_agent_then_retries(self) -> None:
-        compiler = _RepairingCompiler()
+        compiler = _RepairingCompiler(self.shared.assets)
         orchestrator = LiveSessionOrchestrator(
             domain_registry=self.registry,
             plan_agent=self.agent,  # type: ignore[arg-type]
             panel_compiler=compiler,  # type: ignore[arg-type]
+            shared_resource_registry=self.shared_registry,
         )
 
         result = asyncio.run(orchestrator.execute_tool_call_result(
@@ -774,7 +867,8 @@ class LiveRoutingTests(unittest.TestCase):
         orchestrator = LiveSessionOrchestrator(
             domain_registry=self.registry,
             plan_agent=agent,  # type: ignore[arg-type]
-            panel_compiler=PanelCompiler(runtime_widget_registry()),
+            panel_compiler=PanelCompiler(runtime_widget_registry(), asset_catalog=self.shared.assets),
+            shared_resource_registry=self.shared_registry,
         )
 
         result = asyncio.run(orchestrator.execute_tool_call_result(
