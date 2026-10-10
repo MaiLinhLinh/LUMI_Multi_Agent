@@ -56,7 +56,7 @@ Lumi web_app.py
 | CP1 | Xây fake Async Agent Service | Hoàn thành | `local_agent_service/`; syntax compile thành công; không import `final_framework` |
 | CP2 | Kiểm thử service độc lập | Hoàn thành | 4/4 unit test pass; HTTP local submit/poll/cancel/404 đều pass |
 | CP3 | Deploy service lên Render và cấp HTTPS URL | Hoàn thành | `https://lumi-multi-agent.onrender.com`; health/submit/poll/cancel qua HTTPS đều pass |
-| CP4 | Thêm và validate manifest | Chưa làm | |
+| CP4 | Thêm và validate manifest | Hoàn thành | Loader chấp nhận `remote_text_task`; task xuất hiện trong public catalog |
 | CP5 | Kiểm tra activation khi startup | Chưa làm | |
 | CP6 | Kiểm thử end-to-end qua Task Manager Agent | Chưa làm | |
 | CP7 | Kiểm thử failure, timeout, cancel và supersede | Chưa làm | |
@@ -289,12 +289,12 @@ Thay `<render-service>` bằng hostname thực tế của CP3.
 
 ### Tiêu chí hoàn thành
 
-- [ ] Manifest loader chấp nhận package.
-- [ ] ID thư mục trùng `manifest.id`.
-- [ ] `remote_text_task` xuất hiện trong Task Catalog.
-- [ ] Không sửa Task Manager prompt.
-- [ ] Không sửa Surface Plan schema.
-- [ ] Không sửa Task Manager Runtime hoặc Generic Executor.
+- [x] Manifest loader chấp nhận package.
+- [x] ID thư mục trùng `manifest.id`.
+- [x] `remote_text_task` xuất hiện trong Task Catalog.
+- [x] Không sửa Task Manager prompt.
+- [x] Không sửa Surface Plan schema.
+- [x] Không sửa Task Manager Runtime hoặc Generic Executor.
 
 ## 9. CP5 — Kiểm tra activation khi startup
 
