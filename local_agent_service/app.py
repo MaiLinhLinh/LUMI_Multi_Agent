@@ -70,13 +70,12 @@ def _completed_payload(job: Job) -> dict[str, Any]:
     task = job.request_body.get("task")
     task_data = task if isinstance(task, dict) else {}
     task_id = task_data.get("task_id", "unknown")
+    task_id_text = task_id if isinstance(task_id, str) else "unknown"
+    confirmation_code = task_id_text[-8:].upper()
     return {
         "status": "completed",
         "payload": {
-            "passage": (
-                "ASYNC_TASK_OK: kết quả từ dịch vụ bên ngoài "
-                f"cho task {task_id}"
-            )
+            "passage": f"ASYNC_TASK_OK: {confirmation_code}"
         },
     }
 

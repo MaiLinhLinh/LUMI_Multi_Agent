@@ -47,7 +47,9 @@ class AsyncAgentServiceTests(unittest.TestCase):
         completed = self.client.get(f"/jobs/{job_id}")
         self.assertEqual(completed.status_code, 200)
         self.assertEqual(completed.json()["status"], "completed")
-        self.assertIn("ASYNC_TASK_OK", completed.json()["payload"]["passage"])
+        passage = completed.json()["payload"]["passage"]
+        self.assertEqual(passage, "ASYNC_TASK_OK: ASK_TEST")
+        self.assertLessEqual(len(passage), 80)
 
     def test_cancel(self) -> None:
         submitted = self.client.post("/tasks", json=self._request_body())
