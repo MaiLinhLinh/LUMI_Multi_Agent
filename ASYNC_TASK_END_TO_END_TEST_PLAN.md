@@ -55,7 +55,7 @@ Lumi web_app.py
 |---|---|---|---|
 | CP1 | Xây fake Async Agent Service | Hoàn thành | `local_agent_service/`; syntax compile thành công; không import `final_framework` |
 | CP2 | Kiểm thử service độc lập | Hoàn thành | 4/4 unit test pass; HTTP local submit/poll/cancel/404 đều pass |
-| CP3 | Deploy service lên Render và cấp HTTPS URL | Chưa làm | |
+| CP3 | Deploy service lên Render và cấp HTTPS URL | Hoàn thành | `https://lumi-multi-agent.onrender.com`; health/submit/poll/cancel qua HTTPS đều pass |
 | CP4 | Thêm và validate manifest | Chưa làm | |
 | CP5 | Kiểm tra activation khi startup | Chưa làm | |
 | CP6 | Kiểm thử end-to-end qua Task Manager Agent | Chưa làm | |
@@ -202,11 +202,11 @@ GET https://<render-service>.onrender.com/health
 
 ### Tiêu chí hoàn thành
 
-- [ ] URL có scheme `https`.
-- [ ] Framework host có thể truy cập URL.
-- [ ] `/health` trả 200 qua Render.
-- [ ] Submit/status/cancel hoạt động qua Render.
-- [ ] Ghi lại Render URL dùng cho CP4.
+- [x] URL có scheme `https`.
+- [x] Framework host có thể truy cập URL.
+- [x] `/health` trả 200 qua Render.
+- [x] Submit/status/cancel hoạt động qua Render.
+- [x] Render URL dùng cho CP4: `https://lumi-multi-agent.onrender.com`.
 
 ## 8. CP4 — Thêm manifest vào framework
 
