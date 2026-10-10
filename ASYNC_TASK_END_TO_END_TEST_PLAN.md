@@ -57,7 +57,7 @@ Lumi web_app.py
 | CP2 | Kiểm thử service độc lập | Hoàn thành | 4/4 unit test pass; HTTP local submit/poll/cancel/404 đều pass |
 | CP3 | Deploy service lên Render và cấp HTTPS URL | Hoàn thành | `https://lumi-multi-agent.onrender.com`; health/submit/poll/cancel qua HTTPS đều pass |
 | CP4 | Thêm và validate manifest | Hoàn thành | Loader chấp nhận `remote_text_task`; task xuất hiện trong public catalog |
-| CP5 | Kiểm tra activation khi startup | Chưa làm | |
+| CP5 | Kiểm tra activation khi startup | Hoàn thành | `web_app.py` startup và HTTP root pass; Runtime bind `remote_text_task`; catalog assertion pass |
 | CP6 | Kiểm thử end-to-end qua Task Manager Agent | Chưa làm | |
 | CP7 | Kiểm thử failure, timeout, cancel và supersede | Chưa làm | |
 
@@ -317,10 +317,10 @@ executor=http_async_agent
 
 ### Tiêu chí hoàn thành
 
-- [ ] `web_app.py` startup thành công.
-- [ ] Manifest không bị reject.
-- [ ] Executor được bind tự động.
-- [ ] Task Catalog cấp `remote_text_task` cho Task Manager Agent.
+- [x] `web_app.py` startup thành công.
+- [x] Manifest không bị reject.
+- [x] Executor được bind tự động.
+- [x] Task Catalog cấp `remote_text_task` cho Task Manager Agent.
 
 Nếu chưa đạt CP5 thì dừng, không tiếp tục kiểm thử qua Gemini Live.
 
