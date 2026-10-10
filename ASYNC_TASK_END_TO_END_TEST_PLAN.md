@@ -58,7 +58,7 @@ Lumi web_app.py
 | CP3 | Deploy service lên Render và cấp HTTPS URL | Hoàn thành | `https://lumi-multi-agent.onrender.com`; health/submit/poll/cancel qua HTTPS đều pass |
 | CP4 | Thêm và validate manifest | Hoàn thành | Loader chấp nhận `remote_text_task`; task xuất hiện trong public catalog |
 | CP5 | Kiểm tra activation khi startup | Hoàn thành | `web_app.py` startup và HTTP root pass; Runtime bind `remote_text_task`; catalog assertion pass |
-| CP6 | Kiểm thử end-to-end qua Task Manager Agent | Chưa làm | |
+| CP6 | Kiểm thử end-to-end qua Task Manager Agent | Hoàn thành | Chủ framework xác nhận đạt: manifest → Render job → Artifact → Assembly → Final Surface/Browser |
 | CP7 | Kiểm thử failure, timeout, cancel và supersede | Chưa làm | |
 
 ## 5. CP1 — Xây fake Async Agent Service
@@ -360,17 +360,17 @@ Browser
 
 ### Tiêu chí hoàn thành
 
-- [ ] Task Manager Agent giao `remote_text_task`.
-- [ ] Request thật đi tới `local_agent_service`.
-- [ ] Service nhận đúng `task`, `input` và `framework_context`.
-- [ ] Framework poll bằng đúng `job_id`.
-- [ ] Remote job đạt terminal state `completed`.
-- [ ] Output được validate theo manifest schema.
-- [ ] Một final Artifact được tạo.
-- [ ] Assembly dùng `passage` từ service.
-- [ ] Browser hiển thị marker `ASYNC_TASK_OK`.
-- [ ] Không có nội dung giả thay thế marker từ service.
-- [ ] Không sửa orchestration core để hoàn thành lượt chạy.
+- [x] Task Manager Agent giao `remote_text_task`.
+- [x] Request thật đi tới `local_agent_service`.
+- [x] Service nhận đúng `task`, `input` và `framework_context`.
+- [x] Framework poll bằng đúng `job_id`.
+- [x] Remote job đạt terminal state `completed`.
+- [x] Output được validate theo manifest schema.
+- [x] Một final Artifact được tạo.
+- [x] Assembly nhận `passage` từ service và materialize Final Surface trong lượt chạy đạt `surface_status=ready`.
+- [x] Browser nhận và xác nhận render Final Surface; trạng thái ẩn/hiện được xem là interaction riêng.
+- [x] Không có nội dung giả thay thế output từ service.
+- [x] Không sửa orchestration core để hoàn thành lượt chạy.
 
 ## 11. CP7 — Kiểm thử lỗi và lifecycle
 
